@@ -13,8 +13,19 @@ app = Flask('')
 def home():
     return "Bot está rodando!"
 
+@app.route('/health')
+def health():
+    return "OK", 200
+
+@app.route('/status')
+def status():
+    if bot.is_ready():
+        return "Bot is online", 200
+    else:
+        return "Bot is connecting", 503
+
 def run():
-    app.run(host='0.0.0.0', port=8080)
+    app.run(host='0.0.0.0', port=8080, threaded=True)
 
 def keep_alive():
     t = Thread(target=run)
