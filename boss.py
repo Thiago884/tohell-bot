@@ -51,6 +51,17 @@ BOSSES = [
     "Rei Kundun"
 ]
 
+# Mapeamento de abreviações
+BOSS_ABBREVIATIONS = {
+    "super red dragon": "red",
+    "hell maine": "hell",
+    "illusion of kundun": "illusion",
+    "death beam knight": "dbk",
+    "phoenix of darkness": "phoenix",
+    "rei kundun": "rei",
+    # Os outros permanecem iguais
+}
+
 boss_timers = {boss: {'death_time': None, 'respawn_time': None, 'closed_time': None} for boss in BOSSES}
 
 # DEFINA AQUI O ID DO CANAL DESEJADO
@@ -58,6 +69,7 @@ NOTIFICATION_CHANNEL_ID = 1364594212280078457  # ← Alterar este valor
 
 # Variável para armazenar a mensagem da tabela
 table_message = None
+control_buttons_message = None
 
 def format_time_remaining(target_time):
     now = datetime.now(brazil_tz)
@@ -65,6 +77,22 @@ def format_time_remaining(target_time):
     hours, remainder = divmod(delta.seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02d}h {minutes:02d}m"
+
+def get_boss_by_abbreviation(abbrev):
+    abbrev = abbrev.lower()
+    # Verifica se é uma abreviação conhecida
+    for boss, abbr in BOSS_ABBREVIATIONS.items():
+        if abbr.lower() == abbrev:
+            for b in BOSSES:
+                if b.lower() == boss:
+                    return b
+    
+    # Se não encontrou por abreviação, procura por nome parcial
+    for boss in BOSSES:
+        if abbrev in boss.lower():
+            return boss
+    
+    return None
 
 def create_boss_table(compact=False):
     now = datetime.now(brazil_tz)
@@ -86,22 +114,13 @@ def create_boss_table(compact=False):
         if not sorted_bosses:
             return "```diff\n+ Nenhum boss ativo no momento +\n```"
     
-    # Header
-    table = "```diff\n"
-    table += "+================================================================================+\n"
-    table += f"| {'BOSS TIMER - ' + now.strftime('%d/%m/%Y %H:%M:%S') + ' BRT':^80} |\n"
-    table += "+================================================================================+\n"
-    table += "| BOSS                      |    MORTE      |   ABERTURA    |   FECHAMENTO    | STATUS |\n"
-    table += "+---------------------------+---------------+---------------+-----------------+--------+\n"
+    # Criar embed para a tabela
+    embed = discord.Embed(
+        title=f"⏰ BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
+        color=discord.Color.gold()
+    )
     
-    # Next bosses prediction
-    upcoming_bosses = []
-    for boss in sorted_bosses:
-        timers = boss_timers[boss]
-        if timers['respawn_time'] and now < timers['respawn_time']:
-            time_left = format_time_remaining(timers['respawn_time'])
-            upcoming_bosses.append(f"{boss} (em {time_left})")
-    
+    # Adicionar campo para cada boss
     for boss in sorted_bosses:
         timers = boss_timers[boss]
         
@@ -110,11 +129,11 @@ def create_boss_table(compact=False):
             continue
             
         # Format times
-        death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else " " * 13
-        respawn_time = timers['respawn_time'].strftime("%d/%m %H:%M") if timers['respawn_time'] else " " * 13
-        closed_time = timers['closed_time'].strftime("%d/%m %H:%M") if timers['closed_time'] else " " * 15
+        death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "Não registrado"
+        respawn_time = timers['respawn_time'].strftime("%d/%m %H:%M") if timers['respawn_time'] else "Não registrado"
+        closed_time = timers['closed_time'].strftime("%d/%m %H:%M") if timers['closed_time'] else "Não registrado"
         
-        # Enhanced status with symbols
+        # Status com emojis e cores
         status = ""
         if timers['respawn_time']:
             if now >= timers['respawn_time']:
@@ -128,48 +147,88 @@ def create_boss_table(compact=False):
         else:
             status = "⚪ LIVRE"
         
-        # Add row with Discord-compatible formatting
-        table += f"| {boss:<25} | {death_time:^13} | {respawn_time:^13} | {closed_time:^15} | {status:^6} |\n"
+        # Adicionar campo ao embed
+        embed.add_field(
+            name=f"**{boss}**",
+            value=(
+                f"```\n"
+                f"Morte:    {death_time}\n"
+                f"Abertura: {respawn_time}\n"
+                f"Fechamento: {closed_time}\n"
+                f"Status:   {status}\n"
+                f"```"
+            ),
+            inline=True
+        )
     
-    # Footer with upcoming bosses
+    # Adicionar footer com próximos bosses
+    upcoming_bosses = []
+    for boss in sorted_bosses:
+        timers = boss_timers[boss]
+        if timers['respawn_time'] and now < timers['respawn_time']:
+            time_left = format_time_remaining(timers['respawn_time'])
+            upcoming_bosses.append(f"{boss} (em {time_left})")
+    
     if upcoming_bosses and not compact:
-        table += "+---------------------------+---------------+---------------+-----------------+--------+\n"
-        table += f"| PRÓXIMOS BOSSES: {', '.join(upcoming_bosses):<63} |\n"
+        embed.set_footer(text=f"Próximos bosses: {', '.join(upcoming_bosses)}")
     
-    table += "+================================================================================+\n```"
-    
-    return table
+    return embed
 
 async def update_table(channel):
-    global table_message
+    global table_message, control_buttons_message
     
     try:
-        table = create_boss_table()
+        embed = create_boss_table()
         
+        # Atualiza ou cria a mensagem da tabela
         if table_message:
             try:
-                await table_message.edit(content=table)
-                return
+                await table_message.edit(embed=embed)
             except:
-                # Se falhar ao editar, cria nova mensagem
                 table_message = None
+                table_message = await channel.send(embed=embed)
+        else:
+            # Procura por mensagens existentes do bot para editar
+            async for message in channel.history(limit=50):
+                if message.author == bot.user and message.embeds and message.embeds[0].title.startswith("⏰ BOSS TIMER"):
+                    try:
+                        await message.edit(embed=embed)
+                        table_message = message
+                        break
+                    except:
+                        continue
+            else:
+                # Se não encontrou mensagem para editar, cria nova
+                table_message = await channel.send(embed=embed)
         
-        # Procura por mensagens existentes do bot para editar
-        async for message in channel.history(limit=50):
-            if message.author == bot.user and message.content.startswith("```diff"):
-                try:
-                    await message.edit(content=table)
-                    table_message = message
-                    return
-                except:
-                    continue
-        
-        # Se não encontrou mensagem para editar, cria nova
-        table_message = await channel.send(table)
+        # Cria ou atualiza os botões de controle
+        view = BossControlView()
+        if control_buttons_message:
+            try:
+                await control_buttons_message.edit(view=view)
+            except:
+                control_buttons_message = None
+                control_buttons_message = await channel.send(view=view)
+        else:
+            # Procura por mensagens de botões existentes
+            async for message in channel.history(limit=50):
+                if message.author == bot.user and message.components:
+                    try:
+                        await message.edit(view=view)
+                        control_buttons_message = message
+                        break
+                    except:
+                        continue
+            else:
+                # Se não encontrou, cria nova
+                control_buttons_message = await channel.send(view=view)
+                
     except Exception as e:
         print(f"Erro ao atualizar tabela: {e}")
         try:
-            table_message = await channel.send(create_boss_table())
+            table_message = await channel.send(embed=create_boss_table())
+            view = BossControlView()
+            control_buttons_message = await channel.send(view=view)
         except:
             pass
 
@@ -225,11 +284,11 @@ async def on_ready():
     if channel:
         await update_table(channel)
 
-class BossButtonsView(discord.ui.View):
+class BossControlView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
     
-    @discord.ui.button(label="Anotar Boss", style=discord.ButtonStyle.green, custom_id="boss_button")
+    @discord.ui.button(label="Anotar Boss", style=discord.ButtonStyle.green, custom_id="boss_button", emoji="📝")
     async def boss_button_callback(self, interaction, button):
         view = discord.ui.View()
         select = discord.ui.Select(
@@ -245,6 +304,28 @@ class BossButtonsView(discord.ui.View):
         select.callback = select_callback
         view.add_item(select)
         await interaction.response.send_message("Selecione o boss que foi derrotado:", view=view, ephemeral=True)
+    
+    @discord.ui.button(label="Limpar Boss", style=discord.ButtonStyle.red, custom_id="clear_boss_button", emoji="❌")
+    async def clear_boss_button_callback(self, interaction, button):
+        view = discord.ui.View()
+        select = discord.ui.Select(
+            placeholder="Selecione um boss para limpar",
+            options=[discord.SelectOption(label=boss) for boss in BOSSES if boss_timers[boss]['death_time'] is not None]
+        )
+        
+        async def select_callback(interaction):
+            boss_name = select.values[0]
+            boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None}
+            await interaction.response.send_message(f"✅ Timer do boss **{boss_name}** foi resetado.", ephemeral=True)
+            await update_table(interaction.channel)
+        
+        if not select.options:
+            await interaction.response.send_message("Nenhum boss ativo para limpar.", ephemeral=True)
+            return
+        
+        select.callback = select_callback
+        view.add_item(select)
+        await interaction.response.send_message("Selecione o boss para limpar:", view=view, ephemeral=True)
 
 class TimeInputModal(discord.ui.Modal):
     def __init__(self, boss_name):
@@ -299,10 +380,13 @@ async def boss_command(ctx, boss_name: str = None, hora_morte: str = None):
         await ctx.send("Por favor, use: `!boss <nome_do_boss> HH:MM`\nExemplo: `!boss Hydra 14:30`")
         return
     
-    boss_name = boss_name.title()
-    if boss_name not in BOSSES:
-        await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}")
+    # Verifica se é uma abreviação
+    full_boss_name = get_boss_by_abbreviation(boss_name)
+    if full_boss_name is None:
+        await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei")
         return
+    
+    boss_name = full_boss_name
     
     try:
         hora, minuto = map(int, hora_morte.split(':'))
@@ -336,27 +420,28 @@ async def bosses_command(ctx, mode: str = None):
         return
     
     compact = mode and mode.lower() in ['compact', 'c', 'resumo']
-    table = create_boss_table(compact=compact)
-    await ctx.send(table)
+    embed = create_boss_table(compact=compact)
+    await ctx.send(embed=embed)
 
 @bot.command(name='clearboss')
-@commands.has_permissions(manage_messages=True)
 async def clear_boss(ctx, boss_name: str):
     if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
         await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
         return
     
-    boss_name = boss_name.title()
-    if boss_name not in BOSSES:
-        await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}")
+    # Verifica se é uma abreviação
+    full_boss_name = get_boss_by_abbreviation(boss_name)
+    if full_boss_name is None:
+        await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei")
         return
+    
+    boss_name = full_boss_name
     
     boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None}
     await ctx.send(f"✅ Timer do boss **{boss_name}** foi resetado.")
     await update_table(ctx.channel)
 
 @bot.command(name='setupboss')
-@commands.has_permissions(administrator=True)
 async def setup_boss(ctx):
     if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
         await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
@@ -364,10 +449,10 @@ async def setup_boss(ctx):
         
     embed = discord.Embed(
         title="Controle de Bosses",
-        description="Clique no botão abaixo para anotar um boss derrotado",
+        description="Use os botões abaixo para gerenciar os bosses",
         color=discord.Color.green()
     )
-    await ctx.send(embed=embed, view=BossButtonsView())
+    await ctx.send(embed=embed, view=BossControlView())
     await update_table(ctx.channel)
 
 @bot.command(name='bosshelp')
@@ -384,12 +469,12 @@ async def boss_help(ctx):
     
     embed.add_field(
         name="!boss <nome> HH:MM",
-        value="Registra a morte de um boss no horário especificado\nExemplo: `!boss Hydra 14:30`",
+        value="Registra a morte de um boss no horário especificado\nExemplo: `!boss Hydra 14:30`\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei",
         inline=False
     )
     embed.add_field(
-        name="Botão 'Anotar Boss'",
-        value="Clique no botão para selecionar e registrar um boss derrotado com horário",
+        name="Botões de Controle",
+        value="Use os botões abaixo da tabela para:\n- 📝 Anotar boss derrotado\n- ❌ Limpar timer de boss",
         inline=False
     )
     embed.add_field(
@@ -399,12 +484,12 @@ async def boss_help(ctx):
     )
     embed.add_field(
         name="!clearboss <nome>",
-        value="(Moderadores) Reseta o timer de um boss",
+        value="Reseta o timer de um boss (também pode usar abreviações)",
         inline=False
     )
     embed.add_field(
         name="!setupboss",
-        value="(Administradores) Configura o botão de anotação no chat",
+        value="Configura os botões de controle no chat",
         inline=False
     )
     embed.add_field(
