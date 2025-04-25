@@ -64,7 +64,7 @@ BOSS_ABBREVIATIONS = {
     # Hydra permanece igual
 }
 
-boss_timers = {boss: {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None} for boss in BOSSES}
+boss_timers = {boss: {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None, 'opened_notified': False} for boss in BOSSES}
 user_stats = defaultdict(lambda: {'count': 0, 'last_recorded': None})
 
 # DEFINA AQUI O ID DO CANAL DESEJADO
@@ -267,17 +267,24 @@ async def check_boss_respawns():
         closed_time = timers['closed_time']
         
         if respawn_time is not None:
-            if now >= respawn_time and closed_time is None:
-                recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
-                notifications.append(f"🟢 **{boss}** está disponível AGORA! (aberto até {respawn_time + timedelta(hours=4):%d/%m %H:%M} BRT){recorded_by}")
-                boss_timers[boss]['closed_time'] = respawn_time + timedelta(hours=4)
-            elif closed_time is not None and now >= closed_time:
-                notifications.append(f"🔴 **{boss}** FECHADO!")
-                boss_timers[boss] = {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None}
-            elif now >= (respawn_time - timedelta(minutes=5)) and closed_time is None:
+            # Notificação de boss aberto
+            if now >= respawn_time and closed_time is not None and now < closed_time:
+                # Se ainda não foi notificado que está aberto
+                if not timers.get('opened_notified', False):
+                    recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
+                    notifications.append(f"🟢 **{boss}** está disponível AGORA! (aberto até {closed_time:%d/%m %H:%M} BRT){recorded_by}")
+                    boss_timers[boss]['opened_notified'] = True
+            
+            # Notificação de aviso 5 minutos antes de abrir
+            elif now >= (respawn_time - timedelta(minutes=5)) and now < respawn_time and closed_time is not None:
                 time_left = format_time_remaining(respawn_time)
                 recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
                 notifications.append(f"🟡 **{boss}** estará disponível em {time_left} ({respawn_time:%d/%m %H:%M} BRT){recorded_by}")
+            
+            # Notificação de boss fechado
+            elif closed_time is not None and now >= closed_time:
+                notifications.append(f"🔴 **{boss}** FECHADO!")
+                boss_timers[boss] = {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None, 'opened_notified': False}
 
     if notifications:
         message = "**Notificações de Boss:**\n" + "\n".join(notifications)
@@ -331,7 +338,7 @@ class BossControlView(discord.ui.View):
         
         async def select_callback(interaction):
             boss_name = select.values[0]
-            boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None}
+            boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None, 'opened_notified': False}
             await interaction.response.send_message(f"✅ Timer do boss **{boss_name}** foi resetado.", ephemeral=True)
             # Mostra a tabela atualizada automaticamente
             embed = create_boss_embed()
@@ -380,7 +387,8 @@ class TimeInputModal(discord.ui.Modal):
                 'death_time': death_time,
                 'respawn_time': respawn_time,
                 'closed_time': respawn_time + timedelta(hours=4),
-                'recorded_by': recorded_by
+                'recorded_by': recorded_by,
+                'opened_notified': False
             }
             
             # Atualiza estatísticas do usuário
@@ -438,7 +446,8 @@ async def boss_command(ctx, boss_name: str = None, hora_morte: str = None):
             'death_time': death_time,
             'respawn_time': respawn_time,
             'closed_time': respawn_time + timedelta(hours=4),
-            'recorded_by': recorded_by
+            'recorded_by': recorded_by,
+            'opened_notified': False
         }
         
         # Atualiza estatísticas do usuário
@@ -485,7 +494,7 @@ async def clear_boss(ctx, boss_name: str):
     
     boss_name = full_boss_name
     
-    boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None}
+    boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None, 'opened_notified': False}
     await ctx.send(f"✅ Timer do boss **{boss_name}** foi resetado.")
     # Mostra a tabela atualizada automaticamente
     embed = create_boss_embed()
