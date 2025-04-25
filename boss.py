@@ -5,6 +5,7 @@ import os
 import pytz
 from flask import Flask
 from threading import Thread
+from collections import defaultdict
 
 # Configurações do Flask para keep-alive
 app = Flask('')
@@ -63,7 +64,8 @@ BOSS_ABBREVIATIONS = {
     # Hydra permanece igual
 }
 
-boss_timers = {boss: {'death_time': None, 'respawn_time': None, 'closed_time': None} for boss in BOSSES}
+boss_timers = {boss: {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None} for boss in BOSSES}
+user_stats = defaultdict(lambda: {'count': 0, 'last_recorded': None})
 
 # DEFINA AQUI O ID DO CANAL DESEJADO
 NOTIFICATION_CHANNEL_ID = 1364594212280078457  # ← Alterar este valor
@@ -136,6 +138,7 @@ def create_boss_embed(compact=False):
         death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "Não registrado"
         respawn_time = timers['respawn_time'].strftime("%d/%m %H:%M") if timers['respawn_time'] else "Não registrado"
         closed_time = timers['closed_time'].strftime("%d/%m %H:%M") if timers['closed_time'] else "Não registrado"
+        recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
         
         # Status com emojis e cores
         status = ""
@@ -159,7 +162,8 @@ def create_boss_embed(compact=False):
                 f"Morte:    {death_time}\n"
                 f"Abertura: {respawn_time}\n"
                 f"Fechamento: {closed_time}\n"
-                f"Status:   {status}\n"
+                f"Status:   {status}"
+                f"{recorded_by}\n"
                 f"```"
             ),
             inline=True
@@ -176,6 +180,32 @@ def create_boss_embed(compact=False):
     if upcoming_bosses and not compact:
         embed.set_footer(text=f"Próximos bosses: {', '.join(upcoming_bosses)}")
     
+    return embed
+
+def create_ranking_embed():
+    # Ordena os usuários pelo número de anotações
+    sorted_users = sorted(user_stats.items(), key=lambda x: x[1]['count'], reverse=True)
+    
+    embed = discord.Embed(
+        title="🏆 RANKING DE ANOTAÇÕES",
+        color=discord.Color.gold()
+    )
+    
+    if not sorted_users:
+        embed.description = "Nenhuma anotação registrada ainda."
+        return embed
+    
+    ranking_text = []
+    for idx, (user_id, stats) in enumerate(sorted_users[:10]):  # Top 10
+        user = bot.get_user(int(user_id))
+        username = user.name if user else f"Usuário {user_id}"
+        last_recorded = stats['last_recorded'].strftime("%d/%m %H:%M") if stats['last_recorded'] else "Nunca"
+        ranking_text.append(
+            f"**{idx+1}.** {username} - {stats['count']} anotações\n"
+            f"Última: {last_recorded}"
+        )
+    
+    embed.description = "\n\n".join(ranking_text)
     return embed
 
 async def update_table(channel):
@@ -234,14 +264,16 @@ async def check_boss_respawns():
         
         if respawn_time is not None:
             if now >= respawn_time and closed_time is None:
-                notifications.append(f"🟢 **{boss}** está disponível AGORA! (aberto até {respawn_time + timedelta(hours=4):%d/%m %H:%M} BRT)")
+                recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
+                notifications.append(f"🟢 **{boss}** está disponível AGORA! (aberto até {respawn_time + timedelta(hours=4):%d/%m %H:%M} BRT){recorded_by}")
                 boss_timers[boss]['closed_time'] = respawn_time + timedelta(hours=4)
             elif closed_time is not None and now >= closed_time:
                 notifications.append(f"🔴 **{boss}** FECHADO!")
-                boss_timers[boss] = {'death_time': None, 'respawn_time': None, 'closed_time': None}
+                boss_timers[boss] = {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None}
             elif now >= (respawn_time - timedelta(minutes=5)) and closed_time is None:
                 time_left = format_time_remaining(respawn_time)
-                notifications.append(f"🟡 **{boss}** estará disponível em {time_left} ({respawn_time:%d/%m %H:%M} BRT)")
+                recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
+                notifications.append(f"🟡 **{boss}** estará disponível em {time_left} ({respawn_time:%d/%m %H:%M} BRT){recorded_by}")
 
     if notifications:
         message = "**Notificações de Boss:**\n" + "\n".join(notifications)
@@ -295,7 +327,7 @@ class BossControlView(discord.ui.View):
         
         async def select_callback(interaction):
             boss_name = select.values[0]
-            boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None}
+            boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None}
             await interaction.response.send_message(f"✅ Timer do boss **{boss_name}** foi resetado.", ephemeral=True)
             # Mostra a tabela atualizada automaticamente
             embed = create_boss_embed()
@@ -310,6 +342,11 @@ class BossControlView(discord.ui.View):
         select.callback = select_callback
         view.add_item(select)
         await interaction.response.send_message("Selecione o boss para limpar:", view=view, ephemeral=True)
+    
+    @discord.ui.button(label="Ranking", style=discord.ButtonStyle.blurple, custom_id="ranking_button", emoji="🏆")
+    async def ranking_button_callback(self, interaction, button):
+        embed = create_ranking_embed()
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class TimeInputModal(discord.ui.Modal):
     def __init__(self, boss_name):
@@ -334,14 +371,21 @@ class TimeInputModal(discord.ui.Modal):
                 death_time -= timedelta(days=1)
             
             respawn_time = death_time + timedelta(hours=8)
+            recorded_by = interaction.user.name
             boss_timers[self.boss_name] = {
                 'death_time': death_time,
                 'respawn_time': respawn_time,
-                'closed_time': respawn_time + timedelta(hours=4)
+                'closed_time': respawn_time + timedelta(hours=4),
+                'recorded_by': recorded_by
             }
             
+            # Atualiza estatísticas do usuário
+            user_id = str(interaction.user.id)
+            user_stats[user_id]['count'] += 1
+            user_stats[user_id]['last_recorded'] = now
+            
             await interaction.response.send_message(
-                f"✅ **{self.boss_name}** registrado:\n"
+                f"✅ **{self.boss_name}** registrado por {recorded_by}:\n"
                 f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
                 f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
                 f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
@@ -385,14 +429,21 @@ async def boss_command(ctx, boss_name: str = None, hora_morte: str = None):
             death_time -= timedelta(days=1)
         
         respawn_time = death_time + timedelta(hours=8)
+        recorded_by = ctx.author.name
         boss_timers[boss_name] = {
             'death_time': death_time,
             'respawn_time': respawn_time,
-            'closed_time': respawn_time + timedelta(hours=4)
+            'closed_time': respawn_time + timedelta(hours=4),
+            'recorded_by': recorded_by
         }
         
+        # Atualiza estatísticas do usuário
+        user_id = str(ctx.author.id)
+        user_stats[user_id]['count'] += 1
+        user_stats[user_id]['last_recorded'] = now
+        
         await ctx.send(
-            f"✅ **{boss_name}** registrado:\n"
+            f"✅ **{boss_name}** registrado por {recorded_by}:\n"
             f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
             f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
             f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT"
@@ -430,13 +481,22 @@ async def clear_boss(ctx, boss_name: str):
     
     boss_name = full_boss_name
     
-    boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None}
+    boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None}
     await ctx.send(f"✅ Timer do boss **{boss_name}** foi resetado.")
     # Mostra a tabela atualizada automaticamente
     embed = create_boss_embed()
     view = BossControlView()
     await ctx.send(embed=embed, view=view)
     await update_table(ctx.channel)
+
+@bot.command(name='ranking')
+async def ranking_command(ctx):
+    if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
+        await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+        return
+    
+    embed = create_ranking_embed()
+    await ctx.send(embed=embed)
 
 @bot.command(name='setupboss')
 async def setup_boss(ctx):
@@ -467,7 +527,7 @@ async def boss_help(ctx):
     )
     embed.add_field(
         name="Botões de Controle",
-        value="Use os botões abaixo da tabela para:\n- 📝 Anotar boss derrotado\n- ❌ Limpar timer de boss",
+        value="Use os botões abaixo da tabela para:\n- 📝 Anotar boss derrotado\n- ❌ Limpar timer de boss\n- 🏆 Ver ranking de anotações",
         inline=False
     )
     embed.add_field(
@@ -478,6 +538,11 @@ async def boss_help(ctx):
     embed.add_field(
         name="!clearboss <nome>",
         value="Reseta o timer de um boss (também pode usar abreviações)",
+        inline=False
+    )
+    embed.add_field(
+        name="!ranking",
+        value="Mostra o ranking de quem mais anotou bosses",
         inline=False
     )
     embed.add_field(
