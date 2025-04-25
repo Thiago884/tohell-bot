@@ -113,14 +113,14 @@ def create_boss_embed(compact=False):
                         if boss_timers[boss]['death_time'] is not None]
         if not sorted_bosses:
             return discord.Embed(
-                title="⏰ BOSS TIMER",
+                title="BOSS TIMER SALA 7",
                 description="```diff\n+ Nenhum boss ativo no momento +\n```",
                 color=discord.Color.gold()
             )
     
     # Criar embed para a tabela
     embed = discord.Embed(
-        title=f"⏰ BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
+        title=f"BOSS TIMER SALA 7 - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
         color=discord.Color.gold()
     )
     
@@ -195,7 +195,7 @@ async def update_table(channel):
         
         # Procura por mensagens existentes do bot para editar
         async for message in channel.history(limit=50):
-            if message.author == bot.user and message.embeds and message.embeds[0].title.startswith("⏰ BOSS TIMER"):
+            if message.author == bot.user and message.embeds and message.embeds[0].title.startswith("BOSS TIMER SALA 7"):
                 try:
                     await message.edit(embed=embed, view=view)
                     table_message = message
@@ -297,6 +297,10 @@ class BossControlView(discord.ui.View):
             boss_name = select.values[0]
             boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None}
             await interaction.response.send_message(f"✅ Timer do boss **{boss_name}** foi resetado.", ephemeral=True)
+            # Mostra a tabela atualizada automaticamente
+            embed = create_boss_embed()
+            view = BossControlView()
+            await interaction.followup.send(embed=embed, view=view)
             await update_table(interaction.channel)
         
         if not select.options:
@@ -343,6 +347,10 @@ class TimeInputModal(discord.ui.Modal):
                 f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
                 ephemeral=True
             )
+            # Mostra a tabela atualizada automaticamente
+            embed = create_boss_embed()
+            view = BossControlView()
+            await interaction.followup.send(embed=embed, view=view)
             await update_table(interaction.channel)
         except ValueError:
             await interaction.response.send_message(
@@ -389,6 +397,10 @@ async def boss_command(ctx, boss_name: str = None, hora_morte: str = None):
             f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
             f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT"
         )
+        # Mostra a tabela atualizada automaticamente
+        embed = create_boss_embed()
+        view = BossControlView()
+        await ctx.send(embed=embed, view=view)
         await update_table(ctx.channel)
     except ValueError:
         await ctx.send("Formato de hora inválido. Use HH:MM (ex: 14:30)")
@@ -420,6 +432,10 @@ async def clear_boss(ctx, boss_name: str):
     
     boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None}
     await ctx.send(f"✅ Timer do boss **{boss_name}** foi resetado.")
+    # Mostra a tabela atualizada automaticamente
+    embed = create_boss_embed()
+    view = BossControlView()
+    await ctx.send(embed=embed, view=view)
     await update_table(ctx.channel)
 
 @bot.command(name='setupboss')
