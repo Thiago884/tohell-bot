@@ -182,7 +182,7 @@ def create_boss_embed(compact=False):
     
     return embed
 
-def create_ranking_embed():
+async def create_ranking_embed():
     # Ordena os usuários pelo número de anotações
     sorted_users = sorted(user_stats.items(), key=lambda x: x[1]['count'], reverse=True)
     
@@ -197,8 +197,12 @@ def create_ranking_embed():
     
     ranking_text = []
     for idx, (user_id, stats) in enumerate(sorted_users[:10]):  # Top 10
-        user = bot.get_user(int(user_id))
-        username = user.name if user else f"Usuário {user_id}"
+        try:
+            user = await bot.fetch_user(int(user_id))
+            username = user.name
+        except:
+            username = f"Usuário {user_id}"
+        
         last_recorded = stats['last_recorded'].strftime("%d/%m %H:%M") if stats['last_recorded'] else "Nunca"
         ranking_text.append(
             f"**{idx+1}.** {username} - {stats['count']} anotações\n"
@@ -345,7 +349,7 @@ class BossControlView(discord.ui.View):
     
     @discord.ui.button(label="Ranking", style=discord.ButtonStyle.blurple, custom_id="ranking_button", emoji="🏆")
     async def ranking_button_callback(self, interaction, button):
-        embed = create_ranking_embed()
+        embed = await create_ranking_embed()
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class TimeInputModal(discord.ui.Modal):
@@ -495,7 +499,7 @@ async def ranking_command(ctx):
         await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
         return
     
-    embed = create_ranking_embed()
+    embed = await create_ranking_embed()
     await ctx.send(embed=embed)
 
 @bot.command(name='setupboss')
