@@ -366,10 +366,16 @@ async def update_table(channel):
             try:
                 await table_message.edit(embed=embed, view=view)
                 return
-            except:
+            except discord.NotFound:
+                # Se a mensagem não for encontrada, criar uma nova
+                table_message = await channel.send(embed=embed, view=view)
+                return
+            except Exception as e:
+                print(f"Erro ao editar mensagem da tabela: {e}")
                 table_message = await channel.send(embed=embed, view=view)
                 return
         
+        # Procurar a mensagem existente no histórico
         async for message in channel.history(limit=50):
             if message.author == bot.user and message.embeds and message.embeds[0].title.startswith("BOSS TIMER"):
                 try:
@@ -379,6 +385,7 @@ async def update_table(channel):
                 except:
                     continue
         
+        # Se não encontrar, enviar uma nova mensagem
         table_message = await channel.send(embed=embed, view=view)
     except Exception as e:
         print(f"Erro ao atualizar tabela: {e}")
@@ -519,6 +526,9 @@ class BossControlView(discord.ui.View):
     @discord.ui.button(label="Anotar Horário", style=discord.ButtonStyle.green, custom_id="boss_control:anotar", emoji="📝")
     async def boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
+            # Responder à interação imediatamente para evitar timeout
+            await interaction.response.defer(ephemeral=False)
+            
             view = discord.ui.View(timeout=180)
             
             select_boss = discord.ui.Select(
@@ -655,7 +665,8 @@ class BossControlView(discord.ui.View):
             view.add_item(submit_btn)
             view.add_item(cancel_btn)
             
-            await interaction.response.send_message(
+            # Usar followup.send em vez de interaction.response.send_message
+            await interaction.followup.send(
                 "📝 **Anotar Horário de Boss**\nSelecione o boss, sala e marque se foi ontem:",
                 view=view,
                 ephemeral=False
@@ -665,22 +676,20 @@ class BossControlView(discord.ui.View):
             print(f"ERRO DETALHADO no botão de anotar: {str(e)}")
             traceback.print_exc()
             try:
-                if not interaction.response.is_done():
-                    await interaction.response.send_message(
-                        "Ocorreu um erro ao processar sua solicitação.",
-                        ephemeral=True
-                    )
-                else:
-                    await interaction.followup.send(
-                        "Ocorreu um erro ao processar sua solicitação.",
-                        ephemeral=True
-                    )
+                # Tentar enviar mensagem de erro como followup
+                await interaction.followup.send(
+                    "Ocorreu um erro ao processar sua solicitação.",
+                    ephemeral=True
+                )
             except Exception as e:
                 print(f"Erro ao enviar mensagem de erro: {e}")
     
     @discord.ui.button(label="Limpar Boss", style=discord.ButtonStyle.red, custom_id="boss_control:limpar", emoji="❌")
     async def clear_boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
+            # Responder à interação imediatamente para evitar timeout
+            await interaction.response.defer(ephemeral=True)
+            
             view = discord.ui.View(timeout=180)
             
             select_boss = discord.ui.Select(
@@ -741,7 +750,7 @@ class BossControlView(discord.ui.View):
             view.add_item(select_boss)
             view.add_item(select_sala)
             
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Selecione o boss para limpar:",
                 view=view,
                 ephemeral=True
@@ -750,28 +759,28 @@ class BossControlView(discord.ui.View):
             print(f"ERRO DETALHADO no botão de limpar: {str(e)}")
             traceback.print_exc()
             try:
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     "Ocorreu um erro ao processar sua solicitação.",
                     ephemeral=True
                 )
             except:
-                try:
-                    await interaction.followup.send(
-                        "Ocorreu um erro ao processar sua solicitação.",
-                        ephemeral=True
-                    )
-                except:
-                    pass
+                pass
     
     @discord.ui.button(label="Ranking", style=discord.ButtonStyle.blurple, custom_id="boss_control:ranking", emoji="🏆")
     async def ranking_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
+            # Responder à interação imediatamente para evitar timeout
+            await interaction.response.defer(ephemeral=False)
+            
             embed = await create_ranking_embed()
-            await interaction.response.send_message(embed=embed, ephemeral=False)
+            await interaction.followup.send(embed=embed)
         except Exception as e:
             print(f"ERRO DETALHADO no botão de ranking: {str(e)}")
             traceback.print_exc()
-            await interaction.response.send_message("Ocorreu um erro ao gerar o ranking.", ephemeral=True)
+            try:
+                await interaction.followup.send("Ocorreu um erro ao gerar o ranking.", ephemeral=True)
+            except:
+                pass
 
 @bot.event
 async def on_ready():
