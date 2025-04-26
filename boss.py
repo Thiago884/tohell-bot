@@ -6,6 +6,7 @@ import pytz
 from flask import Flask
 from threading import Thread
 from collections import defaultdict
+import random
 
 # Configurações do Flask para keep-alive
 app = Flask('')
@@ -251,7 +252,11 @@ async def check_boss_respawns():
                     notifications.append(f"🟡 **{boss} (Sala {sala})** estará disponível em {time_left} ({respawn_time:%d/%m %H:%M} BRT){recorded_by}")
                 
                 elif closed_time is not None and now >= closed_time:
-                    notifications.append(f"🔴 **{boss} (Sala {sala})** FECHADO!")
+                    if not timers.get('opened_notified', False):
+                        notifications.append(f"🔴 **{boss} (Sala {sala})** FECHOU sem nenhuma anotação durante o período aberto!")
+                    else:
+                        notifications.append(f"🔴 **{boss} (Sala {sala})** FECHOU!")
+                    
                     boss_timers[boss][sala] = {
                         'death_time': None,
                         'respawn_time': None,
@@ -266,6 +271,16 @@ async def check_boss_respawns():
     
     await update_table(channel)
 
+@tasks.loop(minutes=30)
+async def periodic_table_update():
+    # Aleatorizar o intervalo entre 30 e 60 minutos
+    periodic_table_update.change_interval(minutes=random.randint(30, 60))
+    
+    channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
+    if channel:
+        embed = create_boss_embed()
+        await channel.send("**Atualização periódica dos horários de boss:**", embed=embed)
+
 @bot.event
 async def on_ready():
     print(f'Bot conectado como {bot.user.name}')
@@ -274,6 +289,7 @@ async def on_ready():
     
     check_boss_respawns.start()
     live_table_updater.start()
+    periodic_table_update.start()
     
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
     if channel:
@@ -399,6 +415,10 @@ class BossControlView(discord.ui.View):
                             ephemeral=True
                         )
                         
+                        # Enviar a tabela atualizada após anotação
+                        embed = create_boss_embed()
+                        await interaction.channel.send(embed=embed)
+                        
                         await update_table(interaction.channel)
                         
                     except ValueError:
@@ -486,6 +506,10 @@ class BossControlView(discord.ui.View):
                 ephemeral=True
             )
             
+            # Enviar a tabela atualizada após limpar
+            embed = create_boss_embed()
+            await interaction.channel.send(embed=embed)
+            
             await update_table(interaction.channel)
         
         select_boss.callback = boss_selected
@@ -555,6 +579,10 @@ async def boss_command(ctx, boss_name: str = None, sala: int = None, hora_morte:
             f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT"
         )
         
+        # Enviar a tabela atualizada após anotação
+        embed = create_boss_embed()
+        await ctx.send(embed=embed)
+        
         await update_table(ctx.channel)
     except ValueError:
         await ctx.send("Formato de hora inválido. Use HH:MM (ex: 14:30)")
@@ -606,6 +634,10 @@ async def clear_boss(ctx, boss_name: str, sala: int = None):
             'opened_notified': False
         }
         await ctx.send(f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.")
+    
+    # Enviar a tabela atualizada após limpar
+    embed = create_boss_embed()
+    await ctx.send(embed=embed)
     
     await update_table(ctx.channel)
 
