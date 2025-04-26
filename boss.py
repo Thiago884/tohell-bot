@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 from datetime import datetime, timedelta
 import os
 import pytz
+import mysql.connector
 from flask import Flask
 from threading import Thread
 from collections import defaultdict
@@ -40,6 +41,173 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
+
+# Conexão com o banco de dados MySQL
+def connect_db():
+    try:
+        conn = mysql.connector.connect(
+            host="localhost",
+            user="thia5326_tohell",
+            password="Thi@goba1102@@",  # Adicione sua senha aqui se necessário
+            database="thia5326_tohell_bot"
+        )
+        return conn
+    except mysql.connector.Error as err:
+        print(f"Erro ao conectar ao banco de dados: {err}")
+        return None
+
+# Inicializar o banco de dados
+def init_db():
+    conn = connect_db()
+    if conn is None:
+        return
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Tabela de timers de boss
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS boss_timers (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            boss_name VARCHAR(50) NOT NULL,
+            sala INT NOT NULL,
+            death_time DATETIME NOT NULL,
+            respawn_time DATETIME NOT NULL,
+            closed_time DATETIME NOT NULL,
+            recorded_by VARCHAR(50) NOT NULL,
+            opened_notified BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY boss_sala (boss_name, sala)
+        )
+        """)
+        
+        # Tabela de estatísticas de usuários
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_stats (
+            user_id VARCHAR(20) PRIMARY KEY,
+            username VARCHAR(50) NOT NULL,
+            count INT DEFAULT 0,
+            last_recorded DATETIME,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+        """)
+        
+        conn.commit()
+        print("Banco de dados inicializado com sucesso!")
+    except mysql.connector.Error as err:
+        print(f"Erro ao inicializar banco de dados: {err}")
+    finally:
+        conn.close()
+
+# Carregar dados do banco de dados
+def load_db_data():
+    conn = connect_db()
+    if conn is None:
+        return
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        
+        # Carregar timers de boss
+        cursor.execute("SELECT * FROM boss_timers")
+        timers = cursor.fetchall()
+        
+        for timer in timers:
+            boss_name = timer['boss_name']
+            sala = timer['sala']
+            
+            if boss_name in boss_timers and sala in boss_timers[boss_name]:
+                boss_timers[boss_name][sala] = {
+                    'death_time': timer['death_time'].replace(tzinfo=brazil_tz),
+                    'respawn_time': timer['respawn_time'].replace(tzinfo=brazil_tz),
+                    'closed_time': timer['closed_time'].replace(tzinfo=brazil_tz),
+                    'recorded_by': timer['recorded_by'],
+                    'opened_notified': timer['opened_notified']
+                }
+        
+        # Carregar estatísticas de usuários
+        cursor.execute("SELECT * FROM user_stats")
+        stats = cursor.fetchall()
+        
+        for stat in stats:
+            user_stats[stat['user_id']] = {
+                'count': stat['count'],
+                'last_recorded': stat['last_recorded'].replace(tzinfo=brazil_tz) if stat['last_recorded'] else None
+            }
+        
+        print("Dados carregados do banco de dados com sucesso!")
+    except mysql.connector.Error as err:
+        print(f"Erro ao carregar dados do banco: {err}")
+    finally:
+        conn.close()
+
+# Salvar dados no banco de dados
+def save_timer(boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified=False):
+    conn = connect_db()
+    if conn is None:
+        return
+    
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+        INSERT INTO boss_timers (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            death_time = VALUES(death_time),
+            respawn_time = VALUES(respawn_time),
+            closed_time = VALUES(closed_time),
+            recorded_by = VALUES(recorded_by),
+            opened_notified = VALUES(opened_notified)
+        """, (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified))
+        
+        conn.commit()
+    except mysql.connector.Error as err:
+        print(f"Erro ao salvar timer: {err}")
+    finally:
+        conn.close()
+
+def save_user_stats(user_id, username, count, last_recorded):
+    conn = connect_db()
+    if conn is None:
+        return
+    
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+        INSERT INTO user_stats (user_id, username, count, last_recorded)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            username = VALUES(username),
+            count = VALUES(count),
+            last_recorded = VALUES(last_recorded)
+        """, (user_id, username, count, last_recorded))
+        
+        conn.commit()
+    except mysql.connector.Error as err:
+        print(f"Erro ao salvar estatísticas do usuário: {err}")
+    finally:
+        conn.close()
+
+def clear_timer(boss_name, sala=None):
+    conn = connect_db()
+    if conn is None:
+        return
+    
+    try:
+        cursor = conn.cursor()
+        
+        if sala is None:
+            cursor.execute("DELETE FROM boss_timers WHERE boss_name = %s", (boss_name,))
+        else:
+            cursor.execute("DELETE FROM boss_timers WHERE boss_name = %s AND sala = %s", (boss_name, sala))
+        
+        conn.commit()
+    except mysql.connector.Error as err:
+        print(f"Erro ao limpar timer: {err}")
+    finally:
+        conn.close()
 
 # Variáveis de configuração
 BOSSES = [
@@ -198,7 +366,8 @@ async def update_table(channel):
                 await table_message.edit(embed=embed, view=view)
                 return
             except:
-                table_message = None
+                table_message = await channel.send(embed=embed, view=view)
+                return
         
         async for message in channel.history(limit=50):
             if message.author == bot.user and message.embeds and message.embeds[0].title.startswith("BOSS TIMER"):
@@ -245,6 +414,7 @@ async def check_boss_respawns():
                         recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
                         notifications.append(f"🟢 **{boss} (Sala {sala})** está disponível AGORA! (aberto até {closed_time:%d/%m %H:%M} BRT){recorded_by}")
                         boss_timers[boss][sala]['opened_notified'] = True
+                        save_timer(boss, sala, timers['death_time'], respawn_time, closed_time, timers['recorded_by'], True)
                 
                 elif now >= (respawn_time - timedelta(minutes=5)) and now < respawn_time and closed_time is not None:
                     time_left = format_time_remaining(respawn_time)
@@ -264,6 +434,7 @@ async def check_boss_respawns():
                         'recorded_by': None,
                         'opened_notified': False
                     }
+                    clear_timer(boss, sala)
 
     if notifications:
         message = "**Notificações de Boss:**\n" + "\n".join(notifications)
@@ -280,20 +451,6 @@ async def periodic_table_update():
     if channel:
         embed = create_boss_embed()
         await channel.send("**Atualização periódica dos horários de boss:**", embed=embed)
-
-@bot.event
-async def on_ready():
-    print(f'Bot conectado como {bot.user.name}')
-    print(f'Canal de notificação configurado para ID: {NOTIFICATION_CHANNEL_ID}')
-    await bot.change_presence(activity=discord.Game(name="!bosshelp para ajuda"))
-    
-    check_boss_respawns.start()
-    live_table_updater.start()
-    periodic_table_update.start()
-    
-    channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
-    if channel:
-        await update_table(channel)
 
 class BossControlView(discord.ui.View):
     def __init__(self):
@@ -329,6 +486,13 @@ class BossControlView(discord.ui.View):
             custom_id="ontem_btn"
         )
         
+        cancel_btn = discord.ui.Button(
+            label="Cancelar",
+            style=discord.ButtonStyle.red,
+            emoji="❌",
+            custom_id="cancel_btn"
+        )
+        
         selected_boss = None
         selected_sala = None
         foi_ontem = False
@@ -349,6 +513,9 @@ class BossControlView(discord.ui.View):
             ontem_btn.emoji = "✅" if foi_ontem else "⬜"
             ontem_btn.style = discord.ButtonStyle.green if foi_ontem else discord.ButtonStyle.gray
             await interaction.response.edit_message(view=view)
+        
+        async def cancel_callback(interaction):
+            await interaction.response.edit_message(content="Operação cancelada", view=None)
         
         async def submit_callback(interaction):
             nonlocal selected_boss, selected_sala, foi_ontem
@@ -407,6 +574,10 @@ class BossControlView(discord.ui.View):
                         user_stats[user_id]['count'] += 1
                         user_stats[user_id]['last_recorded'] = now
                         
+                        # Salvar no banco de dados
+                        save_timer(boss_name, selected_sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
+                        save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
+                        
                         await interaction.response.send_message(
                             f"✅ **{boss_name} (Sala {selected_sala})** registrado por {recorded_by}:\n"
                             f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
@@ -414,10 +585,6 @@ class BossControlView(discord.ui.View):
                             f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
                             ephemeral=True
                         )
-                        
-                        # Enviar a tabela atualizada após anotação
-                        embed = create_boss_embed()
-                        await interaction.channel.send(embed=embed)
                         
                         await update_table(interaction.channel)
                         
@@ -433,6 +600,7 @@ class BossControlView(discord.ui.View):
         select_boss.callback = boss_select_callback
         select_sala.callback = sala_select_callback
         ontem_btn.callback = ontem_callback
+        cancel_btn.callback = cancel_callback
         
         view.add_item(select_boss)
         view.add_item(select_sala)
@@ -445,7 +613,12 @@ class BossControlView(discord.ui.View):
             custom_id="submit_btn"
         )
         submit_btn.callback = submit_callback
-        view.add_item(submit_btn)
+        
+        # Adicionar botões em uma linha
+        action_row = discord.ui.ActionRow()
+        action_row.add_item(cancel_btn)
+        action_row.add_item(submit_btn)
+        view.add_item(action_row)
         
         await interaction.response.send_message(
             "📝 **Anotar Horário de Boss**\nSelecione o boss, sala e marque se foi ontem:",
@@ -455,7 +628,7 @@ class BossControlView(discord.ui.View):
     
     @discord.ui.button(label="Limpar Boss", style=discord.ButtonStyle.red, custom_id="clear_boss_button", emoji="❌")
     async def clear_boss_button_callback(self, interaction, button):
-        view = discord.ui.View()
+        view = discord.ui.View(timeout=None)
         
         select_boss = discord.ui.Select(
             placeholder="Selecione um boss",
@@ -501,14 +674,13 @@ class BossControlView(discord.ui.View):
                 'opened_notified': False
             }
             
+            # Limpar do banco de dados
+            clear_timer(boss_name, sala)
+            
             await interaction.response.send_message(
                 f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
                 ephemeral=True
             )
-            
-            # Enviar a tabela atualizada após limpar
-            embed = create_boss_embed()
-            await interaction.channel.send(embed=embed)
             
             await update_table(interaction.channel)
         
@@ -527,6 +699,24 @@ class BossControlView(discord.ui.View):
     async def ranking_button_callback(self, interaction, button):
         embed = await create_ranking_embed()
         await interaction.response.send_message(embed=embed, ephemeral=False)
+
+@bot.event
+async def on_ready():
+    print(f'Bot conectado como {bot.user.name}')
+    print(f'Canal de notificação configurado para ID: {NOTIFICATION_CHANNEL_ID}')
+    await bot.change_presence(activity=discord.Game(name="!bosshelp para ajuda"))
+    
+    # Inicializar banco de dados
+    init_db()
+    load_db_data()
+    
+    check_boss_respawns.start()
+    live_table_updater.start()
+    periodic_table_update.start()
+    
+    channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
+    if channel:
+        await update_table(channel)
 
 @bot.command(name='boss')
 async def boss_command(ctx, boss_name: str = None, sala: int = None, hora_morte: str = None):
@@ -572,16 +762,16 @@ async def boss_command(ctx, boss_name: str = None, sala: int = None, hora_morte:
         user_stats[user_id]['count'] += 1
         user_stats[user_id]['last_recorded'] = now
         
+        # Salvar no banco de dados
+        save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
+        save_user_stats(user_id, ctx.author.name, user_stats[user_id]['count'], now)
+        
         await ctx.send(
             f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
             f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
             f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
             f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT"
         )
-        
-        # Enviar a tabela atualizada após anotação
-        embed = create_boss_embed()
-        await ctx.send(embed=embed)
         
         await update_table(ctx.channel)
     except ValueError:
@@ -620,6 +810,7 @@ async def clear_boss(ctx, boss_name: str, sala: int = None):
                 'recorded_by': None,
                 'opened_notified': False
             }
+        clear_timer(boss_name)
         await ctx.send(f"✅ Todos os timers do boss **{boss_name}** foram resetados.")
     else:
         if sala not in SALAS:
@@ -633,11 +824,8 @@ async def clear_boss(ctx, boss_name: str, sala: int = None):
             'recorded_by': None,
             'opened_notified': False
         }
+        clear_timer(boss_name, sala)
         await ctx.send(f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.")
-    
-    # Enviar a tabela atualizada após limpar
-    embed = create_boss_embed()
-    await ctx.send(embed=embed)
     
     await update_table(ctx.channel)
 
