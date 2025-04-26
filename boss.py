@@ -52,6 +52,8 @@ BOSSES = [
     "Rei Kundun"
 ]
 
+SALAS = [1, 2, 3, 4, 5, 6, 7, 8]  # Incluída a sala 8
+
 # Mapeamento de abreviações
 BOSS_ABBREVIATIONS = {
     "super red dragon": "red",
@@ -64,7 +66,19 @@ BOSS_ABBREVIATIONS = {
     # Hydra permanece igual
 }
 
-boss_timers = {boss: {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None, 'opened_notified': False} for boss in BOSSES}
+# Estrutura de dados para armazenar os timers
+boss_timers = {
+    boss: {
+        sala: {
+            'death_time': None,
+            'respawn_time': None,
+            'closed_time': None,
+            'recorded_by': None,
+            'opened_notified': False
+        } for sala in SALAS
+    } for boss in BOSSES
+}
+
 user_stats = defaultdict(lambda: {'count': 0, 'last_recorded': None})
 
 # DEFINA AQUI O ID DO CANAL DESEJADO
@@ -99,91 +113,53 @@ def get_boss_by_abbreviation(abbrev):
 def create_boss_embed(compact=False):
     now = datetime.now(brazil_tz)
     
-    # Sort bosses: open first, then upcoming, then closed
-    sorted_bosses = sorted(BOSSES, key=lambda boss: (
-        0 if (boss_timers[boss]['respawn_time'] and 
-              now >= boss_timers[boss]['respawn_time'] and 
-              (not boss_timers[boss]['closed_time'] or now < boss_timers[boss]['closed_time'])) 
-        else 1 if (boss_timers[boss]['respawn_time'] and 
-                  now < boss_timers[boss]['respawn_time']) 
-        else 2
-    ))
-    
-    if compact:
-        # Filter only bosses with active timers
-        sorted_bosses = [boss for boss in sorted_bosses 
-                        if boss_timers[boss]['death_time'] is not None]
-        if not sorted_bosses:
-            return discord.Embed(
-                title="BOSS TIMER SALA 7",
-                description="```diff\n+ Nenhum boss ativo no momento +\n```",
-                color=discord.Color.gold()
-            )
-    
-    # Criar embed para a tabela
     embed = discord.Embed(
-        title=f"BOSS TIMER SALA 7 - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
+        title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
         color=discord.Color.gold()
     )
     
-    # Adicionar campo para cada boss
-    for boss in sorted_bosses:
-        timers = boss_timers[boss]
+    for boss in BOSSES:
+        boss_info = []
+        for sala in SALAS:
+            timers = boss_timers[boss][sala]
+            
+            if compact and timers['death_time'] is None:
+                continue
+                
+            death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
+            respawn_time = timers['respawn_time'].strftime("%H:%M") if timers['respawn_time'] else "--:--"
+            closed_time = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
+            recorded_by = f" ({timers['recorded_by']})" if timers['recorded_by'] else ""
+            
+            status = ""
+            if timers['respawn_time']:
+                if now >= timers['respawn_time']:
+                    if timers['closed_time'] and now >= timers['closed_time']:
+                        status = "❌"
+                    else:
+                        status = "✅"
+                else:
+                    time_left = format_time_remaining(timers['respawn_time'])
+                    status = f"🕒 ({time_left})"
+            else:
+                status = "❌"
+            
+            boss_info.append(
+                f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
+            )
         
-        # Skip if in compact mode and no timer
-        if compact and timers['death_time'] is None:
+        if not boss_info and compact:
             continue
             
-        # Format times
-        death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "Não registrado"
-        respawn_time = timers['respawn_time'].strftime("%d/%m %H:%M") if timers['respawn_time'] else "Não registrado"
-        closed_time = timers['closed_time'].strftime("%d/%m %H:%M") if timers['closed_time'] else "Não registrado"
-        recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
-        
-        # Status com emojis e cores
-        status = ""
-        if timers['respawn_time']:
-            if now >= timers['respawn_time']:
-                if timers['closed_time'] and now >= timers['closed_time']:
-                    status = "🔴 FECHADO"
-                else:
-                    status = "🟢 ABERTO"
-            else:
-                time_left = format_time_remaining(timers['respawn_time'])
-                status = f"🟡 EM {time_left}"
-        else:
-            status = "⚪ LIVRE"
-        
-        # Adicionar campo ao embed
         embed.add_field(
             name=f"**{boss}**",
-            value=(
-                f"```\n"
-                f"Morte:    {death_time}\n"
-                f"Abertura: {respawn_time}\n"
-                f"Fechamento: {closed_time}\n"
-                f"Status:   {status}"
-                f"{recorded_by}\n"
-                f"```"
-            ),
-            inline=True
+            value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
+            inline=False
         )
-    
-    # Adicionar footer com próximos bosses
-    upcoming_bosses = []
-    for boss in sorted_bosses:
-        timers = boss_timers[boss]
-        if timers['respawn_time'] and now < timers['respawn_time']:
-            time_left = format_time_remaining(timers['respawn_time'])
-            upcoming_bosses.append(f"{boss} (em {time_left})")
-    
-    if upcoming_bosses and not compact:
-        embed.set_footer(text=f"Próximos bosses: {', '.join(upcoming_bosses)}")
     
     return embed
 
 async def create_ranking_embed():
-    # Ordena os usuários pelo número de anotações
     sorted_users = sorted(user_stats.items(), key=lambda x: x[1]['count'], reverse=True)
     
     embed = discord.Embed(
@@ -196,7 +172,7 @@ async def create_ranking_embed():
         return embed
     
     ranking_text = []
-    for idx, (user_id, stats) in enumerate(sorted_users[:10]):  # Top 10
+    for idx, (user_id, stats) in enumerate(sorted_users[:10]):
         try:
             user = await bot.fetch_user(int(user_id))
             username = user.name
@@ -224,12 +200,10 @@ async def update_table(channel):
                 await table_message.edit(embed=embed, view=view)
                 return
             except:
-                # Se falhar ao editar, cria nova mensagem
                 table_message = None
         
-        # Procura por mensagens existentes do bot para editar
         async for message in channel.history(limit=50):
-            if message.author == bot.user and message.embeds and message.embeds[0].title.startswith("BOSS TIMER SALA 7"):
+            if message.author == bot.user and message.embeds and message.embeds[0].title.startswith("BOSS TIMER"):
                 try:
                     await message.edit(embed=embed, view=view)
                     table_message = message
@@ -237,7 +211,6 @@ async def update_table(channel):
                 except:
                     continue
         
-        # Se não encontrou mensagem para editar, cria nova
         table_message = await channel.send(embed=embed, view=view)
     except Exception as e:
         print(f"Erro ao atualizar tabela: {e}")
@@ -262,29 +235,33 @@ async def check_boss_respawns():
     now = datetime.now(brazil_tz)
     notifications = []
 
-    for boss, timers in boss_timers.items():
-        respawn_time = timers['respawn_time']
-        closed_time = timers['closed_time']
-        
-        if respawn_time is not None:
-            # Notificação de boss aberto
-            if now >= respawn_time and closed_time is not None and now < closed_time:
-                # Se ainda não foi notificado que está aberto
-                if not timers.get('opened_notified', False):
+    for boss in BOSSES:
+        for sala in SALAS:
+            timers = boss_timers[boss][sala]
+            respawn_time = timers['respawn_time']
+            closed_time = timers['closed_time']
+            
+            if respawn_time is not None:
+                if now >= respawn_time and closed_time is not None and now < closed_time:
+                    if not timers.get('opened_notified', False):
+                        recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
+                        notifications.append(f"🟢 **{boss} (Sala {sala})** está disponível AGORA! (aberto até {closed_time:%d/%m %H:%M} BRT){recorded_by}")
+                        boss_timers[boss][sala]['opened_notified'] = True
+                
+                elif now >= (respawn_time - timedelta(minutes=5)) and now < respawn_time and closed_time is not None:
+                    time_left = format_time_remaining(respawn_time)
                     recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
-                    notifications.append(f"🟢 **{boss}** está disponível AGORA! (aberto até {closed_time:%d/%m %H:%M} BRT){recorded_by}")
-                    boss_timers[boss]['opened_notified'] = True
-            
-            # Notificação de aviso 5 minutos antes de abrir
-            elif now >= (respawn_time - timedelta(minutes=5)) and now < respawn_time and closed_time is not None:
-                time_left = format_time_remaining(respawn_time)
-                recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
-                notifications.append(f"🟡 **{boss}** estará disponível em {time_left} ({respawn_time:%d/%m %H:%M} BRT){recorded_by}")
-            
-            # Notificação de boss fechado
-            elif closed_time is not None and now >= closed_time:
-                notifications.append(f"🔴 **{boss}** FECHADO!")
-                boss_timers[boss] = {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None, 'opened_notified': False}
+                    notifications.append(f"🟡 **{boss} (Sala {sala})** estará disponível em {time_left} ({respawn_time:%d/%m %H:%M} BRT){recorded_by}")
+                
+                elif closed_time is not None and now >= closed_time:
+                    notifications.append(f"🔴 **{boss} (Sala {sala})** FECHADO!")
+                    boss_timers[boss][sala] = {
+                        'death_time': None,
+                        'respawn_time': None,
+                        'closed_time': None,
+                        'recorded_by': None,
+                        'opened_notified': False
+                    }
 
     if notifications:
         message = "**Notificações de Boss:**\n" + "\n".join(notifications)
@@ -298,11 +275,9 @@ async def on_ready():
     print(f'Canal de notificação configurado para ID: {NOTIFICATION_CHANNEL_ID}')
     await bot.change_presence(activity=discord.Game(name="!bosshelp para ajuda"))
     
-    # Inicia as tarefas
     check_boss_respawns.start()
     live_table_updater.start()
     
-    # Envia a tabela inicial
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
     if channel:
         await update_table(channel)
@@ -314,45 +289,96 @@ class BossControlView(discord.ui.View):
     @discord.ui.button(label="Anotar Boss", style=discord.ButtonStyle.green, custom_id="boss_button", emoji="📝")
     async def boss_button_callback(self, interaction, button):
         view = discord.ui.View()
-        select = discord.ui.Select(
+        select_boss = discord.ui.Select(
             placeholder="Selecione um boss",
             options=[discord.SelectOption(label=boss) for boss in BOSSES]
         )
         
+        select_sala = discord.ui.Select(
+            placeholder="Selecione uma sala",
+            options=[discord.SelectOption(label=f"Sala {sala}", value=str(sala)) for sala in SALAS]
+        )
+        
         async def select_callback(interaction):
-            boss_name = select.values[0]
-            modal = TimeInputModal(boss_name)
+            boss_name = select_boss.values[0]
+            sala = int(select_sala.values[0])
+            modal = TimeInputModal(boss_name, sala)
             await interaction.response.send_modal(modal)
         
-        select.callback = select_callback
-        view.add_item(select)
-        await interaction.response.send_message("Selecione o boss que foi derrotado:", view=view, ephemeral=True)
+        select_boss.callback = select_callback
+        select_sala.callback = select_callback
+        view.add_item(select_boss)
+        view.add_item(select_sala)
+        await interaction.response.send_message("Selecione o boss e a sala:", view=view, ephemeral=True)
     
     @discord.ui.button(label="Limpar Boss", style=discord.ButtonStyle.red, custom_id="clear_boss_button", emoji="❌")
     async def clear_boss_button_callback(self, interaction, button):
         view = discord.ui.View()
-        select = discord.ui.Select(
-            placeholder="Selecione um boss para limpar",
-            options=[discord.SelectOption(label=boss) for boss in BOSSES if boss_timers[boss]['death_time'] is not None]
+        
+        select_boss = discord.ui.Select(
+            placeholder="Selecione um boss",
+            options=[discord.SelectOption(label=boss) for boss in BOSSES]
         )
         
-        async def select_callback(interaction):
-            boss_name = select.values[0]
-            boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None, 'opened_notified': False}
-            await interaction.response.send_message(f"✅ Timer do boss **{boss_name}** foi resetado.", ephemeral=True)
-            # Mostra a tabela atualizada automaticamente
+        select_sala = discord.ui.Select(
+            placeholder="Selecione uma sala",
+            options=[]
+        )
+        
+        async def boss_selected(interaction):
+            boss_name = select_boss.values[0]
+            
+            salas_com_timer = [
+                sala for sala in SALAS 
+                if boss_timers[boss_name][sala]['death_time'] is not None
+            ]
+            
+            if not salas_com_timer:
+                await interaction.response.send_message(f"Nenhum timer ativo para {boss_name}", ephemeral=True)
+                return
+                
+            select_sala.options = [
+                discord.SelectOption(label=f"Sala {sala}", value=str(sala))
+                for sala in salas_com_timer
+            ]
+            
+            await interaction.response.edit_message(
+                content=f"Selecione a sala de {boss_name} para limpar:",
+                view=view
+            )
+        
+        async def sala_selected(interaction):
+            boss_name = select_boss.values[0]
+            sala = int(select_sala.values[0])
+            
+            boss_timers[boss_name][sala] = {
+                'death_time': None,
+                'respawn_time': None,
+                'closed_time': None,
+                'recorded_by': None,
+                'opened_notified': False
+            }
+            
+            await interaction.response.send_message(
+                f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
+                ephemeral=True
+            )
+            
             embed = create_boss_embed()
             view = BossControlView()
             await interaction.followup.send(embed=embed, view=view)
             await update_table(interaction.channel)
         
-        if not select.options:
-            await interaction.response.send_message("Nenhum boss ativo para limpar.", ephemeral=True)
-            return
+        select_boss.callback = boss_selected
+        select_sala.callback = sala_selected
+        view.add_item(select_boss)
+        view.add_item(select_sala)
         
-        select.callback = select_callback
-        view.add_item(select)
-        await interaction.response.send_message("Selecione o boss para limpar:", view=view, ephemeral=True)
+        await interaction.response.send_message(
+            "Selecione o boss para limpar:",
+            view=view,
+            ephemeral=True
+        )
     
     @discord.ui.button(label="Ranking", style=discord.ButtonStyle.blurple, custom_id="ranking_button", emoji="🏆")
     async def ranking_button_callback(self, interaction, button):
@@ -360,9 +386,10 @@ class BossControlView(discord.ui.View):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 class TimeInputModal(discord.ui.Modal):
-    def __init__(self, boss_name):
-        super().__init__(title=f"Registrar {boss_name}")
+    def __init__(self, boss_name, sala):
+        super().__init__(title=f"Registrar {boss_name} (Sala {sala})")
         self.boss_name = boss_name
+        self.sala = sala
         
         self.time_input = discord.ui.TextInput(
             label="Horário da morte (HH:MM)",
@@ -383,7 +410,8 @@ class TimeInputModal(discord.ui.Modal):
             
             respawn_time = death_time + timedelta(hours=8)
             recorded_by = interaction.user.name
-            boss_timers[self.boss_name] = {
+            
+            boss_timers[self.boss_name][self.sala] = {
                 'death_time': death_time,
                 'respawn_time': respawn_time,
                 'closed_time': respawn_time + timedelta(hours=4),
@@ -391,19 +419,18 @@ class TimeInputModal(discord.ui.Modal):
                 'opened_notified': False
             }
             
-            # Atualiza estatísticas do usuário
             user_id = str(interaction.user.id)
             user_stats[user_id]['count'] += 1
             user_stats[user_id]['last_recorded'] = now
             
             await interaction.response.send_message(
-                f"✅ **{self.boss_name}** registrado por {recorded_by}:\n"
+                f"✅ **{self.boss_name} (Sala {self.sala})** registrado por {recorded_by}:\n"
                 f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
                 f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
                 f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
                 ephemeral=True
             )
-            # Mostra a tabela atualizada automaticamente
+            
             embed = create_boss_embed()
             view = BossControlView()
             await interaction.followup.send(embed=embed, view=view)
@@ -415,16 +442,19 @@ class TimeInputModal(discord.ui.Modal):
             )
 
 @bot.command(name='boss')
-async def boss_command(ctx, boss_name: str = None, hora_morte: str = None):
+async def boss_command(ctx, boss_name: str = None, sala: int = None, hora_morte: str = None):
     if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
         await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
         return
 
-    if boss_name is None or hora_morte is None:
-        await ctx.send("Por favor, use: `!boss <nome_do_boss> HH:MM`\nExemplo: `!boss Hydra 14:30`\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
+    if boss_name is None or sala is None or hora_morte is None:
+        await ctx.send("Por favor, use: `!boss <nome_do_boss> <sala> HH:MM`\nExemplo: `!boss Hydra 8 14:30`\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
         return
     
-    # Verifica se é uma abreviação
+    if sala not in SALAS:
+        await ctx.send(f"Sala inválida. Salas disponíveis: {', '.join(map(str, SALAS))}")
+        return
+    
     full_boss_name = get_boss_by_abbreviation(boss_name)
     if full_boss_name is None:
         await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
@@ -442,7 +472,8 @@ async def boss_command(ctx, boss_name: str = None, hora_morte: str = None):
         
         respawn_time = death_time + timedelta(hours=8)
         recorded_by = ctx.author.name
-        boss_timers[boss_name] = {
+        
+        boss_timers[boss_name][sala] = {
             'death_time': death_time,
             'respawn_time': respawn_time,
             'closed_time': respawn_time + timedelta(hours=4),
@@ -450,18 +481,17 @@ async def boss_command(ctx, boss_name: str = None, hora_morte: str = None):
             'opened_notified': False
         }
         
-        # Atualiza estatísticas do usuário
         user_id = str(ctx.author.id)
         user_stats[user_id]['count'] += 1
         user_stats[user_id]['last_recorded'] = now
         
         await ctx.send(
-            f"✅ **{boss_name}** registrado por {recorded_by}:\n"
+            f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
             f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
             f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
             f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT"
         )
-        # Mostra a tabela atualizada automaticamente
+        
         embed = create_boss_embed()
         view = BossControlView()
         await ctx.send(embed=embed, view=view)
@@ -481,12 +511,11 @@ async def bosses_command(ctx, mode: str = None):
     await ctx.send(embed=embed, view=view)
 
 @bot.command(name='clearboss')
-async def clear_boss(ctx, boss_name: str):
+async def clear_boss(ctx, boss_name: str, sala: int = None):
     if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
         await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
         return
     
-    # Verifica se é uma abreviação
     full_boss_name = get_boss_by_abbreviation(boss_name)
     if full_boss_name is None:
         await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
@@ -494,9 +523,30 @@ async def clear_boss(ctx, boss_name: str):
     
     boss_name = full_boss_name
     
-    boss_timers[boss_name] = {'death_time': None, 'respawn_time': None, 'closed_time': None, 'recorded_by': None, 'opened_notified': False}
-    await ctx.send(f"✅ Timer do boss **{boss_name}** foi resetado.")
-    # Mostra a tabela atualizada automaticamente
+    if sala is None:
+        for s in SALAS:
+            boss_timers[boss_name][s] = {
+                'death_time': None,
+                'respawn_time': None,
+                'closed_time': None,
+                'recorded_by': None,
+                'opened_notified': False
+            }
+        await ctx.send(f"✅ Todos os timers do boss **{boss_name}** foram resetados.")
+    else:
+        if sala not in SALAS:
+            await ctx.send(f"Sala inválida. Salas disponíveis: {', '.join(map(str, SALAS))}")
+            return
+        
+        boss_timers[boss_name][sala] = {
+            'death_time': None,
+            'respawn_time': None,
+            'closed_time': None,
+            'recorded_by': None,
+            'opened_notified': False
+        }
+        await ctx.send(f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.")
+    
     embed = create_boss_embed()
     view = BossControlView()
     await ctx.send(embed=embed, view=view)
@@ -534,8 +584,8 @@ async def boss_help(ctx):
     )
     
     embed.add_field(
-        name="!boss <nome> HH:MM",
-        value="Registra a morte de um boss no horário especificado\nExemplo: `!boss Hydra 14:30`\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
+        name="!boss <nome> <sala> HH:MM",
+        value="Registra a morte de um boss no horário especificado\nExemplo: `!boss Hydra 8 14:30`\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
         inline=False
     )
     embed.add_field(
@@ -549,8 +599,8 @@ async def boss_help(ctx):
         inline=False
     )
     embed.add_field(
-        name="!clearboss <nome>",
-        value="Reseta o timer de um boss (também pode usar abreviações)",
+        name="!clearboss <nome> [sala]",
+        value="Reseta o timer de um boss (opcional: especifique a sala, senão limpa todas)",
         inline=False
     )
     embed.add_field(
@@ -566,6 +616,11 @@ async def boss_help(ctx):
     embed.add_field(
         name="Bosses disponíveis",
         value="\n".join(BOSSES),
+        inline=False
+    )
+    embed.add_field(
+        name="Salas disponíveis",
+        value=", ".join(map(str, SALAS)),
         inline=False
     )
     
