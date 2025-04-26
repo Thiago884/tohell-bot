@@ -460,12 +460,7 @@ class BossControlView(discord.ui.View):
     @discord.ui.button(label="Anotar Horário", style=discord.ButtonStyle.green, custom_id="boss_control:anotar", emoji="📝")
     async def boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            # Primeiro respondemos à interação
-            await interaction.response.send_message(
-                "📝 **Anotar Horário de Boss**\nCarregando opções...",
-                ephemeral=True
-            )
-            
+            # Criamos a view primeiro
             view = discord.ui.View(timeout=180)
             
             select_boss = discord.ui.Select(
@@ -529,7 +524,7 @@ class BossControlView(discord.ui.View):
                 nonlocal selected_boss, selected_sala, foi_ontem
                 
                 if not selected_boss or not selected_sala:
-                    await interaction.response.send_message("Selecione o boss e a sala primeiro!", ephemeral=True)
+                    await interaction.followup.send("Selecione o boss e a sala primeiro!", ephemeral=True)
                     return
                 
                 class TimeInputModal(discord.ui.Modal, title="Informe o Horário"):
@@ -617,30 +612,33 @@ class BossControlView(discord.ui.View):
             )
             submit_btn.callback = submit_callback
             
-            # Substitua ActionRow por uma nova View para os botões de ação
-            action_view = discord.ui.View(timeout=180)
-            action_view.add_item(cancel_btn)
-            action_view.add_item(submit_btn)
+            # Adicionamos os botões diretamente na view principal
+            view.add_item(cancel_btn)
+            view.add_item(submit_btn)
             
-            # Primeiro editamos a mensagem inicial para remover o "Carregando..."
-            await interaction.edit_original_response(
-                content="📝 **Anotar Horário de Boss**\nSelecione o boss, sala e marque se foi ontem:",
-                view=view
+            # Respondemos à interação apenas uma vez
+            await interaction.response.send_message(
+                "📝 **Anotar Horário de Boss**\nSelecione o boss, sala e marque se foi ontem:",
+                view=view,
+                ephemeral=False
             )
             
-            # Enviamos os botões de ação em uma mensagem separada
-            await interaction.followup.send(
-                "Ações:",
-                view=action_view,
-                ephemeral=True
-            )
         except Exception as e:
             print(f"ERRO DETALHADO no botão de anotar: {str(e)}")
             traceback.print_exc()
             try:
-                await interaction.followup.send("Ocorreu um erro ao processar sua solicitação.", ephemeral=True)
-            except:
-                pass
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao processar sua solicitação.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao processar sua solicitação.",
+                        ephemeral=True
+                    )
+            except Exception as e:
+                print(f"Erro ao enviar mensagem de erro: {e}")
     
     @discord.ui.button(label="Limpar Boss", style=discord.ButtonStyle.red, custom_id="boss_control:limpar", emoji="❌")
     async def clear_boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
