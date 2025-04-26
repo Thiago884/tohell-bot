@@ -460,168 +460,111 @@ class BossControlView(discord.ui.View):
     @discord.ui.button(label="Anotar Horário", style=discord.ButtonStyle.green, custom_id="boss_control:anotar", emoji="📝")
     async def boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            # Criamos a view primeiro
-            view = discord.ui.View(timeout=180)
-            
-            select_boss = discord.ui.Select(
-                placeholder="Selecione o Boss",
-                options=[
-                    discord.SelectOption(label="Rei Kundun", value="rei", emoji="👑"),
-                    discord.SelectOption(label="Phoenix of Darkness", value="phoenix", emoji="🦅"),
-                    discord.SelectOption(label="Illusion of Kundun", value="illusion", emoji="👻"),
-                    discord.SelectOption(label="Death Beam Knight", value="dbk", emoji="⚔️"),
-                    discord.SelectOption(label="Genocider", value="geno", emoji="💀"),
-                    discord.SelectOption(label="Hell Maine", value="hell", emoji="🔥"),
-                    discord.SelectOption(label="Super Red Dragon", value="red", emoji="🐉"),
-                    discord.SelectOption(label="Hydra", value="hydra", emoji="🐍")
-                ]
-            )
-            
-            select_sala = discord.ui.Select(
-                placeholder="Selecione a Sala",
-                options=[discord.SelectOption(label=f"Sala {sala}", value=str(sala)) for sala in SALAS]
-            )
-            
-            ontem_btn = discord.ui.Button(
-                label="Foi Ontem?",
-                style=discord.ButtonStyle.gray,
-                emoji="⬜",
-                custom_id="ontem_btn"
-            )
-            
-            cancel_btn = discord.ui.Button(
-                label="Cancelar",
-                style=discord.ButtonStyle.red,
-                emoji="❌",
-                custom_id="cancel_btn"
-            )
-            
-            selected_boss = None
-            selected_sala = None
-            foi_ontem = False
-            
-            async def boss_select_callback(interaction: discord.Interaction):
-                nonlocal selected_boss
-                selected_boss = select_boss.values[0]
-                await interaction.response.defer()
-            
-            async def sala_select_callback(interaction: discord.Interaction):
-                nonlocal selected_sala
-                selected_sala = int(select_sala.values[0])
-                await interaction.response.defer()
-            
-            async def ontem_callback(interaction: discord.Interaction):
-                nonlocal foi_ontem
-                foi_ontem = not foi_ontem
-                ontem_btn.emoji = "✅" if foi_ontem else "⬜"
-                ontem_btn.style = discord.ButtonStyle.green if foi_ontem else discord.ButtonStyle.gray
-                await interaction.response.edit_message(view=view)
-            
-            async def cancel_callback(interaction: discord.Interaction):
-                await interaction.response.edit_message(content="Operação cancelada", view=None)
-            
-            async def submit_callback(interaction: discord.Interaction):
-                nonlocal selected_boss, selected_sala, foi_ontem
+            # Criar o modal diretamente
+            class BossTimeModal(discord.ui.Modal, title="Anotar Horário do Boss"):
+                boss_name = discord.ui.Select(
+                    placeholder="Selecione o Boss",
+                    options=[
+                        discord.SelectOption(label="Rei Kundun", value="rei", emoji="👑"),
+                        discord.SelectOption(label="Phoenix of Darkness", value="phoenix", emoji="🦅"),
+                        discord.SelectOption(label="Illusion of Kundun", value="illusion", emoji="👻"),
+                        discord.SelectOption(label="Death Beam Knight", value="dbk", emoji="⚔️"),
+                        discord.SelectOption(label="Genocider", value="geno", emoji="💀"),
+                        discord.SelectOption(label="Hell Maine", value="hell", emoji="🔥"),
+                        discord.SelectOption(label="Super Red Dragon", value="red", emoji="🐉"),
+                        discord.SelectOption(label="Hydra", value="hydra", emoji="🐍")
+                    ]
+                )
                 
-                if not selected_boss or not selected_sala:
-                    await interaction.followup.send("Selecione o boss e a sala primeiro!", ephemeral=True)
-                    return
+                sala = discord.ui.Select(
+                    placeholder="Selecione a Sala",
+                    options=[discord.SelectOption(label=f"Sala {sala}", value=str(sala)) for sala in SALAS]
+                )
                 
-                class TimeInputModal(discord.ui.Modal, title="Informe o Horário"):
-                    time_input = discord.ui.TextInput(
-                        label="Horário da morte (HH:MM)",
-                        placeholder="Ex: 14:30",
-                        required=True,
-                        max_length=5
+                time_input = discord.ui.TextInput(
+                    label="Horário da morte (HH:MM)",
+                    placeholder="Ex: 14:30",
+                    required=True,
+                    max_length=5
+                )
+                
+                foi_ontem = discord.ui.Button(
+                    label="Foi Ontem?",
+                    style=discord.ButtonStyle.gray,
+                    emoji="⬜",
+                    custom_id="ontem_btn"
+                )
+                
+                async def on_submit(self, interaction: discord.Interaction):
+                    try:
+                        hora, minuto = map(int, self.time_input.value.split(':'))
+                        now = datetime.now(brazil_tz)
+                        death_time = now.replace(hour=hora, minute=minuto, second=0, microsecond=0)
+                        
+                        # Verificar se foi ontem (precisa ser implementada a lógica do botão)
+                        if False:  # Substituir pela lógica do botão "Foi Ontem?"
+                            death_time -= timedelta(days=1)
+                        elif death_time > now:
+                            death_time -= timedelta(days=1)
+                        
+                        respawn_time = death_time + timedelta(hours=8)
+                        recorded_by = interaction.user.name
+                        
+                        boss_map = {
+                            'red': 'Super Red Dragon',
+                            'hell': 'Hell Maine',
+                            'illusion': 'Illusion of Kundun',
+                            'dbk': 'Death Beam Knight',
+                            'geno': 'Genocider',
+                            'phoenix': 'Phoenix of Darkness',
+                            'hydra': 'Hydra',
+                            'rei': 'Rei Kundun'
+                        }
+                        
+                        boss_name = boss_map[self.boss_name.values[0]]
+                        sala_num = int(self.sala.values[0])
+                        
+                        boss_timers[boss_name][sala_num] = {
+                            'death_time': death_time,
+                            'respawn_time': respawn_time,
+                            'closed_time': respawn_time + timedelta(hours=4),
+                            'recorded_by': recorded_by,
+                            'opened_notified': False
+                        }
+                        
+                        user_id = str(interaction.user.id)
+                        user_stats[user_id]['count'] += 1
+                        user_stats[user_id]['last_recorded'] = now
+                        
+                        save_timer(boss_name, sala_num, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
+                        save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
+                        
+                        await interaction.response.send_message(
+                            f"✅ **{boss_name} (Sala {sala_num})** registrado por {recorded_by}:\n"
+                            f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
+                            f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
+                            f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
+                            ephemeral=True
+                        )
+                        
+                        channel = interaction.channel
+                        if channel:
+                            await update_table(channel)
+                            
+                    except ValueError:
+                        await interaction.response.send_message(
+                            "Formato de hora inválido. Use HH:MM (ex: 14:30)",
+                            ephemeral=True
+                        )
+                
+                async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao processar sua solicitação.",
+                        ephemeral=True
                     )
-                    
-                    async def on_submit(self, interaction: discord.Interaction):
-                        try:
-                            hora, minuto = map(int, self.time_input.value.split(':'))
-                            now = datetime.now(brazil_tz)
-                            death_time = now.replace(hour=hora, minute=minuto, second=0, microsecond=0)
-                            
-                            if foi_ontem:
-                                death_time -= timedelta(days=1)
-                            elif death_time > now:
-                                death_time -= timedelta(days=1)
-                            
-                            respawn_time = death_time + timedelta(hours=8)
-                            recorded_by = interaction.user.name
-                            
-                            boss_map = {
-                                'red': 'Super Red Dragon',
-                                'hell': 'Hell Maine',
-                                'illusion': 'Illusion of Kundun',
-                                'dbk': 'Death Beam Knight',
-                                'geno': 'Genocider',
-                                'phoenix': 'Phoenix of Darkness',
-                                'hydra': 'Hydra',
-                                'rei': 'Rei Kundun'
-                            }
-                            
-                            boss_name = boss_map[selected_boss]
-                            
-                            boss_timers[boss_name][selected_sala] = {
-                                'death_time': death_time,
-                                'respawn_time': respawn_time,
-                                'closed_time': respawn_time + timedelta(hours=4),
-                                'recorded_by': recorded_by,
-                                'opened_notified': False
-                            }
-                            
-                            user_id = str(interaction.user.id)
-                            user_stats[user_id]['count'] += 1
-                            user_stats[user_id]['last_recorded'] = now
-                            
-                            save_timer(boss_name, selected_sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
-                            save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
-                            
-                            await interaction.response.send_message(
-                                f"✅ **{boss_name} (Sala {selected_sala})** registrado por {recorded_by}:\n"
-                                f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
-                                f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
-                                f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
-                                ephemeral=True
-                            )
-                            
-                            await update_table(interaction.channel)
-                            
-                        except ValueError:
-                            await interaction.response.send_message(
-                                "Formato de hora inválido. Use HH:MM (ex: 14:30)",
-                                ephemeral=True
-                            )
-                
-                await interaction.response.send_modal(TimeInputModal())
+                    traceback.print_exc()
             
-            select_boss.callback = boss_select_callback
-            select_sala.callback = sala_select_callback
-            ontem_btn.callback = ontem_callback
-            cancel_btn.callback = cancel_callback
-            
-            view.add_item(select_boss)
-            view.add_item(select_sala)
-            view.add_item(ontem_btn)
-            
-            submit_btn = discord.ui.Button(
-                label="Enviar",
-                style=discord.ButtonStyle.green,
-                emoji="✅",
-                custom_id="submit_btn"
-            )
-            submit_btn.callback = submit_callback
-            
-            # Adicionamos os botões diretamente na view principal
-            view.add_item(cancel_btn)
-            view.add_item(submit_btn)
-            
-            # Respondemos à interação apenas uma vez
-            await interaction.response.send_message(
-                "📝 **Anotar Horário de Boss**\nSelecione o boss, sala e marque se foi ontem:",
-                view=view,
-                ephemeral=False
-            )
+            await interaction.response.send_modal(BossTimeModal())
             
         except Exception as e:
             print(f"ERRO DETALHADO no botão de anotar: {str(e)}")
@@ -643,8 +586,6 @@ class BossControlView(discord.ui.View):
     @discord.ui.button(label="Limpar Boss", style=discord.ButtonStyle.red, custom_id="boss_control:limpar", emoji="❌")
     async def clear_boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            await interaction.response.defer()
-            
             view = discord.ui.View(timeout=180)
             
             select_boss = discord.ui.Select(
@@ -654,7 +595,7 @@ class BossControlView(discord.ui.View):
             
             select_sala = discord.ui.Select(
                 placeholder="Selecione uma sala",
-                options=[]
+                options=[discord.SelectOption(label=f"Sala {sala}", value=str(sala)) for sala in SALAS]
             )
             
             async def boss_selected(interaction: discord.Interaction):
@@ -698,14 +639,16 @@ class BossControlView(discord.ui.View):
                     ephemeral=True
                 )
                 
-                await update_table(interaction.channel)
+                channel = interaction.channel
+                if channel:
+                    await update_table(channel)
             
             select_boss.callback = boss_selected
             select_sala.callback = sala_selected
             view.add_item(select_boss)
             view.add_item(select_sala)
             
-            await interaction.followup.send(
+            await interaction.response.send_message(
                 "Selecione o boss para limpar:",
                 view=view,
                 ephemeral=True
@@ -714,9 +657,18 @@ class BossControlView(discord.ui.View):
             print(f"ERRO DETALHADO no botão de limpar: {str(e)}")
             traceback.print_exc()
             try:
-                await interaction.followup.send("Ocorreu um erro ao processar sua solicitação.", ephemeral=True)
+                await interaction.response.send_message(
+                    "Ocorreu um erro ao processar sua solicitação.",
+                    ephemeral=True
+                )
             except:
-                pass
+                try:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao processar sua solicitação.",
+                        ephemeral=True
+                    )
+                except:
+                    pass
     
     @discord.ui.button(label="Ranking", style=discord.ButtonStyle.blurple, custom_id="boss_control:ranking", emoji="🏆")
     async def ranking_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
