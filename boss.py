@@ -460,7 +460,11 @@ class BossControlView(discord.ui.View):
     @discord.ui.button(label="Anotar Horário", style=discord.ButtonStyle.green, custom_id="boss_control:anotar", emoji="📝")
     async def boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            await interaction.response.defer()
+            # Primeiro respondemos à interação
+            await interaction.response.send_message(
+                "📝 **Anotar Horário de Boss**\nCarregando opções...",
+                ephemeral=True
+            )
             
             view = discord.ui.View(timeout=180)
             
@@ -613,15 +617,22 @@ class BossControlView(discord.ui.View):
             )
             submit_btn.callback = submit_callback
             
-            action_row = discord.ui.ActionRow()
-            action_row.add_item(cancel_btn)
-            action_row.add_item(submit_btn)
-            view.add_item(action_row)
+            # Substitua ActionRow por uma nova View para os botões de ação
+            action_view = discord.ui.View(timeout=180)
+            action_view.add_item(cancel_btn)
+            action_view.add_item(submit_btn)
             
+            # Primeiro editamos a mensagem inicial para remover o "Carregando..."
+            await interaction.edit_original_response(
+                content="📝 **Anotar Horário de Boss**\nSelecione o boss, sala e marque se foi ontem:",
+                view=view
+            )
+            
+            # Enviamos os botões de ação em uma mensagem separada
             await interaction.followup.send(
-                "📝 **Anotar Horário de Boss**\nSelecione o boss, sala e marque se foi ontem:",
-                view=view,
-                ephemeral=False
+                "Ações:",
+                view=action_view,
+                ephemeral=True
             )
         except Exception as e:
             print(f"ERRO DETALHADO no botão de anotar: {str(e)}")
