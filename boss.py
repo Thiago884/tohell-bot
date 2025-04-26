@@ -8,6 +8,7 @@ from flask import Flask
 from threading import Thread
 from collections import defaultdict
 import random
+import traceback
 
 # Configurações do Flask para keep-alive
 app = Flask('')
@@ -455,15 +456,13 @@ async def periodic_table_update():
 class BossControlView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        # Garante que os botões terão IDs únicos e persistentes
-        self.children[0].custom_id = "boss_control:anotar"
-        self.children[1].custom_id = "boss_control:limpar"
-        self.children[2].custom_id = "boss_control:ranking"
     
     @discord.ui.button(label="Anotar Horário", style=discord.ButtonStyle.green, custom_id="boss_control:anotar", emoji="📝")
     async def boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            view = discord.ui.View(timeout=180)  # Timeout de 3 minutos
+            await interaction.response.defer()
+            
+            view = discord.ui.View(timeout=180)
             
             select_boss = discord.ui.Select(
                 placeholder="Selecione o Boss",
@@ -576,7 +575,6 @@ class BossControlView(discord.ui.View):
                             user_stats[user_id]['count'] += 1
                             user_stats[user_id]['last_recorded'] = now
                             
-                            # Salvar no banco de dados
                             save_timer(boss_name, selected_sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
                             save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
                             
@@ -615,25 +613,30 @@ class BossControlView(discord.ui.View):
             )
             submit_btn.callback = submit_callback
             
-            # Adicionar botões em uma linha
             action_row = discord.ui.ActionRow()
             action_row.add_item(cancel_btn)
             action_row.add_item(submit_btn)
             view.add_item(action_row)
             
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "📝 **Anotar Horário de Boss**\nSelecione o boss, sala e marque se foi ontem:",
                 view=view,
                 ephemeral=False
             )
         except Exception as e:
-            print(f"Erro no botão de anotar: {e}")
-            await interaction.response.send_message("Ocorreu um erro ao processar sua solicitação.", ephemeral=True)
+            print(f"ERRO DETALHADO no botão de anotar: {str(e)}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send("Ocorreu um erro ao processar sua solicitação.", ephemeral=True)
+            except:
+                pass
     
     @discord.ui.button(label="Limpar Boss", style=discord.ButtonStyle.red, custom_id="boss_control:limpar", emoji="❌")
     async def clear_boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            view = discord.ui.View(timeout=180)  # Timeout de 3 minutos
+            await interaction.response.defer()
+            
+            view = discord.ui.View(timeout=180)
             
             select_boss = discord.ui.Select(
                 placeholder="Selecione um boss",
@@ -679,7 +682,6 @@ class BossControlView(discord.ui.View):
                     'opened_notified': False
                 }
                 
-                # Limpar do banco de dados
                 clear_timer(boss_name, sala)
                 
                 await interaction.response.send_message(
@@ -694,14 +696,18 @@ class BossControlView(discord.ui.View):
             view.add_item(select_boss)
             view.add_item(select_sala)
             
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "Selecione o boss para limpar:",
                 view=view,
                 ephemeral=True
             )
         except Exception as e:
-            print(f"Erro no botão de limpar: {e}")
-            await interaction.response.send_message("Ocorreu um erro ao processar sua solicitação.", ephemeral=True)
+            print(f"ERRO DETALHADO no botão de limpar: {str(e)}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send("Ocorreu um erro ao processar sua solicitação.", ephemeral=True)
+            except:
+                pass
     
     @discord.ui.button(label="Ranking", style=discord.ButtonStyle.blurple, custom_id="boss_control:ranking", emoji="🏆")
     async def ranking_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -709,7 +715,8 @@ class BossControlView(discord.ui.View):
             embed = await create_ranking_embed()
             await interaction.response.send_message(embed=embed, ephemeral=False)
         except Exception as e:
-            print(f"Erro no botão de ranking: {e}")
+            print(f"ERRO DETALHADO no botão de ranking: {str(e)}")
+            traceback.print_exc()
             await interaction.response.send_message("Ocorreu um erro ao gerar o ranking.", ephemeral=True)
 
 @bot.event
@@ -777,7 +784,6 @@ async def boss_command(ctx, boss_name: str = None, sala: int = None, hora_morte:
         user_stats[user_id]['count'] += 1
         user_stats[user_id]['last_recorded'] = now
         
-        # Salvar no banco de dados
         save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
         save_user_stats(user_id, ctx.author.name, user_stats[user_id]['count'], now)
         
