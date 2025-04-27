@@ -741,8 +741,11 @@ class BossControlView(discord.ui.View):
     @discord.ui.button(label="Anotar Horário", style=discord.ButtonStyle.green, custom_id="boss_control:anotar", emoji="📝")
     async def boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            modal = AnotarBossModal()
-            await interaction.response.send_modal(modal)
+            if not interaction.response.is_done():
+                modal = AnotarBossModal()
+                await interaction.response.send_modal(modal)
+            else:
+                await interaction.followup.send("Por favor, tente novamente.", ephemeral=True)
         except Exception as e:
             print(f"ERRO DETALHADO no botão de anotar: {str(e)}")
             traceback.print_exc()
@@ -763,7 +766,10 @@ class BossControlView(discord.ui.View):
     @discord.ui.button(label="Limpar Boss", style=discord.ButtonStyle.red, custom_id="boss_control:limpar", emoji="❌")
     async def clear_boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            await interaction.response.defer(ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+            else:
+                await interaction.followup.send("Processando...", ephemeral=True)
             
             view = discord.ui.View(timeout=180)
             
@@ -778,7 +784,8 @@ class BossControlView(discord.ui.View):
             )
             
             async def boss_selected(interaction: discord.Interaction):
-                await interaction.response.defer()
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
                 boss_name = select_boss.values[0]
                 
                 salas_com_timer = [
@@ -802,7 +809,8 @@ class BossControlView(discord.ui.View):
                 )
             
             async def sala_selected(interaction: discord.Interaction):
-                await interaction.response.defer()
+                if not interaction.response.is_done():
+                    await interaction.response.defer()
                 boss_name = select_boss.values[0]
                 sala = int(select_sala.values[0])
                 
@@ -847,7 +855,8 @@ class BossControlView(discord.ui.View):
     @discord.ui.button(label="Ranking", style=discord.ButtonStyle.blurple, custom_id="boss_control:ranking", emoji="🏆")
     async def ranking_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            await interaction.response.defer()
+            if not interaction.response.is_done():
+                await interaction.response.defer()
             embed = await create_ranking_embed()
             await interaction.followup.send(embed=embed)
         except Exception as e:
@@ -861,7 +870,10 @@ class BossControlView(discord.ui.View):
     @discord.ui.button(label="Backup", style=discord.ButtonStyle.gray, custom_id="boss_control:backup", emoji="💾")
     async def backup_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            await interaction.response.defer(ephemeral=True)
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+            else:
+                await interaction.followup.send("Processando backup...", ephemeral=True)
             
             # Verificar se o usuário tem permissão de administrador
             if not interaction.user.guild_permissions.administrator:
@@ -874,7 +886,8 @@ class BossControlView(discord.ui.View):
             restore_button = discord.ui.Button(label="Restaurar Backup", style=discord.ButtonStyle.red)
             
             async def backup_callback(interaction: discord.Interaction):
-                await interaction.response.defer()
+                if not interaction.response.is_done():
+                    await interaction.response.defer(ephemeral=True)
                 backup_file = create_backup()
                 if backup_file:
                     try:
@@ -896,7 +909,8 @@ class BossControlView(discord.ui.View):
                     )
             
             async def restore_callback(interaction: discord.Interaction):
-                await interaction.response.defer()
+                if not interaction.response.is_done():
+                    await interaction.response.defer(ephemeral=True)
                 
                 # Verificar se há arquivos de backup
                 backup_files = [f for f in os.listdir() if f.startswith('backup_') and f.endswith('.json')]
@@ -912,7 +926,8 @@ class BossControlView(discord.ui.View):
                 )
                 
                 async def restore_selected(interaction: discord.Interaction):
-                    await interaction.response.defer()
+                    if not interaction.response.is_done():
+                        await interaction.response.defer(ephemeral=True)
                     backup_file = select.values[0]
                     
                     if restore_backup(backup_file):
