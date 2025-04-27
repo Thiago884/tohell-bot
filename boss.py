@@ -585,6 +585,17 @@ async def check_boss_respawns():
     
     await update_table(channel)
 
+@tasks.loop(minutes=30)
+async def periodic_table_update():
+    """Atualização periódica da tabela com intervalo aleatório"""
+    channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
+    if channel:
+        embed = create_boss_embed()
+        await channel.send("**Atualização periódica dos horários de boss:**", embed=embed)
+    
+    # Define um intervalo aleatório para a próxima atualização (entre 30 e 60 minutos)
+    periodic_table_update.change_interval(minutes=random.randint(30, 60))
+
 @tasks.loop(hours=24)
 async def daily_backup():
     """Rotina de backup diário"""
@@ -963,7 +974,7 @@ async def on_ready():
     
     check_boss_respawns.start()
     live_table_updater.start()
-    periodic_table_update.start()
+    periodic_table_update.start()  # Agora esta tarefa está definida
     daily_backup.start()
     
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
@@ -977,7 +988,7 @@ async def boss_command(ctx, boss_name: str = None, sala: int = None, hora_morte:
         return
 
     if boss_name is None or sala is None or hora_morte is None:
-        await ctx.send("Por favor, use: `!boss <nome_do_boss> <sala> HH:MM`\nExemplo: `!boss Hydra 8 14:30`\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
+        await ctx.send("Por favor, use: `!boss <nome_do_boss> <sala> HH:MM`\nExemplo: `!boss Hydra 8 14:30`\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno\nFormatos de hora aceitos: HH:MM ou HHhMM")
         return
     
     if sala not in SALAS:
@@ -1101,16 +1112,6 @@ async def ranking_command(ctx):
     embed = await create_ranking_embed()
     await ctx.send(embed=embed)
 
-@bot.command(name='setupboss')
-async def setup_boss(ctx):
-    if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-        await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
-        return
-        
-    embed = create_boss_embed()
-    view = BossControlView()
-    await ctx.send(embed=embed, view=view)
-
 @bot.command(name='backup')
 async def backup_command(ctx, action: str = None):
     if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
@@ -1180,6 +1181,16 @@ async def backup_command(ctx, action: str = None):
     
     else:
         await ctx.send("Ação inválida. Use `create` ou `restore`")
+
+@bot.command(name='setupboss')
+async def setup_boss(ctx):
+    if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
+        await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+        return
+        
+    embed = create_boss_embed()
+    view = BossControlView()
+    await ctx.send(embed=embed, view=view)
 
 @bot.command(name='bosshelp')
 async def boss_help(ctx):
