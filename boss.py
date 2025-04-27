@@ -9,6 +9,10 @@ from threading import Thread
 from collections import defaultdict
 import random
 import traceback
+import re
+import json
+from shutil import copyfile
+import time
 
 # Configurações do Flask para keep-alive
 app = Flask('')
@@ -210,6 +214,98 @@ def clear_timer(boss_name, sala=None):
     finally:
         conn.close()
 
+# Funções para backup do banco de dados
+def create_backup():
+    try:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = f"backup_{timestamp}.json"
+        
+        conn = connect_db()
+        if conn is None:
+            return None
+            
+        cursor = conn.cursor(dictionary=True)
+        
+        # Backup dos timers de boss
+        cursor.execute("SELECT * FROM boss_timers")
+        boss_timers_data = cursor.fetchall()
+        
+        # Backup das estatísticas de usuários
+        cursor.execute("SELECT * FROM user_stats")
+        user_stats_data = cursor.fetchall()
+        
+        backup_data = {
+            'boss_timers': boss_timers_data,
+            'user_stats': user_stats_data,
+            'timestamp': timestamp
+        }
+        
+        with open(backup_file, 'w') as f:
+            json.dump(backup_data, f, indent=4, default=str)
+            
+        print(f"Backup criado com sucesso: {backup_file}")
+        return backup_file
+        
+    except Exception as e:
+        print(f"Erro ao criar backup: {e}")
+        return None
+    finally:
+        if conn:
+            conn.close()
+
+def restore_backup(backup_file):
+    try:
+        with open(backup_file, 'r') as f:
+            backup_data = json.load(f)
+            
+        conn = connect_db()
+        if conn is None:
+            return False
+            
+        cursor = conn.cursor()
+        
+        # Limpar tabelas antes de restaurar
+        cursor.execute("DELETE FROM boss_timers")
+        cursor.execute("DELETE FROM user_stats")
+        
+        # Restaurar timers de boss
+        for timer in backup_data['boss_timers']:
+            cursor.execute("""
+            INSERT INTO boss_timers (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                timer['boss_name'],
+                timer['sala'],
+                timer['death_time'],
+                timer['respawn_time'],
+                timer['closed_time'],
+                timer['recorded_by'],
+                timer['opened_notified']
+            ))
+        
+        # Restaurar estatísticas de usuários
+        for stat in backup_data['user_stats']:
+            cursor.execute("""
+            INSERT INTO user_stats (user_id, username, count, last_recorded)
+            VALUES (%s, %s, %s, %s)
+            """, (
+                stat['user_id'],
+                stat['username'],
+                stat['count'],
+                stat['last_recorded']
+            ))
+        
+        conn.commit()
+        print(f"Backup restaurado com sucesso: {backup_file}")
+        return True
+        
+    except Exception as e:
+        print(f"Erro ao restaurar backup: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
 # Variáveis de configuração
 BOSSES = [
     "Super Red Dragon",
@@ -391,6 +487,48 @@ async def update_table(channel):
         except:
             pass
 
+def parse_time_input(time_str):
+    """Analisa o input de tempo em vários formatos (HH:MM, HHhMM) e retorna (hora, minuto)"""
+    # Remover espaços em branco
+    time_str = time_str.strip().lower()
+    
+    # Tentar formato HH:MM
+    if ':' in time_str:
+        parts = time_str.split(':')
+        if len(parts) == 2:
+            try:
+                hour = int(parts[0])
+                minute = int(parts[1])
+                return hour, minute
+            except ValueError:
+                return None
+    
+    # Tentar formato HHhMM
+    if 'h' in time_str:
+        parts = time_str.split('h')
+        if len(parts) == 2:
+            try:
+                hour = int(parts[0])
+                minute = int(parts[1])
+                return hour, minute
+            except ValueError:
+                return None
+    
+    # Tentar apenas HH
+    try:
+        hour = int(time_str)
+        return hour, 0
+    except ValueError:
+        return None
+
+def validate_time(hour, minute):
+    """Verifica se o horário é válido"""
+    if hour < 0 or hour > 23:
+        return False
+    if minute < 0 or minute > 59:
+        return False
+    return True
+
 @tasks.loop(seconds=30)
 async def live_table_updater():
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
@@ -447,14 +585,17 @@ async def check_boss_respawns():
     
     await update_table(channel)
 
-@tasks.loop(minutes=30)
-async def periodic_table_update():
-    periodic_table_update.change_interval(minutes=random.randint(30, 60))
-    
-    channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
-    if channel:
-        embed = create_boss_embed()
-        await channel.send("**Atualização periódica dos horários de boss:**", embed=embed)
+@tasks.loop(hours=24)
+async def daily_backup():
+    """Rotina de backup diário"""
+    try:
+        backup_file = create_backup()
+        if backup_file:
+            print(f"Backup diário realizado com sucesso: {backup_file}")
+        else:
+            print("Falha ao realizar backup diário")
+    except Exception as e:
+        print(f"Erro na rotina de backup: {e}")
 
 class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
     boss = discord.ui.TextInput(
@@ -471,8 +612,8 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
     )
     
     horario = discord.ui.TextInput(
-        label="Horário da morte (HH:MM)",
-        placeholder="Ex: 14:30",
+        label="Horário da morte (HH:MM ou HHhMM)",
+        placeholder="Ex: 14:30 ou 14h30",
         required=True,
         max_length=5
     )
@@ -510,9 +651,27 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
                 return
             
             try:
-                hora, minuto = map(int, self.horario.value.split(':'))
+                # Analisar o horário em diferentes formatos
+                time_parts = parse_time_input(self.horario.value)
+                if not time_parts:
+                    await interaction.response.send_message(
+                        "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
+                        ephemeral=True
+                    )
+                    return
+                
+                hour, minute = time_parts
+                
+                # Validar o horário
+                if not validate_time(hour, minute):
+                    await interaction.response.send_message(
+                        "Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.",
+                        ephemeral=True
+                    )
+                    return
+                
                 now = datetime.now(brazil_tz)
-                death_time = now.replace(hour=hora, minute=minuto, second=0, microsecond=0)
+                death_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
                 
                 if self.foi_ontem.value.lower() == 's':
                     death_time -= timedelta(days=1)
@@ -551,7 +710,7 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
                     
             except ValueError:
                 await interaction.response.send_message(
-                    "Formato de hora inválido. Use HH:MM (ex: 14:30)",
+                    "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
                     ephemeral=True
                 )
                 
@@ -686,6 +845,110 @@ class BossControlView(discord.ui.View):
                 await interaction.followup.send("Ocorreu um erro ao gerar o ranking.", ephemeral=True)
             except:
                 pass
+    
+    @discord.ui.button(label="Backup", style=discord.ButtonStyle.gray, custom_id="boss_control:backup", emoji="💾")
+    async def backup_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.response.defer(ephemeral=True)
+            
+            # Verificar se o usuário tem permissão de administrador
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.followup.send("❌ Apenas administradores podem usar esta função.", ephemeral=True)
+                return
+            
+            view = discord.ui.View(timeout=60)
+            
+            backup_button = discord.ui.Button(label="Criar Backup", style=discord.ButtonStyle.green)
+            restore_button = discord.ui.Button(label="Restaurar Backup", style=discord.ButtonStyle.red)
+            
+            async def backup_callback(interaction: discord.Interaction):
+                await interaction.response.defer()
+                backup_file = create_backup()
+                if backup_file:
+                    try:
+                        with open(backup_file, 'rb') as f:
+                            await interaction.followup.send(
+                                f"✅ Backup criado com sucesso!",
+                                file=discord.File(f, filename=backup_file),
+                                ephemeral=True
+                            )
+                    except Exception as e:
+                        await interaction.followup.send(
+                            f"✅ Backup criado, mas erro ao enviar arquivo: {e}",
+                            ephemeral=True
+                        )
+                else:
+                    await interaction.followup.send(
+                        "❌ Falha ao criar backup!",
+                        ephemeral=True
+                    )
+            
+            async def restore_callback(interaction: discord.Interaction):
+                await interaction.response.defer()
+                
+                # Verificar se há arquivos de backup
+                backup_files = [f for f in os.listdir() if f.startswith('backup_') and f.endswith('.json')]
+                if not backup_files:
+                    await interaction.followup.send("Nenhum arquivo de backup encontrado.", ephemeral=True)
+                    return
+                
+                # Criar menu de seleção de backup
+                select_view = discord.ui.View(timeout=120)
+                select = discord.ui.Select(
+                    placeholder="Selecione um backup para restaurar",
+                    options=[discord.SelectOption(label=f) for f in backup_files]
+                )
+                
+                async def restore_selected(interaction: discord.Interaction):
+                    await interaction.response.defer()
+                    backup_file = select.values[0]
+                    
+                    if restore_backup(backup_file):
+                        # Recarregar dados do banco
+                        load_db_data()
+                        
+                        await interaction.followup.send(
+                            f"✅ Backup **{backup_file}** restaurado com sucesso!",
+                            ephemeral=True
+                        )
+                        
+                        # Atualizar tabela
+                        await update_table(interaction.channel)
+                    else:
+                        await interaction.followup.send(
+                            f"❌ Falha ao restaurar backup **{backup_file}**!",
+                            ephemeral=True
+                        )
+                
+                select.callback = restore_selected
+                select_view.add_item(select)
+                
+                await interaction.followup.send(
+                    "Selecione o backup para restaurar:",
+                    view=select_view,
+                    ephemeral=True
+                )
+            
+            backup_button.callback = backup_callback
+            restore_button.callback = restore_callback
+            view.add_item(backup_button)
+            view.add_item(restore_button)
+            
+            await interaction.followup.send(
+                "Selecione uma opção de backup:",
+                view=view,
+                ephemeral=True
+            )
+        except Exception as e:
+            print(f"ERRO DETALHADO no botão de backup: {str(e)}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send(
+                    "Ocorreu um erro ao processar sua solicitação.",
+                    ephemeral=True
+                )
+            except:
+                pass
 
 @bot.event
 async def on_ready():
@@ -701,6 +964,7 @@ async def on_ready():
     check_boss_respawns.start()
     live_table_updater.start()
     periodic_table_update.start()
+    daily_backup.start()
     
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
     if channel:
@@ -728,9 +992,21 @@ async def boss_command(ctx, boss_name: str = None, sala: int = None, hora_morte:
     boss_name = full_boss_name
     
     try:
-        hora, minuto = map(int, hora_morte.split(':'))
+        # Analisar o horário em diferentes formatos
+        time_parts = parse_time_input(hora_morte)
+        if not time_parts:
+            await ctx.send("Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)")
+            return
+        
+        hour, minute = time_parts
+        
+        # Validar o horário
+        if not validate_time(hour, minute):
+            await ctx.send("Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.")
+            return
+        
         now = datetime.now(brazil_tz)
-        death_time = now.replace(hour=hora, minute=minuto, second=0, microsecond=0)
+        death_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         
         if death_time > now:
             death_time -= timedelta(days=1)
@@ -762,7 +1038,7 @@ async def boss_command(ctx, boss_name: str = None, sala: int = None, hora_morte:
         
         await update_table(ctx.channel)
     except ValueError:
-        await ctx.send("Formato de hora inválido. Use HH:MM (ex: 14:30)")
+        await ctx.send("Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)")
 
 @bot.command(name='bosses')
 async def bosses_command(ctx, mode: str = None):
@@ -835,6 +1111,76 @@ async def setup_boss(ctx):
     view = BossControlView()
     await ctx.send(embed=embed, view=view)
 
+@bot.command(name='backup')
+async def backup_command(ctx, action: str = None):
+    if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
+        await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+        return
+    
+    # Verificar permissões
+    if not ctx.author.guild_permissions.administrator:
+        await ctx.send("❌ Apenas administradores podem usar este comando.")
+        return
+    
+    if action is None:
+        await ctx.send("Uso: `!backup create` ou `!backup restore`")
+        return
+    
+    if action.lower() == 'create':
+        backup_file = create_backup()
+        if backup_file:
+            try:
+                with open(backup_file, 'rb') as f:
+                    await ctx.send(
+                        f"✅ Backup criado com sucesso!",
+                        file=discord.File(f, filename=backup_file)
+                    )
+            except Exception as e:
+                await ctx.send(f"✅ Backup criado, mas erro ao enviar arquivo: {e}")
+        else:
+            await ctx.send("❌ Falha ao criar backup!")
+    
+    elif action.lower() == 'restore':
+        # Verificar se há arquivos de backup
+        backup_files = [f for f in os.listdir() if f.startswith('backup_') and f.endswith('.json')]
+        if not backup_files:
+            await ctx.send("Nenhum arquivo de backup encontrado.")
+            return
+        
+        # Criar menu de seleção
+        view = discord.ui.View(timeout=120)
+        select = discord.ui.Select(
+            placeholder="Selecione um backup para restaurar",
+            options=[discord.SelectOption(label=f) for f in backup_files]
+        )
+        
+        async def restore_selected(interaction: discord.Interaction):
+            await interaction.response.defer()
+            backup_file = select.values[0]
+            
+            if restore_backup(backup_file):
+                # Recarregar dados do banco
+                load_db_data()
+                
+                await interaction.followup.send(
+                    f"✅ Backup **{backup_file}** restaurado com sucesso!"
+                )
+                
+                # Atualizar tabela
+                await update_table(interaction.channel)
+            else:
+                await interaction.followup.send(
+                    f"❌ Falha ao restaurar backup **{backup_file}**!"
+                )
+        
+        select.callback = restore_selected
+        view.add_item(select)
+        
+        await ctx.send("Selecione o backup para restaurar:", view=view)
+    
+    else:
+        await ctx.send("Ação inválida. Use `create` ou `restore`")
+
 @bot.command(name='bosshelp')
 async def boss_help(ctx):
     if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
@@ -849,12 +1195,12 @@ async def boss_help(ctx):
     
     embed.add_field(
         name="!boss <nome> <sala> HH:MM",
-        value="Registra a morte de um boss no horário especificado\nExemplo: `!boss Hydra 8 14:30`\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
+        value="Registra a morte de um boss no horário especificado\nExemplo: `!boss Hydra 8 14:30`\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno\nFormatos de hora aceitos: HH:MM ou HHhMM",
         inline=False
     )
     embed.add_field(
         name="Botões de Controle",
-        value="Use os botões abaixo da tabela para:\n- 📝 Anotar boss derrotado\n- ❌ Limpar timer de boss\n- 🏆 Ver ranking de anotações",
+        value="Use os botões abaixo da tabela para:\n- 📝 Anotar boss derrotado\n- ❌ Limpar timer de boss\n- 🏆 Ver ranking de anotações\n- 💾 Backup/Restore (apenas admins)",
         inline=False
     )
     embed.add_field(
@@ -870,6 +1216,11 @@ async def boss_help(ctx):
     embed.add_field(
         name="!ranking",
         value="Mostra o ranking de quem mais anotou bosses",
+        inline=False
+    )
+    embed.add_field(
+        name="!backup <create|restore>",
+        value="Cria ou restaura um backup dos dados (apenas admins)",
         inline=False
     )
     embed.add_field(
