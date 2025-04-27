@@ -716,8 +716,12 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
                     ephemeral=False
                 )
                 
+                # Enviar a tabela atualizada imediatamente após o registro
                 channel = interaction.channel
                 if channel:
+                    embed = create_boss_embed()
+                    view = BossControlView()
+                    await channel.send("**Tabela atualizada:**", embed=embed, view=view)
                     await update_table(channel)
                     
             except ValueError:
@@ -731,6 +735,85 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
             traceback.print_exc()
             await interaction.response.send_message(
                 "Ocorreu um erro ao processar sua anotação.",
+                ephemeral=True
+            )
+
+class LimparBossModal(discord.ui.Modal, title="Limpar Horário do Boss"):
+    boss = discord.ui.TextInput(
+        label="Nome do Boss",
+        placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
+        required=True
+    )
+    
+    sala = discord.ui.TextInput(
+        label="Número da Sala (1-8) - Deixe em branco para limpar todas",
+        placeholder="Digite um número de 1 a 8 ou deixe em branco",
+        required=False,
+        max_length=1
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            boss_name = get_boss_by_abbreviation(self.boss.value)
+            if boss_name is None:
+                await interaction.response.send_message(
+                    f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
+                    ephemeral=True
+                )
+                return
+            
+            sala = self.sala.value.strip()
+            
+            if not sala:  # Se sala estiver vazia, limpar todas as salas
+                for s in SALAS:
+                    boss_timers[boss_name][s] = {
+                        'death_time': None,
+                        'respawn_time': None,
+                        'closed_time': None,
+                        'recorded_by': None,
+                        'opened_notified': False
+                    }
+                clear_timer(boss_name)
+                await interaction.response.send_message(
+                    f"✅ Todos os timers do boss **{boss_name}** foram resetados.",
+                    ephemeral=True
+                )
+            else:
+                try:
+                    sala = int(sala)
+                    if sala not in SALAS:
+                        await interaction.response.send_message(
+                            f"Sala inválida. Salas disponíveis: {', '.join(map(str, SALAS))}",
+                            ephemeral=True
+                        )
+                        return
+                    
+                    boss_timers[boss_name][sala] = {
+                        'death_time': None,
+                        'respawn_time': None,
+                        'closed_time': None,
+                        'recorded_by': None,
+                        'opened_notified': False
+                    }
+                    clear_timer(boss_name, sala)
+                    await interaction.response.send_message(
+                        f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
+                        ephemeral=True
+                    )
+                except ValueError:
+                    await interaction.response.send_message(
+                        "Sala inválida. Digite um número entre 1 e 8 ou deixe em branco para limpar todas.",
+                        ephemeral=True
+                    )
+                    return
+            
+            await update_table(interaction.channel)
+            
+        except Exception as e:
+            print(f"Erro no modal de limpar boss: {str(e)}")
+            traceback.print_exc()
+            await interaction.response.send_message(
+                "Ocorreu um erro ao processar sua solicitação.",
                 ephemeral=True
             )
 
@@ -767,80 +850,10 @@ class BossControlView(discord.ui.View):
     async def clear_boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
             if not interaction.response.is_done():
-                await interaction.response.defer(ephemeral=True)
+                modal = LimparBossModal()
+                await interaction.response.send_modal(modal)
             else:
-                await interaction.followup.send("Processando...", ephemeral=True)
-            
-            view = discord.ui.View(timeout=180)
-            
-            select_boss = discord.ui.Select(
-                placeholder="Selecione um boss",
-                options=[discord.SelectOption(label=boss) for boss in BOSSES]
-            )
-            
-            select_sala = discord.ui.Select(
-                placeholder="Selecione uma sala",
-                options=[discord.SelectOption(label=f"Sala {sala}", value=str(sala)) for sala in SALAS]
-            )
-            
-            async def boss_selected(interaction: discord.Interaction):
-                if not interaction.response.is_done():
-                    await interaction.response.defer()
-                boss_name = select_boss.values[0]
-                
-                salas_com_timer = [
-                    sala for sala in SALAS 
-                    if boss_timers[boss_name][sala]['death_time'] is not None
-                ]
-                
-                if not salas_com_timer:
-                    await interaction.followup.send(f"Nenhum timer ativo para {boss_name}", ephemeral=True)
-                    return
-                    
-                select_sala.options = [
-                    discord.SelectOption(label=f"Sala {sala}", value=str(sala))
-                    for sala in salas_com_timer
-                ]
-                
-                await interaction.followup.send(
-                    content=f"Selecione a sala de {boss_name} para limpar:",
-                    view=view,
-                    ephemeral=True
-                )
-            
-            async def sala_selected(interaction: discord.Interaction):
-                if not interaction.response.is_done():
-                    await interaction.response.defer()
-                boss_name = select_boss.values[0]
-                sala = int(select_sala.values[0])
-                
-                boss_timers[boss_name][sala] = {
-                    'death_time': None,
-                    'respawn_time': None,
-                    'closed_time': None,
-                    'recorded_by': None,
-                    'opened_notified': False
-                }
-                
-                clear_timer(boss_name, sala)
-                
-                await interaction.followup.send(
-                    f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
-                    ephemeral=True
-                )
-                
-                await update_table(interaction.channel)
-            
-            select_boss.callback = boss_selected
-            select_sala.callback = sala_selected
-            view.add_item(select_boss)
-            view.add_item(select_sala)
-            
-            await interaction.followup.send(
-                "Selecione o boss para limpar:",
-                view=view,
-                ephemeral=True
-            )
+                await interaction.followup.send("Por favor, tente novamente.", ephemeral=True)
         except Exception as e:
             print(f"ERRO DETALHADO no botão de limpar: {str(e)}")
             traceback.print_exc()
@@ -1063,6 +1076,10 @@ async def boss_command(ctx, boss_name: str = None, sala: int = None, hora_morte:
             f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT"
         )
         
+        # Enviar a tabela atualizada imediatamente após o registro
+        embed = create_boss_embed()
+        view = BossControlView()
+        await ctx.send("**Tabela atualizada:**", embed=embed, view=view)
         await update_table(ctx.channel)
     except ValueError:
         await ctx.send("Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)")
