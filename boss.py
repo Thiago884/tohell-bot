@@ -591,7 +591,8 @@ async def periodic_table_update():
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
     if channel:
         embed = create_boss_embed()
-        await channel.send("**Atualização periódica dos horários de boss:**", embed=embed)
+        view = BossControlView()
+        await channel.send("**Atualização periódica dos horários de boss:**", embed=embed, view=view)
     
     # Define um intervalo aleatório para a próxima atualização (entre 30 e 60 minutos)
     periodic_table_update.change_interval(minutes=random.randint(30, 60))
@@ -974,7 +975,7 @@ async def on_ready():
     
     check_boss_respawns.start()
     live_table_updater.start()
-    periodic_table_update.start()  # Agora esta tarefa está definida
+    periodic_table_update.start()
     daily_backup.start()
     
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
