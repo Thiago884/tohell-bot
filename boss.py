@@ -617,14 +617,14 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
     )
     
     sala = discord.ui.TextInput(
-        label="Número da Sala (1-8)",
+        label="Sala (1-8)",
         placeholder="Digite um número de 1 a 8",
         required=True,
         max_length=1
     )
     
     horario = discord.ui.TextInput(
-        label="Horário da morte (HH:MM ou HHhMM)",
+        label="Horário da morte",
         placeholder="Ex: 14:30 ou 14h30",
         required=True,
         max_length=5
@@ -738,7 +738,7 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
                 ephemeral=True
             )
 
-class LimparBossModal(discord.ui.Modal, title="Limpar Horário do Boss"):
+class LimparBossModal(discord.ui.Modal, title="Limpar Boss"):
     boss = discord.ui.TextInput(
         label="Nome do Boss",
         placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
@@ -746,8 +746,8 @@ class LimparBossModal(discord.ui.Modal, title="Limpar Horário do Boss"):
     )
     
     sala = discord.ui.TextInput(
-        label="Número da Sala (1-8) - Deixe em branco para limpar todas",
-        placeholder="Digite um número de 1 a 8 ou deixe em branco",
+        label="Sala (1-8) - Opcional",
+        placeholder="Deixe em branco para limpar todas",
         required=False,
         max_length=1
     )
