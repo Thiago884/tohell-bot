@@ -367,7 +367,6 @@ async def update_table(channel):
                 await table_message.edit(embed=embed, view=view)
                 return
             except discord.NotFound:
-                # Se a mensagem não for encontrada, criar uma nova
                 table_message = await channel.send(embed=embed, view=view)
                 return
             except Exception as e:
@@ -375,7 +374,6 @@ async def update_table(channel):
                 table_message = await channel.send(embed=embed, view=view)
                 return
         
-        # Procurar a mensagem existente no histórico
         async for message in channel.history(limit=50):
             if message.author == bot.user and message.embeds and message.embeds[0].title.startswith("BOSS TIMER"):
                 try:
@@ -385,7 +383,6 @@ async def update_table(channel):
                 except:
                     continue
         
-        # Se não encontrar, enviar uma nova mensagem
         table_message = await channel.send(embed=embed, view=view)
     except Exception as e:
         print(f"Erro ao atualizar tabela: {e}")
@@ -452,7 +449,6 @@ async def check_boss_respawns():
 
 @tasks.loop(minutes=30)
 async def periodic_table_update():
-    # Aleatorizar o intervalo entre 30 e 60 minutos
     periodic_table_update.change_interval(minutes=random.randint(30, 60))
     
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
@@ -490,7 +486,6 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
-            # Processar nome do boss
             boss_name = get_boss_by_abbreviation(self.boss.value)
             if boss_name is None:
                 await interaction.response.send_message(
@@ -499,7 +494,6 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
                 )
                 return
             
-            # Processar sala
             try:
                 sala = int(self.sala.value)
                 if sala not in SALAS:
@@ -515,13 +509,11 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
                 )
                 return
             
-            # Processar horário
             try:
                 hora, minuto = map(int, self.horario.value.split(':'))
                 now = datetime.now(brazil_tz)
                 death_time = now.replace(hour=hora, minute=minuto, second=0, microsecond=0)
                 
-                # Verificar se foi ontem
                 if self.foi_ontem.value.lower() == 's':
                     death_time -= timedelta(days=1)
                 elif death_time > now:
@@ -530,7 +522,6 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
                 respawn_time = death_time + timedelta(hours=8)
                 recorded_by = interaction.user.name
                 
-                # Atualizar os timers
                 boss_timers[boss_name][sala] = {
                     'death_time': death_time,
                     'respawn_time': respawn_time,
@@ -539,12 +530,10 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
                     'opened_notified': False
                 }
                 
-                # Atualizar estatísticas do usuário
                 user_id = str(interaction.user.id)
                 user_stats[user_id]['count'] += 1
                 user_stats[user_id]['last_recorded'] = now
                 
-                # Salvar no banco de dados
                 save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
                 save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
                 
@@ -556,7 +545,6 @@ class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
                     ephemeral=False
                 )
                 
-                # Atualizar a tabela
                 channel = interaction.channel
                 if channel:
                     await update_table(channel)
@@ -582,29 +570,28 @@ class BossControlView(discord.ui.View):
     @discord.ui.button(label="Anotar Horário", style=discord.ButtonStyle.green, custom_id="boss_control:anotar", emoji="📝")
     async def boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            # Responder à interação imediatamente para evitar timeout
-            await interaction.response.defer(ephemeral=True)
-            
-            # Enviar o modal para o usuário
             modal = AnotarBossModal()
-            await interaction.followup.send("Preencha os dados do boss:", ephemeral=True)
-            await interaction.followup.send_modal(modal)
-            
+            await interaction.response.send_modal(modal)
         except Exception as e:
             print(f"ERRO DETALHADO no botão de anotar: {str(e)}")
             traceback.print_exc()
             try:
-                await interaction.followup.send(
-                    "Ocorreu um erro ao processar sua solicitação.",
-                    ephemeral=True
-                )
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao abrir o formulário.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao abrir o formulário.",
+                        ephemeral=True
+                    )
             except Exception as e:
                 print(f"Erro ao enviar mensagem de erro: {e}")
     
     @discord.ui.button(label="Limpar Boss", style=discord.ButtonStyle.red, custom_id="boss_control:limpar", emoji="❌")
     async def clear_boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            # Responder à interação imediatamente para evitar timeout
             await interaction.response.defer(ephemeral=True)
             
             view = discord.ui.View(timeout=180)
@@ -620,6 +607,7 @@ class BossControlView(discord.ui.View):
             )
             
             async def boss_selected(interaction: discord.Interaction):
+                await interaction.response.defer()
                 boss_name = select_boss.values[0]
                 
                 salas_com_timer = [
@@ -628,7 +616,7 @@ class BossControlView(discord.ui.View):
                 ]
                 
                 if not salas_com_timer:
-                    await interaction.response.send_message(f"Nenhum timer ativo para {boss_name}", ephemeral=True)
+                    await interaction.followup.send(f"Nenhum timer ativo para {boss_name}", ephemeral=True)
                     return
                     
                 select_sala.options = [
@@ -636,12 +624,14 @@ class BossControlView(discord.ui.View):
                     for sala in salas_com_timer
                 ]
                 
-                await interaction.response.edit_message(
+                await interaction.followup.send(
                     content=f"Selecione a sala de {boss_name} para limpar:",
-                    view=view
+                    view=view,
+                    ephemeral=True
                 )
             
             async def sala_selected(interaction: discord.Interaction):
+                await interaction.response.defer()
                 boss_name = select_boss.values[0]
                 sala = int(select_sala.values[0])
                 
@@ -655,7 +645,7 @@ class BossControlView(discord.ui.View):
                 
                 clear_timer(boss_name, sala)
                 
-                await interaction.response.send_message(
+                await interaction.followup.send(
                     f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
                     ephemeral=True
                 )
@@ -686,9 +676,7 @@ class BossControlView(discord.ui.View):
     @discord.ui.button(label="Ranking", style=discord.ButtonStyle.blurple, custom_id="boss_control:ranking", emoji="🏆")
     async def ranking_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            # Responder à interação imediatamente para evitar timeout
-            await interaction.response.defer(ephemeral=False)
-            
+            await interaction.response.defer()
             embed = await create_ranking_embed()
             await interaction.followup.send(embed=embed)
         except Exception as e:
@@ -705,10 +693,8 @@ async def on_ready():
     print(f'Canal de notificação configurado para ID: {NOTIFICATION_CHANNEL_ID}')
     await bot.change_presence(activity=discord.Game(name="!bosshelp para ajuda"))
     
-    # Registrar a view persistentemente
     bot.add_view(BossControlView())
     
-    # Inicializar banco de dados
     init_db()
     load_db_data()
     
