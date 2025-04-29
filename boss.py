@@ -97,6 +97,15 @@ def init_db():
         )
         """)
         
+        # Tabela de notificações personalizadas
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_notifications (
+            user_id VARCHAR(20) NOT NULL,
+            boss_name VARCHAR(50) NOT NULL,
+            PRIMARY KEY (user_id, boss_name)
+        )
+        """)
+        
         conn.commit()
         print("Banco de dados inicializado com sucesso!")
     except mysql.connector.Error as err:
@@ -139,6 +148,18 @@ def load_db_data():
                 'count': stat['count'],
                 'last_recorded': stat['last_recorded'].replace(tzinfo=brazil_tz) if stat['last_recorded'] else None
             }
+        
+        # Carregar notificações personalizadas
+        cursor.execute("SELECT * FROM user_notifications")
+        notifications = cursor.fetchall()
+        
+        for notification in notifications:
+            user_id = notification['user_id']
+            boss_name = notification['boss_name']
+            
+            if user_id not in user_notifications:
+                user_notifications[user_id] = []
+            user_notifications[user_id].append(boss_name)
         
         print("Dados carregados do banco de dados com sucesso!")
     except mysql.connector.Error as err:
@@ -214,6 +235,71 @@ def clear_timer(boss_name, sala=None):
     finally:
         conn.close()
 
+def add_user_notification(user_id, boss_name):
+    conn = connect_db()
+    if conn is None:
+        return False
+    
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+        INSERT INTO user_notifications (user_id, boss_name)
+        VALUES (%s, %s)
+        ON DUPLICATE KEY UPDATE
+            user_id = VALUES(user_id),
+            boss_name = VALUES(boss_name)
+        """, (user_id, boss_name))
+        
+        conn.commit()
+        return True
+    except mysql.connector.Error as err:
+        print(f"Erro ao adicionar notificação: {err}")
+        return False
+    finally:
+        conn.close()
+
+def remove_user_notification(user_id, boss_name):
+    conn = connect_db()
+    if conn is None:
+        return False
+    
+    try:
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+        DELETE FROM user_notifications
+        WHERE user_id = %s AND boss_name = %s
+        """, (user_id, boss_name))
+        
+        conn.commit()
+        return cursor.rowcount > 0
+    except mysql.connector.Error as err:
+        print(f"Erro ao remover notificação: {err}")
+        return False
+    finally:
+        conn.close()
+
+def get_user_notifications(user_id):
+    conn = connect_db()
+    if conn is None:
+        return []
+    
+    try:
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+        SELECT boss_name FROM user_notifications
+        WHERE user_id = %s
+        """, (user_id,))
+        
+        return [row['boss_name'] for row in cursor.fetchall()]
+    except mysql.connector.Error as err:
+        print(f"Erro ao obter notificações: {err}")
+        return []
+    finally:
+        conn.close()
+
 # Funções para backup do banco de dados
 def create_backup():
     try:
@@ -234,9 +320,14 @@ def create_backup():
         cursor.execute("SELECT * FROM user_stats")
         user_stats_data = cursor.fetchall()
         
+        # Backup das notificações personalizadas
+        cursor.execute("SELECT * FROM user_notifications")
+        user_notifications_data = cursor.fetchall()
+        
         backup_data = {
             'boss_timers': boss_timers_data,
             'user_stats': user_stats_data,
+            'user_notifications': user_notifications_data,
             'timestamp': timestamp
         }
         
@@ -267,6 +358,7 @@ def restore_backup(backup_file):
         # Limpar tabelas antes de restaurar
         cursor.execute("DELETE FROM boss_timers")
         cursor.execute("DELETE FROM user_stats")
+        cursor.execute("DELETE FROM user_notifications")
         
         # Restaurar timers de boss
         for timer in backup_data['boss_timers']:
@@ -294,6 +386,17 @@ def restore_backup(backup_file):
                 stat['count'],
                 stat['last_recorded']
             ))
+        
+        # Restaurar notificações personalizadas (se existirem no backup)
+        if 'user_notifications' in backup_data:
+            for notification in backup_data['user_notifications']:
+                cursor.execute("""
+                INSERT INTO user_notifications (user_id, boss_name)
+                VALUES (%s, %s)
+                """, (
+                    notification['user_id'],
+                    notification['boss_name']
+                ))
         
         conn.commit()
         print(f"Backup restaurado com sucesso: {backup_file}")
@@ -345,6 +448,7 @@ boss_timers = {
 }
 
 user_stats = defaultdict(lambda: {'count': 0, 'last_recorded': None})
+user_notifications = defaultdict(list)  # user_id: [boss_name1, boss_name2]
 
 # DEFINA AQUI O ID DO CANAL DESEJADO
 NOTIFICATION_CHANNEL_ID = 1364594212280078457  # ← Alterar este valor
@@ -442,14 +546,85 @@ async def create_ranking_embed():
         except:
             username = f"Usuário {user_id}"
         
+        # Adiciona medalhas para os top 3
+        medal = ""
+        if idx == 0:
+            medal = "🥇 "
+        elif idx == 1:
+            medal = "🥈 "
+        elif idx == 2:
+            medal = "🥉 "
+        
         last_recorded = stats['last_recorded'].strftime("%d/%m %H:%M") if stats['last_recorded'] else "Nunca"
         ranking_text.append(
-            f"**{idx+1}.** {username} - {stats['count']} anotações\n"
+            f"{medal}**{idx+1}.** {username} - {stats['count']} anotações\n"
             f"Última: {last_recorded}"
         )
     
     embed.description = "\n\n".join(ranking_text)
     return embed
+
+def get_next_bosses():
+    now = datetime.now(brazil_tz)
+    upcoming_bosses = []
+    
+    for boss in BOSSES:
+        for sala in SALAS:
+            timers = boss_timers[boss][sala]
+            if timers['respawn_time'] and now < timers['respawn_time']:
+                upcoming_bosses.append({
+                    'boss': boss,
+                    'sala': sala,
+                    'respawn_time': timers['respawn_time'],
+                    'time_left': format_time_remaining(timers['respawn_time']),
+                    'recorded_by': timers['recorded_by']
+                })
+    
+    # Ordenar por tempo de respawn mais próximo
+    upcoming_bosses.sort(key=lambda x: x['respawn_time'])
+    
+    return upcoming_bosses[:5]  # Retorna apenas os 5 próximos
+
+async def create_next_bosses_embed():
+    next_bosses = get_next_bosses()
+    
+    embed = discord.Embed(
+        title="⏳ PRÓXIMOS BOSSES",
+        color=discord.Color.blue()
+    )
+    
+    if not next_bosses:
+        embed.description = "Nenhum boss programado para abrir em breve."
+        return embed
+    
+    boss_info = []
+    for idx, boss in enumerate(next_bosses, 1):
+        recorded_by = f" (Anotado por: {boss['recorded_by']})" if boss['recorded_by'] else ""
+        boss_info.append(
+            f"**{idx}.** {boss['boss']} (Sala {boss['sala']}) - "
+            f"**{boss['time_left']}** ({boss['respawn_time'].strftime('%d/%m %H:%M')} BRT){recorded_by}"
+        )
+    
+    embed.description = "\n".join(boss_info)
+    return embed
+
+async def send_notification_dm(user_id, boss_name, sala, respawn_time, closed_time):
+    try:
+        user = await bot.fetch_user(int(user_id))
+        if user:
+            await user.send(
+                f"🔔 **Notificação de Boss** 🔔\n"
+                f"O boss **{boss_name} (Sala {sala})** que você marcou está disponível AGORA!\n"
+                f"✅ Aberto até: {closed_time.strftime('%d/%m %H:%M')} BRT\n"
+                f"Corra para pegar seu loot! 🏆"
+            )
+            return True
+    except discord.Forbidden:
+        print(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
+    except Exception as e:
+        print(f"Erro ao enviar DM para {user_id}: {e}")
+    
+    return False
 
 async def update_table(channel):
     global table_message
@@ -544,6 +719,7 @@ async def check_boss_respawns():
 
     now = datetime.now(brazil_tz)
     notifications = []
+    dm_notifications = []
 
     for boss in BOSSES:
         for sala in SALAS:
@@ -558,6 +734,17 @@ async def check_boss_respawns():
                         notifications.append(f"🟢 **{boss} (Sala {sala})** está disponível AGORA! (aberto até {closed_time:%d/%m %H:%M} BRT){recorded_by}")
                         boss_timers[boss][sala]['opened_notified'] = True
                         save_timer(boss, sala, timers['death_time'], respawn_time, closed_time, timers['recorded_by'], True)
+                        
+                        # Verificar se há usuários para notificar via DM
+                        for user_id in user_notifications:
+                            if boss in user_notifications[user_id]:
+                                dm_notifications.append({
+                                    'user_id': user_id,
+                                    'boss_name': boss,
+                                    'sala': sala,
+                                    'respawn_time': respawn_time,
+                                    'closed_time': closed_time
+                                })
                 
                 elif now >= (respawn_time - timedelta(minutes=5)) and now < respawn_time and closed_time is not None:
                     time_left = format_time_remaining(respawn_time)
@@ -582,6 +769,17 @@ async def check_boss_respawns():
     if notifications:
         message = "**Notificações de Boss:**\n" + "\n".join(notifications)
         await channel.send(message)
+    
+    # Enviar notificações por DM
+    if dm_notifications:
+        for notification in dm_notifications:
+            await send_notification_dm(
+                notification['user_id'],
+                notification['boss_name'],
+                notification['sala'],
+                notification['respawn_time'],
+                notification['closed_time']
+            )
     
     await update_table(channel)
 
@@ -817,6 +1015,84 @@ class LimparBossModal(discord.ui.Modal, title="Limpar Boss"):
                 ephemeral=True
             )
 
+class NotificationModal(discord.ui.Modal, title="Gerenciar Notificações"):
+    boss = discord.ui.TextInput(
+        label="Nome do Boss",
+        placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
+        required=True
+    )
+    
+    action = discord.ui.TextInput(
+        label="Ação (adicionar/remover)",
+        placeholder="Digite 'add' para adicionar ou 'rem' para remover",
+        required=True,
+        max_length=3
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            boss_name = get_boss_by_abbreviation(self.boss.value)
+            if boss_name is None:
+                await interaction.response.send_message(
+                    f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
+                    ephemeral=True
+                )
+                return
+            
+            user_id = str(interaction.user.id)
+            action = self.action.value.lower()
+            
+            if action in ['add', 'adicionar', 'a']:
+                if boss_name not in user_notifications[user_id]:
+                    if add_user_notification(user_id, boss_name):
+                        user_notifications[user_id].append(boss_name)
+                        await interaction.response.send_message(
+                            f"✅ Você será notificado quando **{boss_name}** estiver disponível!",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.response.send_message(
+                            "❌ Ocorreu um erro ao salvar sua preferência. Tente novamente.",
+                            ephemeral=True
+                        )
+                else:
+                    await interaction.response.send_message(
+                        f"ℹ Você já está sendo notificado para **{boss_name}**.",
+                        ephemeral=True
+                    )
+            
+            elif action in ['rem', 'remover', 'r']:
+                if boss_name in user_notifications[user_id]:
+                    if remove_user_notification(user_id, boss_name):
+                        user_notifications[user_id].remove(boss_name)
+                        await interaction.response.send_message(
+                            f"✅ Você NÃO será mais notificado para **{boss_name}**.",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.response.send_message(
+                            "❌ Ocorreu um erro ao remover sua notificação. Tente novamente.",
+                            ephemeral=True
+                        )
+                else:
+                    await interaction.response.send_message(
+                        f"ℹ Você não tinha notificação ativa para **{boss_name}**.",
+                        ephemeral=True
+                    )
+            else:
+                await interaction.response.send_message(
+                    "Ação inválida. Use 'add' para adicionar ou 'rem' para remover.",
+                    ephemeral=True
+                )
+        
+        except Exception as e:
+            print(f"Erro no modal de notificações: {str(e)}")
+            traceback.print_exc()
+            await interaction.response.send_message(
+                "Ocorreu um erro ao processar sua solicitação.",
+                ephemeral=True
+            )
+
 class BossControlView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -877,6 +1153,40 @@ class BossControlView(discord.ui.View):
             traceback.print_exc()
             try:
                 await interaction.followup.send("Ocorreu um erro ao gerar o ranking.", ephemeral=True)
+            except:
+                pass
+    
+    @discord.ui.button(label="Próximos", style=discord.ButtonStyle.blurple, custom_id="boss_control:proximos", emoji="⏳")
+    async def next_bosses_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            embed = await create_next_bosses_embed()
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            print(f"ERRO DETALHADO no botão de próximos bosses: {str(e)}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send("Ocorreu um erro ao buscar os próximos bosses.", ephemeral=True)
+            except:
+                pass
+    
+    @discord.ui.button(label="Notificações", style=discord.ButtonStyle.gray, custom_id="boss_control:notificacoes", emoji="🔔")
+    async def notifications_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            if not interaction.response.is_done():
+                modal = NotificationModal()
+                await interaction.response.send_modal(modal)
+            else:
+                await interaction.followup.send("Por favor, tente novamente.", ephemeral=True)
+        except Exception as e:
+            print(f"ERRO DETALHADO no botão de notificações: {str(e)}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send(
+                    "Ocorreu um erro ao processar sua solicitação.",
+                    ephemeral=True
+                )
             except:
                 pass
     
@@ -1095,6 +1405,15 @@ async def bosses_command(ctx, mode: str = None):
     view = BossControlView()
     await ctx.send(embed=embed, view=view)
 
+@bot.command(name='nextboss')
+async def next_boss_command(ctx):
+    if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
+        await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+        return
+    
+    embed = await create_next_bosses_embed()
+    await ctx.send(embed=embed)
+
 @bot.command(name='clearboss')
 async def clear_boss(ctx, boss_name: str, sala: int = None):
     if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
@@ -1144,6 +1463,69 @@ async def ranking_command(ctx):
     
     embed = await create_ranking_embed()
     await ctx.send(embed=embed)
+
+@bot.command(name='notify')
+async def notify_command(ctx, boss_name: str = None, action: str = None):
+    if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
+        await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+        return
+    
+    if boss_name is None or action is None:
+        await ctx.send(
+            "Uso: `!notify <boss> <add/rem>`\n"
+            "Exemplo: `!notify Hydra add` - Para receber DM quando Hydra abrir\n"
+            "`!notify Hydra rem` - Para parar de receber notificações\n\n"
+            "Bosses disponíveis: " + ", ".join(BOSSES)
+        )
+        return
+    
+    full_boss_name = get_boss_by_abbreviation(boss_name)
+    if full_boss_name is None:
+        await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
+        return
+    
+    boss_name = full_boss_name
+    user_id = str(ctx.author.id)
+    
+    if action.lower() in ['add', 'adicionar', 'a']:
+        if boss_name not in user_notifications[user_id]:
+            if add_user_notification(user_id, boss_name):
+                user_notifications[user_id].append(boss_name)
+                await ctx.send(f"✅ Você será notificado quando **{boss_name}** estiver disponível!")
+            else:
+                await ctx.send("❌ Ocorreu um erro ao salvar sua preferência. Tente novamente.")
+        else:
+            await ctx.send(f"ℹ Você já está sendo notificado para **{boss_name}**.")
+    
+    elif action.lower() in ['rem', 'remover', 'r']:
+        if boss_name in user_notifications[user_id]:
+            if remove_user_notification(user_id, boss_name):
+                user_notifications[user_id].remove(boss_name)
+                await ctx.send(f"✅ Você NÃO será mais notificado para **{boss_name}**.")
+            else:
+                await ctx.send("❌ Ocorreu um erro ao remover sua notificação. Tente novamente.")
+        else:
+            await ctx.send(f"ℹ Você não tinha notificação ativa para **{boss_name}**.")
+    else:
+        await ctx.send("Ação inválida. Use 'add' para adicionar ou 'rem' para remover.")
+
+@bot.command(name='mynotifications')
+async def my_notifications_command(ctx):
+    if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
+        await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+        return
+    
+    user_id = str(ctx.author.id)
+    notifications = user_notifications.get(user_id, [])
+    
+    if not notifications:
+        await ctx.send("Você não tem notificações ativas para nenhum boss.")
+    else:
+        await ctx.send(
+            f"🔔 **Suas notificações ativas:**\n"
+            + "\n".join(f"- {boss}" for boss in notifications)
+            + "\n\nUse `!notify <boss> rem` para remover notificações."
+        )
 
 @bot.command(name='backup')
 async def backup_command(ctx, action: str = None):
@@ -1244,12 +1626,17 @@ async def boss_help(ctx):
     )
     embed.add_field(
         name="Botões de Controle",
-        value="Use os botões abaixo da tabela para:\n- 📝 Anotar boss derrotado\n- ❌ Limpar timer de boss\n- 🏆 Ver ranking de anotações\n- 💾 Backup/Restore (apenas admins)",
+        value="Use os botões abaixo da tabela para:\n- 📝 Anotar boss derrotado\n- ❌ Limpar timer de boss\n- 🏆 Ver ranking de anotações\n- ⏳ Ver próximos bosses\n- 🔔 Gerenciar notificações por DM\n- 💾 Backup/Restore (apenas admins)",
         inline=False
     )
     embed.add_field(
         name="!bosses [compact]",
         value="Mostra a tabela com os horários (adicione 'compact' para ver apenas bosses ativos)",
+        inline=False
+    )
+    embed.add_field(
+        name="!nextboss",
+        value="Mostra os próximos bosses que vão abrir em ordem cronológica",
         inline=False
     )
     embed.add_field(
@@ -1259,7 +1646,17 @@ async def boss_help(ctx):
     )
     embed.add_field(
         name="!ranking",
-        value="Mostra o ranking de quem mais anotou bosses",
+        value="Mostra o ranking de quem mais anotou bosses (com medalhas para o Top 3)",
+        inline=False
+    )
+    embed.add_field(
+        name="!notify <boss> <add/rem>",
+        value="Ativa/desativa notificação por DM quando o boss abrir\nEx: `!notify Hydra add`",
+        inline=False
+    )
+    embed.add_field(
+        name="!mynotifications",
+        value="Mostra seus bosses marcados para notificação",
         inline=False
     )
     embed.add_field(
