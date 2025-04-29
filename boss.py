@@ -13,7 +13,28 @@ import re
 import json
 from shutil import copyfile
 import time
+import asyncio
+from discord.errors import HTTPException
 
+# Modifique a parte final do código onde o bot é iniciado:
+async def run_bot():
+    while True:
+        try:
+            print("Iniciando o bot...")
+            await bot.start(token)
+        except HTTPException as e:
+            if e.status == 429:
+                retry_after = e.response.headers.get('Retry-After', 30)
+                print(f"Rate limit atingido. Tentando novamente em {retry_after} segundos...")
+                await asyncio.sleep(float(retry_after))
+            else:
+                print(f"Erro HTTP {e.status}: {e.text}")
+                await asyncio.sleep(30)
+        except Exception as e:
+            print(f"Erro inesperado: {e}")
+            await asyncio.sleep(30)
+        else:
+            break
 # Configurações do Flask para keep-alive
 app = Flask('')
 
@@ -1683,11 +1704,12 @@ async def boss_help(ctx):
     await ctx.send(embed=embed)
 
 # Iniciar o bot
-keep_alive()
-token = os.getenv('DISCORD_TOKEN')
-if not token:
-    print("ERRO: Token não encontrado! Verifique as Secrets do Replit.")
-    print("Certifique-se que a chave é 'DISCORD_TOKEN'")
-else:
-    print("Token encontrado, iniciando bot...")
-    bot.run(token)
+if __name__ == "__main__":
+    keep_alive()
+    token = os.getenv('DISCORD_TOKEN')
+    if not token:
+        print("ERRO: Token não encontrado! Verifique as Secrets do Replit.")
+        print("Certifique-se que a chave é 'DISCORD_TOKEN'")
+    else:
+        print("Token encontrado, iniciando bot...")
+        asyncio.run(run_bot())
