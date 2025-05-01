@@ -355,31 +355,61 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
         try:
             cursor = conn.cursor(dictionary=True)
             
+            # Busca os bosses que tiveram morte registrada, abriram, fecharam e não foram anotados durante o período aberto
             cursor.execute("""
-            SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by 
-            FROM boss_timers 
-            WHERE opened_notified = FALSE AND closed_time IS NOT NULL AND closed_time > (NOW() - INTERVAL 24 HOUR)
-            ORDER BY closed_time DESC 
+            SELECT 
+                bt.boss_name, 
+                bt.sala, 
+                bt.death_time, 
+                bt.respawn_time, 
+                bt.closed_time,
+                bt.recorded_by,
+                COUNT(bt2.id) as annotations_during_open
+            FROM 
+                boss_timers bt
+            LEFT JOIN 
+                boss_timers bt2 ON 
+                bt2.boss_name = bt.boss_name AND 
+                bt2.sala = bt.sala AND 
+                bt2.death_time > bt.respawn_time AND 
+                bt2.death_time < bt.closed_time
+            WHERE 
+                bt.closed_time IS NOT NULL AND 
+                bt.closed_time > (NOW() - INTERVAL 7 DAY) AND
+                bt.opened_notified = FALSE
+            GROUP BY 
+                bt.id
+            HAVING 
+                annotations_during_open = 0
+            ORDER BY 
+                bt.closed_time DESC 
             LIMIT 5
             """)
             
             unrecorded = cursor.fetchall()
             
             if not unrecorded:
-                return discord.Embed(title="Bosses Fechados sem Anotações", description="Nenhum boss foi fechado sem anotações nas últimas 24 horas.", color=discord.Color.blue())
+                return discord.Embed(
+                    title="Bosses Fechados sem Anotações",
+                    description="Nenhum boss foi fechado sem anotações durante seu período aberto nos últimos 7 dias.",
+                    color=discord.Color.blue()
+                )
             
             embed = discord.Embed(
                 title="❌ Últimos Bosses Fechados sem Anotações",
+                description="Estes bosses tiveram a morte registrada, ficaram abertos por 4 horas e ninguém registrou novas mortes durante este período:",
                 color=discord.Color.red()
             )
             
             for idx, record in enumerate(unrecorded, 1):
                 embed.add_field(
                     name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
-                    value=f"⏱ Morte: {record['death_time'].strftime('%d/%m %H:%M')}\n"
-                         f"🔄 Abriu: {record['respawn_time'].strftime('%d/%m %H:%M')}\n"
-                         f"🔴 Fechou: {record['closed_time'].strftime('%d/%m %H:%M')}\n"
-                         f"👤 Por: {record['recorded_by'] or 'Ninguém'}",
+                    value=(
+                        f"⏱ Morte registrada: {record['death_time'].strftime('%d/%m %H:%M')}\n"
+                        f"🔄 Período aberto: {record['respawn_time'].strftime('%d/%m %H:%M')} "
+                        f"até {record['closed_time'].strftime('%d/%m %H:%M')}\n"
+                        f"👤 Registrado por: {record['recorded_by'] or 'Ninguém'}"
+                    ),
                     inline=False
                 )
             
@@ -387,7 +417,11 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             
         except Exception as e:
             print(f"Erro ao buscar bosses não anotados: {e}")
-            return discord.Embed(title="Erro", description="Ocorreu um erro ao buscar os bosses não anotados", color=discord.Color.red())
+            return discord.Embed(
+                title="Erro",
+                description="Ocorreu um erro ao buscar os bosses não anotados",
+                color=discord.Color.red()
+            )
         finally:
             conn.close()
 
