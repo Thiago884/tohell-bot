@@ -989,7 +989,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                         
                         if restore_backup(backup_file):
                             # Recarregar dados do banco
-                            load_db_data()
+                            load_db_data(boss_timers, user_stats, user_notifications)
                             
                             await interaction.followup.send(
                                 f"✅ Backup **{backup_file}** restaurado com sucesso!",
@@ -1309,7 +1309,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 
                 if restore_backup(backup_file):
                     # Recarregar dados do banco
-                    load_db_data()
+                    load_db_data(boss_timers, user_stats, user_notifications)
                     
                     await interaction.followup.send(
                         f"✅ Backup **{backup_file}** restaurado com sucesso!"

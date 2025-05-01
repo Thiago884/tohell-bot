@@ -110,7 +110,7 @@ async def on_ready():
     # Inicialização do banco de dados
     print("\nInicializando banco de dados...")
     init_db()
-    load_db_data()
+    load_db_data(boss_timers, user_stats, user_notifications)
     print("✅ Banco de dados pronto!")
     
     # Configura comandos e tasks

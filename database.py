@@ -74,7 +74,7 @@ def init_db():
         conn.close()
 
 # Carregar dados do banco de dados
-def load_db_data():
+def load_db_data(boss_timers, user_stats, user_notifications):
     conn = connect_db()
     if conn is None:
         return
