@@ -10,7 +10,12 @@ import traceback
 from datetime import datetime
 from bot_commands import setup_bot_commands
 from database import init_db, load_db_data
-
+# Tasks globais
+check_boss_respawns = tasks.loop(seconds=30)(check_boss_respawns)
+live_table_updater = tasks.loop(seconds=30)(live_table_updater)
+periodic_table_update = tasks.loop(minutes=30)(periodic_table_update)
+daily_backup = tasks.loop(hours=24)(daily_backup)
+cleanup_closed_bosses = tasks.loop(hours=1)(cleanup_closed_bosses)
 # ==============================================
 # Configuração do Flask (keep-alive)
 # ==============================================
@@ -119,14 +124,8 @@ async def on_ready():
     
     # Inicia as tasks periódicas
     print("\nIniciando tasks periódicas...")
-    from bot_commands import (
-        check_boss_respawns, 
-        live_table_updater, 
-        periodic_table_update, 
-        daily_backup,
-        cleanup_closed_bosses
-    )
-    
+    from bot_commands import setup_bot_commands
+    await setup_bot_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
     check_boss_respawns.start()
     live_table_updater.start()
     periodic_table_update.start()
