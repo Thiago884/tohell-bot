@@ -34,6 +34,8 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
     # Funções auxiliares
     def format_time_remaining(target_time):
         now = datetime.now(brazil_tz)
+        if target_time < now:
+            return "00h 00m"
         delta = target_time - now
         hours, remainder = divmod(delta.seconds, 3600)
         minutes, seconds = divmod(remainder, 60)
@@ -66,8 +68,8 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             for sala in boss_timers[boss]:
                 timers = boss_timers[boss][sala]
                 
-                # Não mostrar bosses que já fecharam
-                if timers['closed_time'] and now >= timers['closed_time']:
+                # Não mostrar bosses que já fecharam e não têm novo horário registrado
+                if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
                     continue
                     
                 if compact and timers['death_time'] is None:
@@ -98,11 +100,12 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             if not boss_info and compact:
                 continue
                 
-            embed.add_field(
-                name=f"**{boss}**",
-                value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
-                inline=False
-            )
+            if boss_info:
+                embed.add_field(
+                    name=f"**{boss}**",
+                    value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
+                    inline=False
+                )
         
         return embed
 
@@ -126,7 +129,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             except:
                 username = f"Usuário {user_id}"
             
-            # Adiciona medalhas para os top 3
             medal = ""
             if idx == 0:
                 medal = "🥇 "
@@ -177,11 +179,10 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                             'status': 'upcoming'
                         })
         
-        # Ordenar por tempo de respawn mais próximo
         upcoming_bosses.sort(key=lambda x: x['respawn_time'])
         open_bosses.sort(key=lambda x: x['closed_time'])
         
-        return upcoming_bosses[:5] + open_bosses[:5]  # Retorna os próximos 5 e os 5 abertos mais recentes
+        return upcoming_bosses[:5] + open_bosses[:5]
 
     async def create_next_bosses_embed():
         next_bosses = get_next_bosses()
@@ -268,11 +269,8 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 pass
 
     def parse_time_input(time_str):
-        """Analisa o input de tempo em vários formatos (HH:MM, HHhMM) e retorna (hora, minuto)"""
-        # Remover espaços em branco
         time_str = time_str.strip().lower()
         
-        # Tentar formato HH:MM
         if ':' in time_str:
             parts = time_str.split(':')
             if len(parts) == 2:
@@ -283,7 +281,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 except ValueError:
                     return None
         
-        # Tentar formato HHhMM
         if 'h' in time_str:
             parts = time_str.split('h')
             if len(parts) == 2:
@@ -294,7 +291,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 except ValueError:
                     return None
         
-        # Tentar apenas HH
         try:
             hour = int(time_str)
             return hour, 0
@@ -302,7 +298,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             return None
 
     def validate_time(hour, minute):
-        """Verifica se o horário é válido"""
         if hour < 0 or hour > 23:
             return False
         if minute < 0 or minute > 59:
@@ -363,7 +358,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             cursor.execute("""
             SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by 
             FROM boss_timers 
-            WHERE opened_notified = FALSE AND closed_time IS NOT NULL
+            WHERE opened_notified = FALSE AND closed_time IS NOT NULL AND closed_time > (NOW() - INTERVAL 24 HOUR)
             ORDER BY closed_time DESC 
             LIMIT 5
             """)
@@ -371,7 +366,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             unrecorded = cursor.fetchall()
             
             if not unrecorded:
-                return discord.Embed(title="Bosses Fechados sem Anotações", description="Nenhum boss foi fechado sem anotações recentemente.", color=discord.Color.blue())
+                return discord.Embed(title="Bosses Fechados sem Anotações", description="Nenhum boss foi fechado sem anotações nas últimas 24 horas.", color=discord.Color.blue())
             
             embed = discord.Embed(
                 title="❌ Últimos Bosses Fechados sem Anotações",
@@ -435,7 +430,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                             boss_timers[boss][sala]['opened_notified'] = True
                             save_timer(boss, sala, timers['death_time'], respawn_time, closed_time, timers['recorded_by'], True)
                             
-                            # Verificar se há usuários para notificar via DM
                             for user_id in user_notifications:
                                 if boss in user_notifications[user_id]:
                                     dm_notifications.append({
@@ -446,7 +440,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                                         'closed_time': closed_time
                                     })
                     
-                    # Notificação de fechamento (verifica exatamente no minuto do fechamento)
+                    # Notificação de fechamento
                     if closed_time is not None and abs((now - closed_time).total_seconds()) < 60:
                         message = f"🔴 **{boss} (Sala {sala})** FECHOU"
                         if not timers.get('opened_notified', False):
@@ -456,7 +450,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                         
                         notifications.append(message)
                         
-                        # Limpar os dados do boss fechado
+                        # Manter apenas o horário da morte para histórico
                         boss_timers[boss][sala]['respawn_time'] = None
                         boss_timers[boss][sala]['closed_time'] = None
                         boss_timers[boss][sala]['opened_notified'] = False
@@ -466,7 +460,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             message = "**Notificações de Boss:**\n" + "\n".join(notifications)
             await channel.send(message)
         
-        # Enviar notificações por DM
         if dm_notifications:
             for notification in dm_notifications:
                 await send_notification_dm(
@@ -481,19 +474,16 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
 
     @tasks.loop(minutes=30)
     async def periodic_table_update():
-        """Atualização periódica da tabela com intervalo aleatório"""
         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
         if channel:
             embed = create_boss_embed()
             view = BossControlView()
             await channel.send("**Atualização periódica dos horários de boss:**", embed=embed, view=view)
         
-        # Define um intervalo aleatório para a próxima atualização (entre 30 e 60 minutos)
         periodic_table_update.change_interval(minutes=random.randint(30, 60))
 
     @tasks.loop(hours=24)
     async def daily_backup():
-        """Rotina de backup diário"""
         try:
             backup_file = create_backup()
             if backup_file:
@@ -558,7 +548,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                     return
                 
                 try:
-                    # Analisar o horário em diferentes formatos
                     time_parts = parse_time_input(self.horario.value)
                     if not time_parts:
                         await interaction.response.send_message(
@@ -569,7 +558,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                     
                     hour, minute = time_parts
                     
-                    # Validar o horário
                     if not validate_time(hour, minute):
                         await interaction.response.send_message(
                             "Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.",
@@ -611,7 +599,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                         ephemeral=False
                     )
                     
-                    # Enviar a tabela atualizada imediatamente após o registro
                     channel = interaction.channel
                     if channel:
                         embed = create_boss_embed()
@@ -659,7 +646,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 
                 sala = self.sala.value.strip()
                 
-                if not sala:  # Se sala estiver vazia, limpar todas as salas
+                if not sala:
                     for s in boss_timers[boss_name]:
                         boss_timers[boss_name][s] = {
                             'death_time': None,
@@ -926,7 +913,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 else:
                     await interaction.followup.send("Processando backup...", ephemeral=True)
                 
-                # Verificar se o usuário tem permissão de administrador
                 if not interaction.user.guild_permissions.administrator:
                     await interaction.followup.send("❌ Apenas administradores podem usar esta função.", ephemeral=True)
                     return
@@ -963,13 +949,11 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                     if not interaction.response.is_done():
                         await interaction.response.defer(ephemeral=True)
                     
-                    # Verificar se há arquivos de backup
                     backup_files = [f for f in os.listdir() if f.startswith('backup_') and f.endswith('.json')]
                     if not backup_files:
                         await interaction.followup.send("Nenhum arquivo de backup encontrado.", ephemeral=True)
                         return
                     
-                    # Criar menu de seleção de backup
                     select_view = discord.ui.View(timeout=120)
                     select = discord.ui.Select(
                         placeholder="Selecione um backup para restaurar",
@@ -982,7 +966,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                         backup_file = select.values[0]
                         
                         if restore_backup(backup_file):
-                            # Recarregar dados do banco
                             load_db_data(boss_timers, user_stats, user_notifications)
                             
                             await interaction.followup.send(
@@ -990,7 +973,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                                 ephemeral=True
                             )
                             
-                            # Atualizar tabela
                             await update_table(interaction.channel)
                         else:
                             await interaction.followup.send(
@@ -1051,7 +1033,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
         boss_name = full_boss_name
         
         try:
-            # Analisar o horário em diferentes formatos
             time_parts = parse_time_input(hora_morte)
             if not time_parts:
                 await ctx.send("Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)")
@@ -1059,7 +1040,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             
             hour, minute = time_parts
             
-            # Validar o horário
             if not validate_time(hour, minute):
                 await ctx.send("Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.")
                 return
@@ -1095,7 +1075,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT"
             )
             
-            # Enviar a tabela atualizada imediatamente após o registro
             channel = ctx.channel
             if channel:
                 embed = create_boss_embed()
@@ -1263,7 +1242,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
         
-        # Verificar permissões
         if not ctx.author.guild_permissions.administrator:
             await ctx.send("❌ Apenas administradores podem usar este comando.")
             return
@@ -1287,13 +1265,11 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 await ctx.send("❌ Falha ao criar backup!")
         
         elif action.lower() == 'restore':
-            # Verificar se há arquivos de backup
             backup_files = [f for f in os.listdir() if f.startswith('backup_') and f.endswith('.json')]
             if not backup_files:
                 await ctx.send("Nenhum arquivo de backup encontrado.")
                 return
             
-            # Criar menu de seleção
             view = discord.ui.View(timeout=120)
             select = discord.ui.Select(
                 placeholder="Selecione um backup para restaurar",
@@ -1305,14 +1281,12 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 backup_file = select.values[0]
                 
                 if restore_backup(backup_file):
-                    # Recarregar dados do banco
                     load_db_data(boss_timers, user_stats, user_notifications)
                     
                     await interaction.followup.send(
                         f"✅ Backup **{backup_file}** restaurado com sucesso!"
                     )
                     
-                    # Atualizar tabela
                     await update_table(interaction.channel)
                 else:
                     await interaction.followup.send(
