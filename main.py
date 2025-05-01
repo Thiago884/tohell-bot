@@ -1,22 +1,24 @@
 import discord
 from discord.ext import commands
-from discord import HTTPException
+from discord import app_commands, HTTPException
 import os
 import asyncio
 from flask import Flask
 from threading import Thread
 from collections import defaultdict
+import traceback
+from datetime import datetime
 from bot_commands import setup_bot_commands
 from database import init_db, load_db_data
 
 # ==============================================
-# Configurações do Flask para keep-alive
+# Configuração do Flask (keep-alive)
 # ==============================================
-app = Flask('')
+app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot de Timers de Boss está operacional!"
+    return "Bot de Timers de Boss - Online"
 
 @app.route('/health')
 def health():
@@ -27,22 +29,20 @@ def status():
     if bot.is_ready():
         return "Bot is online and ready", 200
     else:
-        return "Bot is connecting or offline", 503
+        return "Bot is connecting", 503
 
 def run_flask():
-    app.run(host='0.0.0.0', port=8080, threaded=True)
-
-def keep_alive():
-    t = Thread(target=run_flask, daemon=True)
-    t.start()
+    app.run(host='0.0.0.0', port=8080)
 
 # ==============================================
-# Configurações do Bot Discord
+# Configuração do Bot Discord
 # ==============================================
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True  # Necessário para buscar informações de usuários
-bot = commands.Bot(command_prefix='!', intents=intents)
+intents = discord.Intents.all()
+bot = commands.Bot(
+    command_prefix='!',
+    intents=intents,
+    help_command=None  # Remove o help padrão para usar o customizado
+)
 
 # ==============================================
 # Variáveis Globais
@@ -60,7 +60,7 @@ BOSS_LIST = [
 
 SALAS = range(1, 9)  # Salas de 1 a 8
 
-# Estrutura de dados para os timers de boss
+# Estruturas de dados
 boss_timers = {boss: {sala: {
     'death_time': None,
     'respawn_time': None,
@@ -70,58 +70,18 @@ boss_timers = {boss: {sala: {
     'last_updated': None
 } for sala in SALAS} for boss in BOSS_LIST}
 
-# Estatísticas de usuários
 user_stats = defaultdict(lambda: {
     'count': 0,
     'last_recorded': None,
     'username': 'Unknown'
 })
 
-# Notificações personalizadas
 user_notifications = defaultdict(list)
-
-# Controle da mensagem da tabela
 table_message = None
-NOTIFICATION_CHANNEL_ID = 1364594212280078457  # Substitua pelo ID do seu canal
+NOTIFICATION_CHANNEL_ID = 1364594212280078457  # Substitua pelo seu canal
 
 # ==============================================
-# Funções Principais
-# ==============================================
-async def run_bot():
-    """Loop principal de execução do bot com tratamento de erros"""
-    while True:
-        try:
-            print("\n" + "="*50)
-            print(f"Iniciando bot...")
-            print(f"BOSSES: {', '.join(BOSS_LIST)}")
-            print(f"SALAS: {', '.join(map(str, SALAS))}")
-            print("="*50 + "\n")
-            
-            await bot.start(os.getenv('DISCORD_TOKEN'))
-            
-        except HTTPException as e:
-            if e.status == 429:
-                retry_after = e.response.headers.get('Retry-After', 30)
-                print(f"\n⚠ Rate limit atingido. Tentando novamente em {retry_after} segundos...")
-                await asyncio.sleep(float(retry_after))
-            else:
-                print(f"\n⚠ Erro HTTP {e.status}: {e.text}")
-                await asyncio.sleep(30)
-                
-        except discord.LoginError:
-            print("\n❌ ERRO: Token inválido ou incorreto!")
-            break
-                
-        except Exception as e:
-            print(f"\n⚠ Erro inesperado: {type(e).__name__}: {e}")
-            traceback.print_exc()
-            await asyncio.sleep(30)
-            
-        else:
-            break
-
-# ==============================================
-# Eventos do Bot
+# Eventos e Inicialização
 # ==============================================
 @bot.event
 async def on_ready():
@@ -138,7 +98,14 @@ async def on_ready():
     else:
         print(f'⚠ ATENÇÃO: Canal de notificação (ID: {NOTIFICATION_CHANNEL_ID}) não encontrado!')
     
-    await bot.change_presence(activity=discord.Game(name="!bosshelp para ajuda"))
+    await bot.change_presence(activity=discord.Game(name="Digite !bosshelp"))
+    
+    # Sincroniza comandos slash
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ {len(synced)} comandos slash sincronizados")
+    except Exception as e:
+        print(f"❌ Erro ao sincronizar comandos slash: {e}")
     
     # Inicialização do banco de dados
     print("\nInicializando banco de dados...")
@@ -157,43 +124,57 @@ async def on_ready():
         live_table_updater, 
         periodic_table_update, 
         daily_backup,
-        cleanup_closed_bosses  # Nova task adicionada
+        cleanup_closed_bosses
     )
     
     check_boss_respawns.start()
     live_table_updater.start()
     periodic_table_update.start()
     daily_backup.start()
-    cleanup_closed_bosses.start()  # Inicia a nova task
+    cleanup_closed_bosses.start()
     
     print("\n✅ Bot totalmente inicializado e pronto para uso!")
 
 # ==============================================
-# Inicialização do Bot
+# Comandos de Teste (Essenciais)
 # ==============================================
+@bot.tree.command(name="teste", description="Verifica se o bot está respondendo")
+async def teste(interaction: discord.Interaction):
+    """Comando slash para testar o bot"""
+    await interaction.response.send_message(
+        "✅ Bot funcionando corretamente!",
+        ephemeral=True
+    )
+
+@bot.command()
+async def ping(ctx):
+    """Comando prefixado tradicional"""
+    await ctx.send(f'🏓 Pong! Latência: {round(bot.latency * 1000)}ms')
+
+# ==============================================
+# Inicialização do Sistema
+# ==============================================
+def keep_alive():
+    """Inicia o servidor Flask em thread separada"""
+    t = Thread(target=run_flask, daemon=True)
+    t.start()
+
 if __name__ == "__main__":
-    import traceback
-    from datetime import datetime
+    keep_alive()
     
-    try:
-        # Inicia o servidor Flask em segundo plano
-        keep_alive()
-        
-        # Verifica o token antes de iniciar
-        token = os.getenv('DISCORD_TOKEN')
-        if not token:
-            print("\n❌ ERRO CRÍTICO: Token não encontrado!")
-            print("Verifique se você configurou a variável de ambiente 'DISCORD_TOKEN'")
-            exit(1)
-            
-        print("\n🔑 Token encontrado, iniciando bot...")
-        asyncio.run(run_bot())
-        
-    except KeyboardInterrupt:
-        print("\n🛑 Bot encerrado pelo usuário")
-        exit(0)
-        
-    except Exception as e:
-        print(f"\n❌ ERRO CRÍTICO: {type(e).__name__}: {e}")
-        traceback.print_exc()
+    token = os.getenv('DISCORD_TOKEN')
+    if not token:
+        print("\n❌ ERRO: Token não encontrado!")
+        print("Verifique se você configurou a variável de ambiente 'DISCORD_TOKEN'")
         exit(1)
+    
+    print("\n🔑 Token encontrado, iniciando bot...")
+    try:
+        bot.run(token)
+    except discord.LoginError:
+        print("\n❌ Falha no login: Token inválido!")
+    except Exception as e:
+        print(f"\n❌ Erro inesperado: {type(e).__name__}: {e}")
+        traceback.print_exc()
+    finally:
+        print("\n🛑 Bot encerrado")
