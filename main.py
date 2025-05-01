@@ -11,9 +11,7 @@ from datetime import datetime
 from bot_commands import setup_bot_commands
 from database import init_db, load_db_data
 
-# ==============================================
 # Configuração do Flask (keep-alive)
-# ==============================================
 app = Flask(__name__)
 
 @app.route('/')
@@ -34,20 +32,16 @@ def status():
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
 
-# ==============================================
 # Configuração do Bot Discord
-# ==============================================
 intents = discord.Intents.all()
 bot = commands.Bot(
     command_prefix='!',
     intents=intents,
-    help_command=None  # Remove o help padrão para usar o customizado
+    help_command=None
 )
 
-# ==============================================
 # Variáveis Globais
-# ==============================================
-BOSS_LIST = [
+BOSSES = [
     "Super Red Dragon",
     "Hell Maine",
     "Illusion of Kundun",
@@ -58,7 +52,7 @@ BOSS_LIST = [
     "Rei Kundun"
 ]
 
-SALAS = range(1, 9)  # Salas de 1 a 8
+SALAS = [1, 2, 3, 4, 5, 6, 7, 8]
 
 # Estruturas de dados
 boss_timers = {boss: {sala: {
@@ -66,9 +60,8 @@ boss_timers = {boss: {sala: {
     'respawn_time': None,
     'closed_time': None,
     'recorded_by': None,
-    'opened_notified': False,
-    'last_updated': None
-} for sala in SALAS} for boss in BOSS_LIST}
+    'opened_notified': False
+} for sala in SALAS} for boss in BOSSES}
 
 user_stats = defaultdict(lambda: {
     'count': 0,
@@ -80,9 +73,6 @@ user_notifications = defaultdict(list)
 table_message = None
 NOTIFICATION_CHANNEL_ID = 1364594212280078457  # Substitua pelo seu canal
 
-# ==============================================
-# Eventos e Inicialização
-# ==============================================
 @bot.event
 async def on_ready():
     """Evento disparado quando o bot está pronto"""
@@ -117,42 +107,16 @@ async def on_ready():
     print("\nConfigurando comandos...")
     await setup_bot_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
     
-    # Importa as tasks do bot_commands.py
-    from bot_commands import (
-        check_boss_respawns, 
-        live_table_updater, 
-        periodic_table_update, 
-        daily_backup
-    )
-    
-    # Inicia as tasks periódicas
-    print("\nIniciando tasks periódicas...")
-    check_boss_respawns.start()
-    live_table_updater.start()
-    periodic_table_update.start()
-    daily_backup.start()
-    
     print("\n✅ Bot totalmente inicializado e pronto para uso!")
 
-# ==============================================
-# Comandos de Teste (Essenciais)
-# ==============================================
 @bot.tree.command(name="teste", description="Verifica se o bot está respondendo")
 async def teste(interaction: discord.Interaction):
-    """Comando slash para testar o bot"""
-    await interaction.response.send_message(
-        "✅ Bot funcionando corretamente!",
-        ephemeral=True
-    )
+    await interaction.response.send_message("✅ Bot funcionando corretamente!", ephemeral=True)
 
 @bot.command()
 async def ping(ctx):
-    """Comando prefixado tradicional"""
     await ctx.send(f'🏓 Pong! Latência: {round(bot.latency * 1000)}ms')
 
-# ==============================================
-# Inicialização do Sistema
-# ==============================================
 def keep_alive():
     """Inicia o servidor Flask em thread separada"""
     t = Thread(target=run_flask, daemon=True)

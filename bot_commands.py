@@ -19,20 +19,6 @@ from database import (
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
-# Variáveis de configuração
-BOSSES = [
-    "Super Red Dragon",
-    "Hell Maine",
-    "Illusion of Kundun",
-    "Death Beam Knight",
-    "Genocider",
-    "Phoenix of Darkness",
-    "Hydra",
-    "Rei Kundun"
-]
-
-SALAS = [1, 2, 3, 4, 5, 6, 7, 8]
-
 # Mapeamento de abreviações
 BOSS_ABBREVIATIONS = {
     "super red dragon": "red",
@@ -45,8 +31,6 @@ BOSS_ABBREVIATIONS = {
 }
 
 async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID):
-    # Configura todos os comandos e views do bot
-    
     # Funções auxiliares
     def format_time_remaining(target_time):
         now = datetime.now(brazil_tz)
@@ -59,11 +43,11 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
         abbrev = abbrev.lower()
         for boss, abbr in BOSS_ABBREVIATIONS.items():
             if abbr.lower() == abbrev:
-                for b in BOSSES:
+                for b in boss_timers.keys():
                     if b.lower() == boss:
                         return b
         
-        for boss in BOSSES:
+        for boss in boss_timers.keys():
             if abbrev in boss.lower():
                 return boss
         
@@ -77,9 +61,9 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             color=discord.Color.gold()
         )
         
-        for boss in BOSSES:
+        for boss in boss_timers:
             boss_info = []
-            for sala in SALAS:
+            for sala in boss_timers[boss]:
                 timers = boss_timers[boss][sala]
                 
                 if compact and timers['death_time'] is None:
@@ -161,8 +145,8 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
         upcoming_bosses = []
         open_bosses = []
         
-        for boss in BOSSES:
-            for sala in SALAS:
+        for boss in boss_timers:
+            for sala in boss_timers[boss]:
                 timers = boss_timers[boss][sala]
                 respawn_time = timers['respawn_time']
                 closed_time = timers['closed_time']
@@ -426,8 +410,8 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
         notifications = []
         dm_notifications = []
 
-        for boss in BOSSES:
-            for sala in SALAS:
+        for boss in boss_timers:
+            for sala in boss_timers[boss]:
                 timers = boss_timers[boss][sala]
                 respawn_time = timers['respawn_time']
                 closed_time = timers['closed_time']
@@ -543,16 +527,16 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 boss_name = get_boss_by_abbreviation(self.boss.value)
                 if boss_name is None:
                     await interaction.response.send_message(
-                        f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
+                        f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
                         ephemeral=True
                     )
                     return
                 
                 try:
                     sala = int(self.sala.value)
-                    if sala not in SALAS:
+                    if sala not in boss_timers[boss_name].keys():
                         await interaction.response.send_message(
-                            f"Sala inválida. Salas disponíveis: {', '.join(map(str, SALAS))}",
+                            f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
                             ephemeral=True
                         )
                         return
@@ -658,7 +642,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 boss_name = get_boss_by_abbreviation(self.boss.value)
                 if boss_name is None:
                     await interaction.response.send_message(
-                        f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
+                        f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
                         ephemeral=True
                     )
                     return
@@ -666,7 +650,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 sala = self.sala.value.strip()
                 
                 if not sala:  # Se sala estiver vazia, limpar todas as salas
-                    for s in SALAS:
+                    for s in boss_timers[boss_name]:
                         boss_timers[boss_name][s] = {
                             'death_time': None,
                             'respawn_time': None,
@@ -682,9 +666,9 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 else:
                     try:
                         sala = int(sala)
-                        if sala not in SALAS:
+                        if sala not in boss_timers[boss_name]:
                             await interaction.response.send_message(
-                                f"Sala inválida. Salas disponíveis: {', '.join(map(str, SALAS))}",
+                                f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
                                 ephemeral=True
                             )
                             return
@@ -737,7 +721,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 boss_name = get_boss_by_abbreviation(self.boss.value)
                 if boss_name is None:
                     await interaction.response.send_message(
-                        f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
+                        f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
                         ephemeral=True
                     )
                     return
@@ -1045,13 +1029,13 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             await ctx.send("Por favor, use: `!boss <nome_do_boss> <sala> HH:MM`\nExemplo: `!boss Hydra 8 14:30`\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno\nFormatos de hora aceitos: HH:MM ou HHhMM")
             return
         
-        if sala not in SALAS:
-            await ctx.send(f"Sala inválida. Salas disponíveis: {', '.join(map(str, SALAS))}")
+        if sala not in boss_timers.get(list(boss_timers.keys())[0], {}).keys():
+            await ctx.send(f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers.get(list(boss_timers.keys())[0], {}).keys()))}")
             return
         
         full_boss_name = get_boss_by_abbreviation(boss_name)
         if full_boss_name is None:
-            await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
+            await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
             return
         
         boss_name = full_boss_name
@@ -1102,10 +1086,13 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             )
             
             # Enviar a tabela atualizada imediatamente após o registro
-            embed = create_boss_embed()
-            view = BossControlView()
-            await ctx.send("**Tabela atualizada:**", embed=embed, view=view)
-            await update_table(ctx.channel)
+            channel = ctx.channel
+            if channel:
+                embed = create_boss_embed()
+                view = BossControlView()
+                await channel.send("**Tabela atualizada:**", embed=embed, view=view)
+                await update_table(channel)
+                
         except ValueError:
             await ctx.send("Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)")
 
@@ -1137,13 +1124,13 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
         
         full_boss_name = get_boss_by_abbreviation(boss_name)
         if full_boss_name is None:
-            await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
+            await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
             return
         
         boss_name = full_boss_name
         
         if sala is None:
-            for s in SALAS:
+            for s in boss_timers[boss_name]:
                 boss_timers[boss_name][s] = {
                     'death_time': None,
                     'respawn_time': None,
@@ -1154,8 +1141,8 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             clear_timer(boss_name)
             await ctx.send(f"✅ Todos os timers do boss **{boss_name}** foram resetados.")
         else:
-            if sala not in SALAS:
-                await ctx.send(f"Sala inválida. Salas disponíveis: {', '.join(map(str, SALAS))}")
+            if sala not in boss_timers[boss_name]:
+                await ctx.send(f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}")
                 return
             
             boss_timers[boss_name][sala] = {
@@ -1190,13 +1177,13 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 "Uso: `!notify <boss> <add/rem>`\n"
                 "Exemplo: `!notify Hydra add` - Para receber DM quando Hydra abrir\n"
                 "`!notify Hydra rem` - Para parar de receber notificações\n\n"
-                "Bosses disponíveis: " + ", ".join(BOSSES)
+                "Bosses disponíveis: " + ", ".join(boss_timers.keys())
             )
             return
         
         full_boss_name = get_boss_by_abbreviation(boss_name)
         if full_boss_name is None:
-            await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(BOSSES)}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
+            await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
             return
         
         boss_name = full_boss_name
@@ -1414,13 +1401,22 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
         )
         embed.add_field(
             name="Bosses disponíveis",
-            value="\n".join(BOSSES),
+            value="\n".join(boss_timers.keys()),
             inline=False
         )
         embed.add_field(
             name="Salas disponíveis",
-            value=", ".join(map(str, SALAS)),
+            value=", ".join(map(str, boss_timers.get(list(boss_timers.keys())[0], {}).keys())),
             inline=False
         )
         
         await ctx.send(embed=embed)
+
+    # Iniciar as tasks
+    check_boss_respawns.start()
+    live_table_updater.start()
+    periodic_table_update.start()
+    daily_backup.start()
+
+    # Adicionar a view persistente
+    bot.add_view(BossControlView())
