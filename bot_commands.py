@@ -66,6 +66,10 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             for sala in boss_timers[boss]:
                 timers = boss_timers[boss][sala]
                 
+                # Não mostrar bosses que já fecharam
+                if timers['closed_time'] and now >= timers['closed_time']:
+                    continue
+                    
                 if compact and timers['death_time'] is None:
                     continue
                     
@@ -417,6 +421,13 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 closed_time = timers['closed_time']
                 
                 if respawn_time is not None:
+                    # Notificação de pré-abertura (5 minutos antes)
+                    if now >= (respawn_time - timedelta(minutes=5)) and now < respawn_time:
+                        time_left = format_time_remaining(respawn_time)
+                        recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
+                        notifications.append(f"🟡 **{boss} (Sala {sala})** estará disponível em {time_left} ({respawn_time:%d/%m %H:%M} BRT){recorded_by}")
+                    
+                    # Notificação de abertura
                     if now >= respawn_time and closed_time is not None and now < closed_time:
                         if not timers.get('opened_notified', False):
                             recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
@@ -435,18 +446,17 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                                         'closed_time': closed_time
                                     })
                     
-                    elif now >= (respawn_time - timedelta(minutes=5)) and now < respawn_time and closed_time is not None:
-                        time_left = format_time_remaining(respawn_time)
-                        recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
-                        notifications.append(f"🟡 **{boss} (Sala {sala})** estará disponível em {time_left} ({respawn_time:%d/%m %H:%M} BRT){recorded_by}")
-                    
-                    elif closed_time is not None and now >= closed_time:
+                    # Notificação de fechamento (verifica exatamente no minuto do fechamento)
+                    if closed_time is not None and abs((now - closed_time).total_seconds()) < 60:
+                        message = f"🔴 **{boss} (Sala {sala})** FECHOU"
                         if not timers.get('opened_notified', False):
-                            notifications.append(f"🔴 **{boss} (Sala {sala})** FECHOU sem nenhuma anotação durante o período aberto!")
+                            message += " sem nenhuma anotação durante o período aberto!"
                         else:
-                            notifications.append(f"🔴 **{boss} (Sala {sala})** FECHOU!")
+                            message += "!"
                         
-                        # Não limpar os dados imediatamente, apenas marcar como fechado
+                        notifications.append(message)
+                        
+                        # Limpar os dados do boss fechado
                         boss_timers[boss][sala]['respawn_time'] = None
                         boss_timers[boss][sala]['closed_time'] = None
                         boss_timers[boss][sala]['opened_notified'] = False
