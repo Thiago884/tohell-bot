@@ -355,7 +355,6 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
         try:
             cursor = conn.cursor(dictionary=True)
             
-            # Busca os bosses que tiveram morte registrada, abriram, fecharam e não foram anotados durante o período aberto
             cursor.execute("""
             SELECT 
                 bt.boss_name, 
@@ -363,27 +362,23 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 bt.death_time, 
                 bt.respawn_time, 
                 bt.closed_time,
-                bt.recorded_by,
-                COUNT(bt2.id) as annotations_during_open
+                bt.recorded_by
             FROM 
                 boss_timers bt
-            LEFT JOIN 
-                boss_timers bt2 ON 
-                bt2.boss_name = bt.boss_name AND 
-                bt2.sala = bt.sala AND 
-                bt2.death_time > bt.respawn_time AND 
-                bt2.death_time < bt.closed_time
             WHERE 
-                bt.closed_time IS NOT NULL AND 
+                bt.closed_time IS NOT NULL AND
                 bt.closed_time > (NOW() - INTERVAL 7 DAY) AND
-                bt.opened_notified = FALSE
-            GROUP BY 
-                bt.id
-            HAVING 
-                annotations_during_open = 0
+                NOT EXISTS (
+                    SELECT 1 FROM boss_timers bt2 
+                    WHERE 
+                        bt2.boss_name = bt.boss_name AND 
+                        bt2.sala = bt.sala AND 
+                        bt2.death_time > bt.respawn_time AND 
+                        bt2.death_time < bt.closed_time
+                )
             ORDER BY 
                 bt.closed_time DESC 
-            LIMIT 5
+            LIMIT 10
             """)
             
             unrecorded = cursor.fetchall()
