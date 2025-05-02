@@ -357,27 +357,20 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             
             cursor.execute("""
             SELECT 
-                bt.boss_name, 
-                bt.sala, 
-                bt.death_time, 
-                bt.respawn_time, 
-                bt.closed_time,
-                bt.recorded_by
+                boss_name, 
+                sala, 
+                death_time, 
+                respawn_time, 
+                closed_time,
+                recorded_by
             FROM 
-                boss_timers bt
+                boss_timers
             WHERE 
-                bt.closed_time IS NOT NULL AND
-                bt.closed_time > (NOW() - INTERVAL 7 DAY) AND
-                NOT EXISTS (
-                    SELECT 1 FROM boss_timers bt2 
-                    WHERE 
-                        bt2.boss_name = bt.boss_name AND 
-                        bt2.sala = bt.sala AND 
-                        bt2.death_time > bt.respawn_time AND 
-                        bt2.death_time < bt.closed_time
-                )
+                closed_time IS NOT NULL AND
+                closed_time < NOW() AND
+                death_time IS NOT NULL
             ORDER BY 
-                bt.closed_time DESC 
+                closed_time DESC 
             LIMIT 10
             """)
             
@@ -385,14 +378,14 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             
             if not unrecorded:
                 return discord.Embed(
-                    title="Bosses Fechados sem Anotações",
-                    description="Nenhum boss foi fechado sem anotações durante seu período aberto nos últimos 7 dias.",
+                    title="Bosses Fechados Recentemente",
+                    description="Nenhum boss foi fechado recentemente.",
                     color=discord.Color.blue()
                 )
             
             embed = discord.Embed(
-                title="❌ Últimos Bosses Fechados sem Anotações",
-                description="Estes bosses tiveram a morte registrada, ficaram abertos por 4 horas e ninguém registrou novas mortes durante este período:",
+                title="🔴 Últimos Bosses Fechados",
+                description="Estes bosses foram fechados recentemente:",
                 color=discord.Color.red()
             )
             
@@ -411,10 +404,10 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             return embed
             
         except Exception as e:
-            print(f"Erro ao buscar bosses não anotados: {e}")
+            print(f"Erro ao buscar bosses fechados: {e}")
             return discord.Embed(
                 title="Erro",
-                description="Ocorreu um erro ao buscar os bosses não anotados",
+                description="Ocorreu um erro ao buscar os bosses fechados",
                 color=discord.Color.red()
             )
         finally:
