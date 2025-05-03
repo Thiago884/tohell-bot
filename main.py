@@ -73,6 +73,22 @@ user_notifications = defaultdict(list)
 table_message = None
 NOTIFICATION_CHANNEL_ID = 1364594212280078457  # Substitua pelo seu canal
 
+async def test_db_connection():
+    """Testa a conexão com o banco de dados"""
+    try:
+        conn = await create_pool()
+        if conn:
+            print("✅ Conexão com o banco de dados estabelecida com sucesso!")
+            await close_pool()
+            return True
+        else:
+            print("❌ Falha ao conectar ao banco de dados")
+            return False
+    except Exception as e:
+        print(f"❌ Erro ao testar conexão com o banco: {e}")
+        traceback.print_exc()
+        return False
+
 @bot.event
 async def on_ready():
     """Evento disparado quando o bot está pronto"""
@@ -96,12 +112,14 @@ async def on_ready():
         print(f"✅ {len(synced)} comandos slash sincronizados")
     except Exception as e:
         print(f"❌ Erro ao sincronizar comandos slash: {e}")
+        traceback.print_exc()
     
     # Inicialização do banco de dados
     print("\nInicializando banco de dados...")
     try:
-        db_connected = await create_pool()
+        db_connected = await test_db_connection()
         if db_connected:
+            await create_pool()
             await init_db()
             await load_db_data(boss_timers, user_stats, user_notifications)
             print("✅ Banco de dados pronto!")
@@ -109,6 +127,7 @@ async def on_ready():
             print("⚠ Banco de dados não disponível - usando dados em memória")
     except Exception as e:
         print(f"❌ Erro ao inicializar banco de dados: {e}")
+        traceback.print_exc()
         print("⚠ O bot funcionará com dados em memória apenas")
     
     # Configura comandos e tasks
@@ -138,6 +157,15 @@ def keep_alive():
 
 if __name__ == "__main__":
     keep_alive()
+    
+    # Testar conexão com o banco antes de iniciar o bot
+    print("\n🔍 Testando conexão com o banco de dados...")
+    loop = asyncio.get_event_loop()
+    db_ok = loop.run_until_complete(test_db_connection())
+    
+    if not db_ok:
+        print("\n❌ ATENÇÃO: Não foi possível conectar ao banco de dados!")
+        print("O bot funcionará com dados em memória apenas")
     
     token = os.getenv('DISCORD_TOKEN')
     if not token:
