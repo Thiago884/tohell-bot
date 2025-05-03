@@ -9,7 +9,7 @@ from collections import defaultdict
 import traceback
 from datetime import datetime
 from bot_commands import setup_bot_commands
-from database import init_db, load_db_data
+from database import init_db, load_db_data, create_pool, close_pool
 
 # Configuração do Flask (keep-alive)
 app = Flask(__name__)
@@ -99,8 +99,9 @@ async def on_ready():
     
     # Inicialização do banco de dados
     print("\nInicializando banco de dados...")
-    init_db()
-    load_db_data(boss_timers, user_stats, user_notifications)
+    await create_pool()
+    await init_db()
+    await load_db_data(boss_timers, user_stats, user_notifications)
     print("✅ Banco de dados pronto!")
     
     # Configura comandos e tasks
@@ -108,6 +109,11 @@ async def on_ready():
     await setup_bot_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
     
     print("\n✅ Bot totalmente inicializado e pronto para uso!")
+
+@bot.event
+async def on_disconnect():
+    """Fecha o pool de conexões ao desconectar"""
+    await close_pool()
 
 @bot.tree.command(name="teste", description="Verifica se o bot está respondendo")
 async def teste(interaction: discord.Interaction):

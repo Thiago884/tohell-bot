@@ -305,104 +305,100 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
         return True
 
     async def create_history_embed():
-        conn = connect_db()
+        conn = await connect_db()
         if conn is None:
             return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
         
         try:
-            cursor = conn.cursor(dictionary=True)
-            
-            cursor.execute("""
-            SELECT boss_name, sala, death_time, respawn_time, recorded_by 
-            FROM boss_timers 
-            WHERE death_time IS NOT NULL
-            ORDER BY death_time DESC 
-            LIMIT 10
-            """)
-            
-            history = cursor.fetchall()
-            
-            if not history:
-                return discord.Embed(title="Histórico de Anotações", description="Nenhuma anotação registrada ainda.", color=discord.Color.blue())
-            
-            embed = discord.Embed(
-                title="📜 Histórico das Últimas Anotações",
-                color=discord.Color.gold()
-            )
-            
-            for idx, record in enumerate(history, 1):
-                embed.add_field(
-                    name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
-                    value=f"⏱ Morte: {record['death_time'].strftime('%d/%m %H:%M')}\n"
-                         f"🔄 Abriu: {record['respawn_time'].strftime('%d/%m %H:%M')}\n"
-                         f"👤 Por: {record['recorded_by']}",
-                    inline=False
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute("""
+                SELECT boss_name, sala, death_time, respawn_time, recorded_by 
+                FROM boss_timers 
+                WHERE death_time IS NOT NULL
+                ORDER BY death_time DESC 
+                LIMIT 10
+                """)
+                
+                history = await cursor.fetchall()
+                
+                if not history:
+                    return discord.Embed(title="Histórico de Anotações", description="Nenhuma anotação registrada ainda.", color=discord.Color.blue())
+                
+                embed = discord.Embed(
+                    title="📜 Histórico das Últimas Anotações",
+                    color=discord.Color.gold()
                 )
-            
-            return embed
-            
+                
+                for idx, record in enumerate(history, 1):
+                    embed.add_field(
+                        name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
+                        value=f"⏱ Morte: {record['death_time'].strftime('%d/%m %H:%M')}\n"
+                             f"🔄 Abriu: {record['respawn_time'].strftime('%d/%m %H:%M')}\n"
+                             f"👤 Por: {record['recorded_by']}",
+                        inline=False
+                    )
+                
+                return embed
         except Exception as e:
             print(f"Erro ao buscar histórico: {e}")
             return discord.Embed(title="Erro", description="Ocorreu um erro ao buscar o histórico", color=discord.Color.red())
         finally:
-            conn.close()
+            await conn.close()
 
     async def create_unrecorded_embed():
-        conn = connect_db()
+        conn = await connect_db()
         if conn is None:
             return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
         
         try:
-            cursor = conn.cursor(dictionary=True)
-            
-            cursor.execute("""
-            SELECT 
-                boss_name, 
-                sala, 
-                death_time, 
-                respawn_time, 
-                closed_time,
-                recorded_by
-            FROM 
-                boss_timers
-            WHERE 
-                closed_time IS NOT NULL AND
-                closed_time < NOW() AND
-                death_time IS NOT NULL
-            ORDER BY 
-                closed_time DESC 
-            LIMIT 10
-            """)
-            
-            unrecorded = cursor.fetchall()
-            
-            if not unrecorded:
-                return discord.Embed(
-                    title="Bosses Fechados Recentemente",
-                    description="Nenhum boss foi fechado recentemente.",
-                    color=discord.Color.blue()
+            async with conn.cursor(aiomysql.DictCursor) as cursor:
+                await cursor.execute("""
+                SELECT 
+                    boss_name, 
+                    sala, 
+                    death_time, 
+                    respawn_time, 
+                    closed_time,
+                    recorded_by
+                FROM 
+                    boss_timers
+                WHERE 
+                    closed_time IS NOT NULL AND
+                    closed_time < NOW() AND
+                    death_time IS NOT NULL
+                ORDER BY 
+                    closed_time DESC 
+                LIMIT 10
+                """)
+                
+                unrecorded = await cursor.fetchall()
+                
+                if not unrecorded:
+                    return discord.Embed(
+                        title="Bosses Fechados Recentemente",
+                        description="Nenhum boss foi fechado recentemente.",
+                        color=discord.Color.blue()
+                    )
+                
+                embed = discord.Embed(
+                    title="🔴 Últimos Bosses Fechados",
+                    description="Estes bosses foram fechados recentemente:",
+                    color=discord.Color.red()
                 )
-            
-            embed = discord.Embed(
-                title="🔴 Últimos Bosses Fechados",
-                description="Estes bosses foram fechados recentemente:",
-                color=discord.Color.red()
-            )
-            
-            for idx, record in enumerate(unrecorded, 1):
-                embed.add_field(
-                    name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
-                    value=(
-                        f"⏱ Morte registrada: {record['death_time'].strftime('%d/%m %H:%M')}\n"
-                        f"🔄 Período aberto: {record['respawn_time'].strftime('%d/%m %H:%M')} "
-                        f"até {record['closed_time'].strftime('%d/%m %H:%M')}\n"
-                        f"👤 Registrado por: {record['recorded_by'] or 'Ninguém'}"
-                    ),
-                    inline=False
-                )
-            
-            return embed
-            
+                
+                for idx, record in enumerate(unrecorded, 1):
+                    embed.add_field(
+                        name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
+                        value=(
+                            f"⏱ Morte registrada: {record['death_time'].strftime('%d/%m %H:%M')}\n"
+                            f"🔄 Período aberto: {record['respawn_time'].strftime('%d/%m %H:%M')} "
+                            f"até {record['closed_time'].strftime('%d/%m %H:%M')}\n"
+                            f"👤 Registrado por: {record['recorded_by'] or 'Ninguém'}"
+                        ),
+                        inline=False
+                    )
+                
+                return embed
         except Exception as e:
             print(f"Erro ao buscar bosses fechados: {e}")
             return discord.Embed(
@@ -411,7 +407,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 color=discord.Color.red()
             )
         finally:
-            conn.close()
+            await conn.close()
 
     # Tasks
     @tasks.loop(seconds=30)
@@ -450,7 +446,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                             recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
                             notifications.append(f"🟢 **{boss} (Sala {sala})** está disponível AGORA! (aberto até {closed_time:%d/%m %H:%M} BRT){recorded_by}")
                             boss_timers[boss][sala]['opened_notified'] = True
-                            save_timer(boss, sala, timers['death_time'], respawn_time, closed_time, timers['recorded_by'], True)
+                            await save_timer(boss, sala, timers['death_time'], respawn_time, closed_time, timers['recorded_by'], True)
                             
                             for user_id in user_notifications:
                                 if boss in user_notifications[user_id]:
@@ -476,7 +472,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                         boss_timers[boss][sala]['respawn_time'] = None
                         boss_timers[boss][sala]['closed_time'] = None
                         boss_timers[boss][sala]['opened_notified'] = False
-                        save_timer(boss, sala, timers['death_time'], None, None, timers['recorded_by'], False)
+                        await save_timer(boss, sala, timers['death_time'], None, None, timers['recorded_by'], False)
 
         if notifications:
             message = "**Notificações de Boss:**\n" + "\n".join(notifications)
@@ -507,7 +503,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
     @tasks.loop(hours=24)
     async def daily_backup():
         try:
-            backup_file = create_backup()
+            backup_file = await create_backup()
             if backup_file:
                 print(f"Backup diário realizado com sucesso: {backup_file}")
             else:
@@ -610,8 +606,8 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                     user_stats[user_id]['count'] += 1
                     user_stats[user_id]['last_recorded'] = now
                     
-                    save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
-                    save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
+                    await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
+                    await save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
                     
                     await interaction.response.send_message(
                         f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
@@ -677,7 +673,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                             'recorded_by': None,
                             'opened_notified': False
                         }
-                    clear_timer(boss_name)
+                    await clear_timer(boss_name)
                     await interaction.response.send_message(
                         f"✅ Todos os timers do boss **{boss_name}** foram resetados.",
                         ephemeral=True
@@ -699,7 +695,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                             'recorded_by': None,
                             'opened_notified': False
                         }
-                        clear_timer(boss_name, sala)
+                        await clear_timer(boss_name, sala)
                         await interaction.response.send_message(
                             f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
                             ephemeral=True
@@ -750,7 +746,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 
                 if action in ['add', 'adicionar', 'a']:
                     if boss_name not in user_notifications[user_id]:
-                        if add_user_notification(user_id, boss_name):
+                        if await add_user_notification(user_id, boss_name):
                             user_notifications[user_id].append(boss_name)
                             await interaction.response.send_message(
                                 f"✅ Você será notificado quando **{boss_name}** estiver disponível!",
@@ -769,7 +765,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 
                 elif action in ['rem', 'remover', 'r']:
                     if boss_name in user_notifications[user_id]:
-                        if remove_user_notification(user_id, boss_name):
+                        if await remove_user_notification(user_id, boss_name):
                             user_notifications[user_id].remove(boss_name)
                             await interaction.response.send_message(
                                 f"✅ Você NÃO será mais notificado para **{boss_name}**.",
@@ -947,7 +943,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 async def backup_callback(interaction: discord.Interaction):
                     if not interaction.response.is_done():
                         await interaction.response.defer(ephemeral=True)
-                    backup_file = create_backup()
+                    backup_file = await create_backup()
                     if backup_file:
                         try:
                             with open(backup_file, 'rb') as f:
@@ -987,8 +983,8 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                             await interaction.response.defer(ephemeral=True)
                         backup_file = select.values[0]
                         
-                        if restore_backup(backup_file):
-                            load_db_data(boss_timers, user_stats, user_notifications)
+                        if await restore_backup(backup_file):
+                            await load_db_data(boss_timers, user_stats, user_notifications)
                             
                             await interaction.followup.send(
                                 f"✅ Backup **{backup_file}** restaurado com sucesso!",
@@ -1087,8 +1083,8 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             user_stats[user_id]['count'] += 1
             user_stats[user_id]['last_recorded'] = now
             
-            save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
-            save_user_stats(user_id, ctx.author.name, user_stats[user_id]['count'], now)
+            await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
+            await save_user_stats(user_id, ctx.author.name, user_stats[user_id]['count'], now)
             
             await ctx.send(
                 f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
@@ -1149,7 +1145,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                     'recorded_by': None,
                     'opened_notified': False
                 }
-            clear_timer(boss_name)
+            await clear_timer(boss_name)
             await ctx.send(f"✅ Todos os timers do boss **{boss_name}** foram resetados.")
         else:
             if sala not in boss_timers[boss_name]:
@@ -1163,7 +1159,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 'recorded_by': None,
                 'opened_notified': False
             }
-            clear_timer(boss_name, sala)
+            await clear_timer(boss_name, sala)
             await ctx.send(f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.")
         
         await update_table(ctx.channel)
@@ -1202,7 +1198,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
         
         if action.lower() in ['add', 'adicionar', 'a']:
             if boss_name not in user_notifications[user_id]:
-                if add_user_notification(user_id, boss_name):
+                if await add_user_notification(user_id, boss_name):
                     user_notifications[user_id].append(boss_name)
                     await ctx.send(f"✅ Você será notificado quando **{boss_name}** estiver disponível!")
                 else:
@@ -1212,7 +1208,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
         
         elif action.lower() in ['rem', 'remover', 'r']:
             if boss_name in user_notifications[user_id]:
-                if remove_user_notification(user_id, boss_name):
+                if await remove_user_notification(user_id, boss_name):
                     user_notifications[user_id].remove(boss_name)
                     await ctx.send(f"✅ Você NÃO será mais notificado para **{boss_name}**.")
                 else:
@@ -1273,7 +1269,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             return
         
         if action.lower() == 'create':
-            backup_file = create_backup()
+            backup_file = await create_backup()
             if backup_file:
                 try:
                     with open(backup_file, 'rb') as f:
@@ -1302,8 +1298,8 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
                 await interaction.response.defer()
                 backup_file = select.values[0]
                 
-                if restore_backup(backup_file):
-                    load_db_data(boss_timers, user_stats, user_notifications)
+                if await restore_backup(backup_file):
+                    await load_db_data(boss_timers, user_stats, user_notifications)
                     
                     await interaction.followup.send(
                         f"✅ Backup **{backup_file}** restaurado com sucesso!"
