@@ -30,7 +30,7 @@ BOSS_ABBREVIATIONS = {
     "genocider": "geno",
 }
 
-def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID):
+async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID):
     # Funções auxiliares
     def format_time_remaining(target_time):
         now = datetime.now(brazil_tz)

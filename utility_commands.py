@@ -19,7 +19,7 @@ from database import (
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
-def setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID):
+async def setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID):
     # Funções auxiliares
     async def create_ranking_embed():
         sorted_users = sorted(user_stats.items(), key=lambda x: x[1]['count'], reverse=True)
