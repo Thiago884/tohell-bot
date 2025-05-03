@@ -76,32 +76,24 @@ NOTIFICATION_CHANNEL_ID = 1364594212280078457  # Substitua pelo seu canal
 async def test_db_connection():
     """Testa a conexão com o banco de dados"""
     try:
-        # Testa a conexão criando um pool temporário
-        test_pool = await aiomysql.create_pool(
+        conn = mysql.connector.connect(
             host=os.getenv('DB_HOST', '192.185.214.113'),
             user=os.getenv('DB_USER', 'thia5326_tohell'),
             password=os.getenv('DB_PASSWORD', 'Thi@goba1102@@'),
-            db=os.getenv('DB_NAME', 'thia5326_tohell_bot'),
-            minsize=1,
-            maxsize=1,
+            database=os.getenv('DB_NAME', 'thia5326_tohell_bot'),
             connect_timeout=5
         )
-        
-        async with test_pool.acquire() as conn:
-            async with conn.cursor() as cursor:
-                await cursor.execute("SELECT 1")
-                result = await cursor.fetchone()
-                if result[0] == 1:
-                    print("✅ Conexão com o banco de dados estabelecida com sucesso!")
-                    return True
-        return False
-    except Exception as e:
+        if conn.is_connected():
+            print("✅ Conexão com o banco de dados estabelecida com sucesso!")
+            conn.close()  # Fechar a conexão após o teste
+            return True
+        else:
+            print("❌ Falha ao conectar ao banco de dados")
+            return False
+    except mysql.connector.Error as e:
         print(f"❌ Falha ao conectar ao banco de dados: {e}")
+        traceback.print_exc()
         return False
-    finally:
-        if 'test_pool' in locals():
-            test_pool.close()
-            await test_pool.wait_closed()
 
 @bot.event
 async def on_ready():
