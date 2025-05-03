@@ -18,18 +18,30 @@ async def create_pool():
     global pool
     try:
         pool = await aiomysql.create_pool(
-            host="192.185.214.113",
-            user="thia5326_tohell",
-            password="Thi@goba1102@@",
-            db="thia5326_tohell_bot",
+            host=os.getenv('DB_HOST', '192.185.214.113'),
+            user=os.getenv('DB_USER', 'thia5326_tohell'),
+            password=os.getenv('DB_PASSWORD', 'Thi@goba1102@@'),
+            db=os.getenv('DB_NAME', 'thia5326_tohell_bot'),
             minsize=1,
             maxsize=5,
             autocommit=True,
             connect_timeout=10,
-            pool_recycle=3600
+            pool_recycle=3600,
+            connect_kwargs={
+                'connect_timeout': 10,
+                'read_timeout': 10,
+                'write_timeout': 10
+            }
         )
         print("✅ Pool de conexão criado com sucesso!")
         return True
+    except aiomysql.OperationalError as err:
+        print(f"❌ Erro de conexão com o banco de dados: {err}")
+        print("Verifique se:")
+        print("- O servidor MySQL está online")
+        print("- As credenciais estão corretas")
+        print("- O servidor permite conexões do seu IP")
+        return False
     except Exception as err:
         print(f"❌ Erro ao criar pool de conexão: {err}")
         traceback.print_exc()
@@ -44,19 +56,28 @@ async def close_pool():
         print("✅ Pool de conexão fechado")
 
 async def connect_db():
-    """Obtém uma conexão do pool"""
+    """Obtém uma conexão do pool com tentativas de reconexão"""
     if pool is None:
         success = await create_pool()
         if not success:
             return None
     
-    try:
-        conn = await pool.acquire()
-        return conn
-    except Exception as err:
-        print(f"❌ Erro ao conectar ao banco de dados: {err}")
-        traceback.print_exc()
-        return None
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            conn = await pool.acquire()
+            return conn
+        except (aiomysql.OperationalError, aiomysql.InterfaceError) as e:
+            if attempt == max_retries - 1:
+                print(f"❌ Falha ao conectar após {max_retries} tentativas: {e}")
+                return None
+            print(f"⚠ Tentativa {attempt + 1} de {max_retries} - Reconectando...")
+            await asyncio.sleep(2 ** attempt)  # Exponential backoff
+            await create_pool()  # Tentar recriar o pool
+        except Exception as err:
+            print(f"❌ Erro ao conectar ao banco de dados: {err}")
+            traceback.print_exc()
+            return None
 
 async def init_db():
     """Inicializa as tabelas do banco de dados"""

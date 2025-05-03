@@ -76,18 +76,32 @@ NOTIFICATION_CHANNEL_ID = 1364594212280078457  # Substitua pelo seu canal
 async def test_db_connection():
     """Testa a conexão com o banco de dados"""
     try:
-        conn = await create_pool()
-        if conn:
-            print("✅ Conexão com o banco de dados estabelecida com sucesso!")
-            await close_pool()
-            return True
-        else:
-            print("❌ Falha ao conectar ao banco de dados")
-            return False
-    except Exception as e:
-        print(f"❌ Erro ao testar conexão com o banco: {e}")
-        traceback.print_exc()
+        # Testa a conexão criando um pool temporário
+        test_pool = await aiomysql.create_pool(
+            host=os.getenv('DB_HOST', '192.185.214.113'),
+            user=os.getenv('DB_USER', 'thia5326_tohell'),
+            password=os.getenv('DB_PASSWORD', 'Thi@goba1102@@'),
+            db=os.getenv('DB_NAME', 'thia5326_tohell_bot'),
+            minsize=1,
+            maxsize=1,
+            connect_timeout=5
+        )
+        
+        async with test_pool.acquire() as conn:
+            async with conn.cursor() as cursor:
+                await cursor.execute("SELECT 1")
+                result = await cursor.fetchone()
+                if result[0] == 1:
+                    print("✅ Conexão com o banco de dados estabelecida com sucesso!")
+                    return True
         return False
+    except Exception as e:
+        print(f"❌ Falha ao conectar ao banco de dados: {e}")
+        return False
+    finally:
+        if 'test_pool' in locals():
+            test_pool.close()
+            await test_pool.wait_closed()
 
 @bot.event
 async def on_ready():
@@ -120,9 +134,15 @@ async def on_ready():
         db_connected = await test_db_connection()
         if db_connected:
             await create_pool()
-            await init_db()
-            await load_db_data(boss_timers, user_stats, user_notifications)
-            print("✅ Banco de dados pronto!")
+            db_initialized = await init_db()
+            if db_initialized:
+                loaded = await load_db_data(boss_timers, user_stats, user_notifications)
+                if loaded:
+                    print("✅ Banco de dados pronto!")
+                else:
+                    print("⚠ Dados não puderam ser carregados - usando dados em memória")
+            else:
+                print("⚠ Tabelas não puderam ser inicializadas - usando dados em memória")
         else:
             print("⚠ Banco de dados não disponível - usando dados em memória")
     except Exception as e:
