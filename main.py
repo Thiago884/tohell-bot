@@ -1,15 +1,16 @@
+import mysql.connector
+import os
 import discord
 from discord.ext import commands, tasks
-from discord import app_commands, HTTPException
-import os
 import asyncio
-from flask import Flask
-from threading import Thread
-from collections import defaultdict
+import pytz
+from datetime import datetime, timedelta
 import traceback
-from datetime import datetime
 from bot_commands import setup_bot_commands
-from database import init_db, load_db_data, connect_db
+from database import connect_db, load_db_data, save_db_data, clear_db_data, create_backup, restore_backup
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Configuração do Flask (keep-alive)
 app = Flask(__name__)
