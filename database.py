@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import json
 import os
 from typing import Optional
+import asyncio
 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
@@ -14,15 +15,23 @@ pool: Optional[aiomysql.Pool] = None
 async def create_pool():
     """Cria o pool de conexões com o banco de dados"""
     global pool
-    pool = await aiomysql.create_pool(
-        host="192.185.214.113",
-        user="thia5326_tohell",
-        password="Thi@goba1102@@",
-        db="thia5326_tohell_bot",
-        minsize=1,
-        maxsize=5,
-        autocommit=True
-    )
+    try:
+        pool = await aiomysql.create_pool(
+            host="192.185.214.113",
+            user="thia5326_tohell",
+            password="Thi@goba1102@@",
+            db="thia5326_tohell_bot",
+            minsize=1,
+            maxsize=5,
+            autocommit=True,
+            connect_timeout=10,
+            pool_recycle=3600
+        )
+        print("✅ Pool de conexão criado com sucesso!")
+        return True
+    except Exception as err:
+        print(f"❌ Erro ao criar pool de conexão: {err}")
+        return False
 
 async def close_pool():
     """Fecha o pool de conexões"""
@@ -30,23 +39,28 @@ async def close_pool():
     if pool is not None:
         pool.close()
         await pool.wait_closed()
+        print("✅ Pool de conexão fechado")
 
 async def connect_db():
     """Obtém uma conexão do pool"""
     if pool is None:
-        await create_pool()
+        success = await create_pool()
+        if not success:
+            return None
+    
     try:
         conn = await pool.acquire()
         return conn
     except Exception as err:
-        print(f"Erro ao conectar ao banco de dados: {err}")
+        print(f"❌ Erro ao conectar ao banco de dados: {err}")
         return None
 
-# Inicializar o banco de dados
 async def init_db():
+    """Inicializa as tabelas do banco de dados"""
     conn = await connect_db()
     if conn is None:
-        return
+        print("⚠ Banco de dados não disponível - usando dados em memória")
+        return False
     
     try:
         async with conn.cursor() as cursor:
@@ -86,17 +100,21 @@ async def init_db():
             )
             """)
             
-        print("Banco de dados inicializado com sucesso!")
+        print("✅ Tabelas do banco de dados verificadas/criadas")
+        return True
     except Exception as err:
-        print(f"Erro ao inicializar banco de dados: {err}")
+        print(f"❌ Erro ao inicializar banco de dados: {err}")
+        return False
     finally:
-        pool.release(conn)
+        if conn:
+            pool.release(conn)
 
-# Carregar dados do banco de dados
 async def load_db_data(boss_timers, user_stats, user_notifications):
+    """Carrega dados do banco de dados para as estruturas em memória"""
     conn = await connect_db()
     if conn is None:
-        return
+        print("⚠ Banco de dados não disponível - usando dados em memória")
+        return False
     
     try:
         async with conn.cursor(aiomysql.DictCursor) as cursor:
@@ -123,8 +141,10 @@ async def load_db_data(boss_timers, user_stats, user_notifications):
             
             for stat in stats:
                 user_stats[stat['user_id']] = {
+
                     'count': stat['count'],
-                    'last_recorded': stat['last_recorded'].replace(tzinfo=brazil_tz) if stat['last_recorded'] else None
+                    'last_recorded': stat['last_recorded'].replace(tzinfo=brazil_tz) if stat['last_recorded'] else None,
+                    'username': stat['username']
                 }
             
             # Carregar notificações personalizadas
@@ -137,19 +157,24 @@ async def load_db_data(boss_timers, user_stats, user_notifications):
                 
                 if user_id not in user_notifications:
                     user_notifications[user_id] = []
-                user_notifications[user_id].append(boss_name)
+                if boss_name not in user_notifications[user_id]:
+                    user_notifications[user_id].append(boss_name)
             
-            print("Dados carregados do banco de dados com sucesso!")
+        print("✅ Dados carregados do banco de dados")
+        return True
     except Exception as err:
-        print(f"Erro ao carregar dados do banco: {err}")
+        print(f"❌ Erro ao carregar dados do banco: {err}")
+        return False
     finally:
-        pool.release(conn)
+        if conn:
+            pool.release(conn)
 
-# Salvar dados no banco de dados
 async def save_timer(boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified=False):
+    """Salva ou atualiza um timer de boss no banco de dados"""
     conn = await connect_db()
     if conn is None:
-        return
+        print("⚠ Banco de dados não disponível - dados não serão persistidos")
+        return False
     
     try:
         async with conn.cursor() as cursor:
@@ -164,16 +189,21 @@ async def save_timer(boss_name, sala, death_time, respawn_time, closed_time, rec
                 opened_notified = VALUES(opened_notified)
             """, (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified))
             
-            print(f"Timer salvo: {boss_name} (Sala {sala})")
+            print(f"✅ Timer salvo: {boss_name} (Sala {sala})")
+            return True
     except Exception as err:
-        print(f"Erro ao salvar timer: {err}")
+        print(f"❌ Erro ao salvar timer: {err}")
+        return False
     finally:
-        pool.release(conn)
+        if conn:
+            pool.release(conn)
 
 async def save_user_stats(user_id, username, count, last_recorded):
+    """Salva ou atualiza estatísticas de usuário no banco de dados"""
     conn = await connect_db()
     if conn is None:
-        return
+        print("⚠ Banco de dados não disponível - dados não serão persistidos")
+        return False
     
     try:
         async with conn.cursor() as cursor:
@@ -185,15 +215,20 @@ async def save_user_stats(user_id, username, count, last_recorded):
                 count = VALUES(count),
                 last_recorded = VALUES(last_recorded)
             """, (user_id, username, count, last_recorded))
+            return True
     except Exception as err:
-        print(f"Erro ao salvar estatísticas do usuário: {err}")
+        print(f"❌ Erro ao salvar estatísticas do usuário: {err}")
+        return False
     finally:
-        pool.release(conn)
+        if conn:
+            pool.release(conn)
 
 async def clear_timer(boss_name, sala=None):
+    """Remove um timer de boss do banco de dados"""
     conn = await connect_db()
     if conn is None:
-        return
+        print("⚠ Banco de dados não disponível - dados não serão persistidos")
+        return False
     
     try:
         async with conn.cursor() as cursor:
@@ -201,14 +236,19 @@ async def clear_timer(boss_name, sala=None):
                 await cursor.execute("DELETE FROM boss_timers WHERE boss_name = %s", (boss_name,))
             else:
                 await cursor.execute("DELETE FROM boss_timers WHERE boss_name = %s AND sala = %s", (boss_name, sala))
+            return True
     except Exception as err:
-        print(f"Erro ao limpar timer: {err}")
+        print(f"❌ Erro ao limpar timer: {err}")
+        return False
     finally:
-        pool.release(conn)
+        if conn:
+            pool.release(conn)
 
 async def add_user_notification(user_id, boss_name):
+    """Adiciona uma notificação de boss para um usuário"""
     conn = await connect_db()
     if conn is None:
+        print("⚠ Banco de dados não disponível - dados não serão persistidos")
         return False
     
     try:
@@ -220,17 +260,19 @@ async def add_user_notification(user_id, boss_name):
                 user_id = VALUES(user_id),
                 boss_name = VALUES(boss_name)
             """, (user_id, boss_name))
-            
             return True
     except Exception as err:
-        print(f"Erro ao adicionar notificação: {err}")
+        print(f"❌ Erro ao adicionar notificação: {err}")
         return False
     finally:
-        pool.release(conn)
+        if conn:
+            pool.release(conn)
 
 async def remove_user_notification(user_id, boss_name):
+    """Remove uma notificação de boss para um usuário"""
     conn = await connect_db()
     if conn is None:
+        print("⚠ Banco de dados não disponível - dados não serão persistidos")
         return False
     
     try:
@@ -239,17 +281,19 @@ async def remove_user_notification(user_id, boss_name):
             DELETE FROM user_notifications
             WHERE user_id = %s AND boss_name = %s
             """, (user_id, boss_name))
-            
             return cursor.rowcount > 0
     except Exception as err:
-        print(f"Erro ao remover notificação: {err}")
+        print(f"❌ Erro ao remover notificação: {err}")
         return False
     finally:
-        pool.release(conn)
+        if conn:
+            pool.release(conn)
 
 async def get_user_notifications(user_id):
+    """Obtém as notificações de boss de um usuário"""
     conn = await connect_db()
     if conn is None:
+        print("⚠ Banco de dados não disponível - usando dados em memória")
         return []
     
     try:
@@ -258,22 +302,23 @@ async def get_user_notifications(user_id):
             SELECT boss_name FROM user_notifications
             WHERE user_id = %s
             """, (user_id,))
-            
             return [row['boss_name'] for row in await cursor.fetchall()]
     except Exception as err:
-        print(f"Erro ao obter notificações: {err}")
+        print(f"❌ Erro ao obter notificações: {err}")
         return []
     finally:
-        pool.release(conn)
+        if conn:
+            pool.release(conn)
 
-# Funções para backup do banco de dados
 async def create_backup():
+    """Cria um backup dos dados em formato JSON"""
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_file = f"backup_{timestamp}.json"
         
         conn = await connect_db()
         if conn is None:
+            print("⚠ Banco de dados não disponível - não foi possível criar backup")
             return None
             
         try:
@@ -300,22 +345,24 @@ async def create_backup():
                 with open(backup_file, 'w') as f:
                     json.dump(backup_data, f, indent=4, default=str)
                 
-                print(f"Backup criado com sucesso: {backup_file}")
+                print(f"✅ Backup criado com sucesso: {backup_file}")
                 return backup_file
         finally:
-            pool.release(conn)
-            
+            if conn:
+                pool.release(conn)
     except Exception as e:
-        print(f"Erro ao criar backup: {e}")
+        print(f"❌ Erro ao criar backup: {e}")
         return None
 
 async def restore_backup(backup_file):
+    """Restaura um backup a partir de um arquivo JSON"""
     try:
         with open(backup_file, 'r') as f:
             backup_data = json.load(f)
             
         conn = await connect_db()
         if conn is None:
+            print("⚠ Banco de dados não disponível - não foi possível restaurar backup")
             return False
             
         try:
@@ -352,7 +399,7 @@ async def restore_backup(backup_file):
                         stat['last_recorded']
                     ))
                 
-                # Restaurar notificações personalizadas (se existirem no backup)
+                # Restaurar notificações personalizadas
                 if 'user_notifications' in backup_data:
                     for notification in backup_data['user_notifications']:
                         await cursor.execute("""
@@ -363,11 +410,11 @@ async def restore_backup(backup_file):
                             notification['boss_name']
                         ))
                 
-                print(f"Backup restaurado com sucesso: {backup_file}")
+                print(f"✅ Backup restaurado com sucesso: {backup_file}")
                 return True
         finally:
-            pool.release(conn)
-            
+            if conn:
+                pool.release(conn)
     except Exception as e:
-        print(f"Erro ao restaurar backup: {e}")
+        print(f"❌ Erro ao restaurar backup: {e}")
         return False

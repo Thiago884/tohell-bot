@@ -99,10 +99,17 @@ async def on_ready():
     
     # Inicialização do banco de dados
     print("\nInicializando banco de dados...")
-    await create_pool()
-    await init_db()
-    await load_db_data(boss_timers, user_stats, user_notifications)
-    print("✅ Banco de dados pronto!")
+    try:
+        db_connected = await create_pool()
+        if db_connected:
+            await init_db()
+            await load_db_data(boss_timers, user_stats, user_notifications)
+            print("✅ Banco de dados pronto!")
+        else:
+            print("⚠ Banco de dados não disponível - usando dados em memória")
+    except Exception as e:
+        print(f"❌ Erro ao inicializar banco de dados: {e}")
+        print("⚠ O bot funcionará com dados em memória apenas")
     
     # Configura comandos e tasks
     print("\nConfigurando comandos...")
@@ -114,6 +121,7 @@ async def on_ready():
 async def on_disconnect():
     """Fecha o pool de conexões ao desconectar"""
     await close_pool()
+    print("⚠ Bot desconectado - pool de conexões fechado")
 
 @bot.tree.command(name="teste", description="Verifica se o bot está respondendo")
 async def teste(interaction: discord.Interaction):
