@@ -9,7 +9,7 @@ from collections import defaultdict
 import traceback
 from datetime import datetime
 from bot_commands import setup_bot_commands
-from database import init_db, load_db_data, create_pool, close_pool
+from database import init_db, load_db_data, connect_db
 
 # Configuração do Flask (keep-alive)
 app = Flask(__name__)
@@ -131,20 +131,15 @@ async def on_ready():
     # Inicialização do banco de dados
     print("\nInicializando banco de dados...")
     try:
-        db_connected = await test_db_connection()
-        if db_connected:
-            await create_pool()
-            db_initialized = await init_db()
-            if db_initialized:
-                loaded = await load_db_data(boss_timers, user_stats, user_notifications)
-                if loaded:
-                    print("✅ Banco de dados pronto!")
-                else:
-                    print("⚠ Dados não puderam ser carregados - usando dados em memória")
+        db_initialized = await init_db()
+        if db_initialized:
+            loaded = await load_db_data(boss_timers, user_stats, user_notifications)
+            if loaded:
+                print("✅ Banco de dados pronto!")
             else:
-                print("⚠ Tabelas não puderam ser inicializadas - usando dados em memória")
+                print("⚠ Dados não puderam ser carregados - usando dados em memória")
         else:
-            print("⚠ Banco de dados não disponível - usando dados em memória")
+            print("⚠ Tabelas não puderam ser inicializadas - usando dados em memória")
     except Exception as e:
         print(f"❌ Erro ao inicializar banco de dados: {e}")
         traceback.print_exc()

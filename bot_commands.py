@@ -310,7 +310,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
         
         try:
-            async with conn.cursor(aiomysql.DictCursor) as cursor:
+            async with conn.cursor() as cursor:
                 await cursor.execute("""
                 SELECT boss_name, sala, death_time, respawn_time, recorded_by 
                 FROM boss_timers 
@@ -351,7 +351,7 @@ async def setup_bot_commands(bot, boss_timers, user_stats, user_notifications, t
             return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
         
         try:
-            async with conn.cursor(aiomysql.DictCursor) as cursor:
+            async with conn.cursor() as cursor:
                 await cursor.execute("""
                 SELECT 
                     boss_name, 
