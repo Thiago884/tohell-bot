@@ -8,7 +8,8 @@ from threading import Thread
 from collections import defaultdict
 import traceback
 from datetime import datetime
-from bot_commands import setup_bot_commands
+from boss_commands import setup_boss_commands
+from utility_commands import setup_utility_commands
 from database import init_db, load_db_data
 
 # Configuração do Flask (keep-alive)
@@ -104,8 +105,11 @@ async def on_ready():
     print("✅ Banco de dados pronto!")
     
     # Configura comandos e tasks
-    print("\nConfigurando comandos...")
-    await setup_bot_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
+    print("\nConfigurando comandos de boss...")
+    await setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
+    
+    print("\nConfigurando comandos utilitários...")
+    await setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
     
     print("\n✅ Bot totalmente inicializado e pronto para uso!")
 
