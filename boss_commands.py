@@ -396,8 +396,24 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
     async def periodic_table_update():
         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
         if channel:
-            await update_table(channel)
+            # Enviar nova mensagem com a tabela atualizada
+            embed = create_boss_embed()
+            view = BossControlView(
+                bot, 
+                boss_timers, 
+                user_stats, 
+                user_notifications, 
+                table_message, 
+                NOTIFICATION_CHANNEL_ID,
+                update_table,
+                create_next_bosses_embed,
+                create_ranking_embed,
+                create_history_embed,
+                create_unrecorded_embed
+            )
+            await channel.send(embed=embed, view=view)
         
+        # Ajustar o intervalo para um valor aleatório entre 30 e 60 minutos
         periodic_table_update.change_interval(minutes=random.randint(30, 60))
 
     # Comandos
@@ -465,7 +481,8 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                 f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT"
             )
             
-            await update_table(ctx.channel)
+            # Enviar a tabela atualizada
+            await bosses_command(ctx)
                 
         except ValueError:
             await ctx.send("Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)")
@@ -541,7 +558,8 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
             clear_timer(boss_name, sala)
             await ctx.send(f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.")
         
-        await update_table(ctx.channel)
+        # Enviar a tabela atualizada
+        await bosses_command(ctx)
 
     @bot.command(name='setupboss')
     async def setup_boss(ctx):

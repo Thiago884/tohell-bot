@@ -1,15 +1,69 @@
 # views.py
 import discord
-from discord.ui import Button, View, Modal
+from discord.ui import Button, View, Modal, Select
 from discord import TextStyle
 from datetime import datetime, timedelta
 import pytz
 import traceback
 import os
+import random
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time
 from database import save_timer, save_user_stats, clear_timer, add_user_notification, remove_user_notification, create_backup, restore_backup, load_db_data
 
 brazil_tz = pytz.timezone('America/Sao_Paulo')
+
+def create_boss_embed(boss_timers, compact=False):
+    now = datetime.now(brazil_tz)
+    
+    embed = discord.Embed(
+        title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
+        color=discord.Color.gold()
+    )
+    
+    for boss in boss_timers:
+        boss_info = []
+        for sala in boss_timers[boss]:
+            timers = boss_timers[boss][sala]
+            
+            if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
+                continue
+                
+            if compact and timers['death_time'] is None:
+                continue
+                
+            death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
+            respawn_time = timers['respawn_time'].strftime("%H:%M") if timers['respawn_time'] else "--:--"
+            closed_time = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
+            recorded_by = f" ({timers['recorded_by']})" if timers['recorded_by'] else ""
+            
+            status = ""
+            if timers['respawn_time']:
+                if now >= timers['respawn_time']:
+                    if timers['closed_time'] and now >= timers['closed_time']:
+                        status = "❌"
+                    else:
+                        status = "✅"
+                else:
+                    time_left = format_time_remaining(timers['respawn_time'])
+                    status = f"🕒 ({time_left})"
+            else:
+                status = "❌"
+            
+            boss_info.append(
+                f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
+            )
+        
+        if not boss_info and compact:
+            continue
+            
+        if boss_info:
+            embed.add_field(
+                name=f"**{boss}**",
+                value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
+                inline=False
+            )
+    
+    return embed
 
 class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
     boss = discord.ui.TextInput(
@@ -39,12 +93,19 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
         max_length=1
     )
 
-    def __init__(self, boss_timers, user_stats, user_notifications, update_table_func):
+    def __init__(self, bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
         super().__init__()
+        self.bot = bot
         self.boss_timers = boss_timers
         self.user_stats = user_stats
         self.user_notifications = user_notifications
+        self.table_message = table_message
+        self.NOTIFICATION_CHANNEL_ID = NOTIFICATION_CHANNEL_ID
         self.update_table_func = update_table_func
+        self.create_next_bosses_embed_func = create_next_bosses_embed_func
+        self.create_ranking_embed_func = create_ranking_embed_func
+        self.create_history_embed_func = create_history_embed_func
+        self.create_unrecorded_embed_func = create_unrecorded_embed_func
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -125,10 +186,23 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                     ephemeral=False
                 )
                 
-                channel = interaction.channel
-                if channel:
-                    await self.update_table_func(channel)
-                    
+                # Enviar a tabela atualizada
+                embed = create_boss_embed(self.boss_timers)
+                view = BossControlView(
+                    self.bot,
+                    self.boss_timers,
+                    self.user_stats,
+                    self.user_notifications,
+                    self.table_message,
+                    self.NOTIFICATION_CHANNEL_ID,
+                    self.update_table_func,
+                    self.create_next_bosses_embed_func,
+                    self.create_ranking_embed_func,
+                    self.create_history_embed_func,
+                    self.create_unrecorded_embed_func
+                )
+                await interaction.followup.send(embed=embed, view=view)
+                
             except ValueError:
                 await interaction.response.send_message(
                     "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
@@ -157,10 +231,17 @@ class LimparBossModal(Modal, title="Limpar Boss"):
         max_length=1
     )
 
-    def __init__(self, boss_timers, update_table_func):
+    def __init__(self, bot, boss_timers, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
         super().__init__()
+        self.bot = bot
         self.boss_timers = boss_timers
+        self.table_message = table_message
+        self.NOTIFICATION_CHANNEL_ID = NOTIFICATION_CHANNEL_ID
         self.update_table_func = update_table_func
+        self.create_next_bosses_embed_func = create_next_bosses_embed_func
+        self.create_ranking_embed_func = create_ranking_embed_func
+        self.create_history_embed_func = create_history_embed_func
+        self.create_unrecorded_embed_func = create_unrecorded_embed_func
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -217,7 +298,22 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                     )
                     return
             
-            await self.update_table_func(interaction.channel)
+            # Enviar a tabela atualizada
+            embed = create_boss_embed(self.boss_timers)
+            view = BossControlView(
+                self.bot,
+                self.boss_timers,
+                {},  # user_stats não é usado na view
+                {},  # user_notifications não é usado na view
+                self.table_message,
+                self.NOTIFICATION_CHANNEL_ID,
+                self.update_table_func,
+                self.create_next_bosses_embed_func,
+                self.create_ranking_embed_func,
+                self.create_history_embed_func,
+                self.create_unrecorded_embed_func
+            )
+            await interaction.followup.send(embed=embed, view=view)
             
         except Exception as e:
             print(f"Erro no modal de limpar boss: {str(e)}")
@@ -335,7 +431,19 @@ class BossControlView(View):
                 return
 
             if not interaction.response.is_done():
-                modal = AnotarBossModal(self.boss_timers, self.user_stats, self.user_notifications, self.update_table_func)
+                modal = AnotarBossModal(
+                    self.bot,
+                    self.boss_timers,
+                    self.user_stats,
+                    self.user_notifications,
+                    self.table_message,
+                    self.NOTIFICATION_CHANNEL_ID,
+                    self.update_table_func,
+                    self.create_next_bosses_embed_func,
+                    self.create_ranking_embed_func,
+                    self.create_history_embed_func,
+                    self.create_unrecorded_embed_func
+                )
                 await interaction.response.send_modal(modal)
             else:
                 await interaction.followup.send("Por favor, tente novamente.", ephemeral=True)
@@ -364,7 +472,17 @@ class BossControlView(View):
                 return
 
             if not interaction.response.is_done():
-                modal = LimparBossModal(self.boss_timers, self.update_table_func)
+                modal = LimparBossModal(
+                    self.bot,
+                    self.boss_timers,
+                    self.table_message,
+                    self.NOTIFICATION_CHANNEL_ID,
+                    self.update_table_func,
+                    self.create_next_bosses_embed_func,
+                    self.create_ranking_embed_func,
+                    self.create_history_embed_func,
+                    self.create_unrecorded_embed_func
+                )
                 await interaction.response.send_modal(modal)
             else:
                 await interaction.followup.send("Por favor, tente novamente.", ephemeral=True)
