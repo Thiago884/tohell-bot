@@ -25,6 +25,18 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                                create_boss_embed_func, update_table_func, create_next_bosses_embed_func,
                                create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
     
+    # Mapeamento de imagens dos bosses
+    BOSS_IMAGES = {
+        "Super Red Dragon": f"{os.getenv('PUBLIC_URL', '')}/static/super-red-dragon.jpg",
+        "Hell Maine": f"{os.getenv('PUBLIC_URL', '')}/static/hellmaine.png",
+        "Illusion of Kundun": f"{os.getenv('PUBLIC_URL', '')}/static/relics-of-kundun.jpg",
+        "Death Beam Knight": f"{os.getenv('PUBLIC_URL', '')}/static/DBK.png",
+        "Genocider": f"{os.getenv('PUBLIC_URL', '')}/static/GENOCIDER.png",
+        "Phoenix of Darkness": f"{os.getenv('PUBLIC_URL', '')}/static/Phoenix.png",
+        "Hydra": f"{os.getenv('PUBLIC_URL', '')}/static/hydra.png",
+        "Rei Kundun": f"{os.getenv('PUBLIC_URL', '')}/static/Rei_Kundun.jpg"
+    }
+
     async def create_ranking_embed():
         sorted_users = sorted(user_stats.items(), key=lambda x: x[1]['count'], reverse=True)
         
@@ -397,6 +409,10 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             title=f"🎁 Drops do {boss_found}",
             color=discord.Color.green()
         )
+        
+        # Adicionar thumbnail se existir
+        if boss_found in BOSS_IMAGES:
+            embed.set_thumbnail(url=BOSS_IMAGES[boss_found])
         
         for drop in BOSS_DROPS[boss_found]['drops']:
             embed.add_field(

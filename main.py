@@ -3,7 +3,7 @@ from discord.ext import commands, tasks
 from discord import app_commands, HTTPException
 import os
 import asyncio
-from flask import Flask
+from flask import Flask, send_from_directory
 from threading import Thread
 from collections import defaultdict
 import traceback
@@ -24,12 +24,9 @@ def home():
 def health():
     return "OK", 200
 
-@app.route('/status')
-def status():
-    if bot.is_ready():
-        return "Bot is online and ready", 200
-    else:
-        return "Bot is connecting", 503
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    return send_from_directory('static', filename)
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
