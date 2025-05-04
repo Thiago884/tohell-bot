@@ -189,6 +189,81 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         finally:
             conn.close()
 
+    # Mapeamento de drops dos bosses
+    BOSS_DROPS = {
+        "Super Red Dragon": {
+            "abreviações": ["red", "red dragon"],
+            "drops": [
+                "50% Jewel of Bless (pacote 30 ~ 60 unidades)",
+                "50% Jewel of Soul (pacote 30 ~ 60 unidades)"
+            ]
+        },
+        "Hell Maine": {
+            "abreviações": ["hell", "hell maine"],
+            "drops": [
+                "50% Jewel of Bless (pacote 30 ~ 60 unidades)",
+                "50% Jewel of Soul (pacote 30 ~ 60 unidades)"
+            ]
+        },
+        "Illusion of Kundun": {
+            "abreviações": ["illusion", "kundun", "iok"],
+            "drops": [
+                "25% Jewel of Bless (pacote 10 unidades)",
+                "25% Jewel of Soul (pacote 10 unidades)",
+                "5% Jewel of Bless (pacote 20 unidades)",
+                "5% Jewel of Soul (pacote 20 unidades)",
+                "5% Jewel of Bless (pacote 30 unidades)",
+                "5% Jewel of Soul (pacote 30 unidades)",
+                "5% SD Potion +13 (100 unidades)",
+                "5% Complex Potion +13 (100 unidades)",
+                "5% SD Potion +13 (50 unidades)",
+                "5% Complex Potion +13 (50 unidades)",
+                "5% 5x Large Healing Potion +13 (100 unidades)",
+                "5% 5x Healing Potion +13 (60 unidades)",
+                "10% 5x E-Zen"
+            ]
+        },
+        "Death Beam Knight": {
+            "abreviações": ["dbk", "death beam", "beam knight"],
+            "drops": [
+                "20% Small Complex Potion +13 (30 ~ 100 unidades)",
+                "25% Complex Potion +13 (30 ~ 100 unidades)",
+                "20% Small SD Potion +13 (30 ~ 100 unidades)",
+                "25% SD Potion +13 (30 ~ 100 unidades)",
+                "5% Sign of lord (255 unidades)",
+                "5% 5~10x Jewel of Guardian"
+            ]
+        },
+        "Genocider": {
+            "abreviações": ["geno", "genocider"],
+            "drops": [
+                "20% 1 ~ 10x Jewel of Harmony",
+                "80% 5 ~ 10x Gemstone"
+            ]
+        },
+        "Phoenix of Darkness": {
+            "abreviações": ["phoenix", "dark phoenix"],
+            "drops": [
+                "40% 1 ~ 4x Loch's Feather",
+                "30% 1 ~ 3x Crest of monarch",
+                "30% 1 ~ 2x Spirit of Dark Horse / Spirit of Dark Spirit"
+            ]
+        },
+        "Hydra": {
+            "abreviações": ["hydra"],
+            "drops": [
+                "50% 10x Jewel of Chaos",
+                "50% SD Potion (15 unidades) / Complex Potion (15 unidades)"
+            ]
+        },
+        "Rei Kundun": {
+            "abreviações": ["rei", "rei kundun"],
+            "drops": [
+                "Informações de drops não disponíveis"
+            ]
+        }
+    }
+
     # Comandos
     @bot.command(name='ranking')
     async def ranking_command(ctx):
@@ -278,6 +353,59 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             return
         
         embed = await create_unrecorded_embed()
+        await ctx.send(embed=embed)
+
+    @bot.command(name='drops')
+    async def drops_command(ctx, boss_name: str = None):
+        if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
+            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+            return
+
+        if boss_name is None:
+            # Mostrar lista de bosses com abreviações
+            embed = discord.Embed(
+                title="📚 Drops dos Bosses",
+                description="Use `!drops <nome_do_boss>` para ver informações específicas\nExemplo: `!drops hydra`",
+                color=discord.Color.blue()
+            )
+            
+            for boss, info in BOSS_DROPS.items():
+                embed.add_field(
+                    name=f"**{boss}**",
+                    value=f"Abreviações: {', '.join(info['abreviações'])}",
+                    inline=False
+                )
+            
+            await ctx.send(embed=embed)
+            return
+
+        # Encontrar o boss pelo nome ou abreviação
+        boss_found = None
+        boss_name_lower = boss_name.lower()
+        
+        for boss, info in BOSS_DROPS.items():
+            if boss_name_lower in [b.lower() for b in info['abreviações']] or boss_name_lower in boss.lower():
+                boss_found = boss
+                break
+
+        if not boss_found:
+            await ctx.send(f"Boss não encontrado. Use `!drops` sem argumentos para ver a lista de bosses.")
+            return
+
+        # Criar embed com os drops do boss
+        embed = discord.Embed(
+            title=f"🎁 Drops do {boss_found}",
+            color=discord.Color.green()
+        )
+        
+        for drop in BOSS_DROPS[boss_found]['drops']:
+            embed.add_field(
+                name="\u200b",
+                value=f"• {drop}",
+                inline=False
+            )
+        
+        embed.set_footer(text=f"Abreviações: {', '.join(BOSS_DROPS[boss_found]['abreviações'])}")
         await ctx.send(embed=embed)
 
     @bot.command(name='backup')
@@ -405,6 +533,11 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         embed.add_field(
             name="!naoanotados",
             value="Mostra os últimos bosses que fecharam sem anotações",
+            inline=False
+        )
+        embed.add_field(
+            name="!drops [boss]",
+            value="Mostra os possíveis drops de um boss específico ou lista todos os bosses\nEx: `!drops hydra` ou `!drops` para lista completa",
             inline=False
         )
         embed.add_field(
