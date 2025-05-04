@@ -16,7 +16,7 @@ from database import (
     create_backup, restore_backup, connect_db
 )
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time, get_next_bosses
-from utility_commands import BossControlView  # Importando a view unificada
+from utility_commands import BossControlView, create_next_bosses_embed, send_notification_dm
 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
@@ -109,54 +109,6 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                 table_message = await channel.send(embed=create_boss_embed(), view=BossControlView())
             except Exception as e:
                 print(f"Erro ao enviar nova mensagem de tabela: {e}")
-
-    async def create_next_bosses_embed():
-        next_bosses = get_next_bosses(boss_timers)
-        
-        embed = discord.Embed(
-            title="⏳ PRÓXIMOS BOSSES E BOSSES ABERTOS",
-            color=discord.Color.blue()
-        )
-        
-        if not next_bosses:
-            embed.description = "Nenhum boss programado para abrir em breve ou atualmente aberto."
-            return embed
-        
-        boss_info = []
-        for boss in next_bosses:
-            recorded_by = f" (Anotado por: {boss['recorded_by']})" if boss['recorded_by'] else ""
-            
-            if boss['status'] == 'open':
-                boss_info.append(
-                    f"🟢 **{boss['boss']} (Sala {boss['sala']})** - ABERTO AGORA!\n"
-                    f"⏳ Fecha em: {boss['time_left']} ({boss['closed_time'].strftime('%d/%m %H:%M')} BRT){recorded_by}"
-                )
-            else:
-                boss_info.append(
-                    f"🟡 **{boss['boss']} (Sala {boss['sala']})** - ABRE EM {boss['time_left']}\n"
-                    f"⏰ Horário: {boss['respawn_time'].strftime('%d/%m %H:%M')} BRT{recorded_by}"
-                )
-        
-        embed.description = "\n\n".join(boss_info)
-        return embed
-
-    async def send_notification_dm(user_id, boss_name, sala, respawn_time, closed_time):
-        try:
-            user = await bot.fetch_user(int(user_id))
-            if user:
-                await user.send(
-                    f"🔔 **Notificação de Boss** 🔔\n"
-                    f"O boss **{boss_name} (Sala {sala})** que você marcou está disponível AGORA!\n"
-                    f"✅ Aberto até: {closed_time.strftime('%d/%m %H:%M')} BRT\n"
-                    f"Corra para pegar seu loot! 🏆"
-                )
-                return True
-        except discord.Forbidden:
-            print(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
-        except Exception as e:
-            print(f"Erro ao enviar DM para {user_id}: {e}")
-        
-        return False
 
     # Modals
     class AnotarBossModal(discord.ui.Modal, title="Anotar Horário do Boss"):
@@ -433,6 +385,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
         if dm_notifications:
             for notification in dm_notifications:
                 await send_notification_dm(
+                    bot,
                     notification['user_id'],
                     notification['boss_name'],
                     notification['sala'],
@@ -537,7 +490,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
         
-        embed = await create_next_bosses_embed()
+        embed = await create_next_bosses_embed(boss_timers)
         await ctx.send(embed=embed)
 
     @bot.command(name='clearboss')
