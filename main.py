@@ -11,6 +11,7 @@ from datetime import datetime
 from boss_commands import setup_boss_commands
 from utility_commands import setup_utility_commands
 from database import init_db, load_db_data
+from shared_functions import get_next_bosses  # ✅ Importação adicionada
 
 # Configuração do Flask (keep-alive)
 app = Flask(__name__)

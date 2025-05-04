@@ -111,4 +111,4 @@ def validate_time(hour, minute):
         return False
     if minute < 0 or minute > 59:
         return False
-    return True
+    return True 

@@ -13,14 +13,14 @@ import os
 from database import (
     save_timer, save_user_stats, clear_timer,
     add_user_notification, remove_user_notification, get_user_notifications,
-    create_backup, restore_backup, connect_db
+    create_backup, restore_backup, connect_db, load_db_data
 )
+from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time, get_next_bosses
 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
 async def setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID):
-    # Funções auxiliares
     async def create_ranking_embed():
         sorted_users = sorted(user_stats.items(), key=lambda x: x[1]['count'], reverse=True)
         
@@ -59,7 +59,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         return embed
 
     async def create_next_bosses_embed():
-        next_bosses = get_next_bosses()
+        next_bosses = get_next_bosses(boss_timers)
         
         embed = discord.Embed(
             title="⏳ PRÓXIMOS BOSSES E BOSSES ABERTOS",
@@ -243,7 +243,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
 
         async def on_submit(self, interaction: discord.Interaction):
             try:
-                boss_name = get_boss_by_abbreviation(self.boss.value)
+                boss_name = get_boss_by_abbreviation(self.boss.value, boss_timers)
                 if boss_name is None:
                     await interaction.response.send_message(
                         f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
@@ -330,7 +330,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             )
             return
         
-        full_boss_name = get_boss_by_abbreviation(boss_name)
+        full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
         if full_boss_name is None:
             await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
             return
