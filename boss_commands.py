@@ -15,7 +15,7 @@ from database import (
     add_user_notification, remove_user_notification, get_user_notifications,
     create_backup, restore_backup, connect_db
 )
-
+from shared_functions import get_next_bosses, format_time_remaining 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 

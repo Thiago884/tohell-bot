@@ -98,7 +98,7 @@ async def on_ready():
     except Exception as e:
         print(f"❌ Erro ao sincronizar comandos slash: {e}")
     
-    # Inicialização do banco de dados
+    # Inicialização do banco de dados e carregamento de dados
     print("\nInicializando banco de dados...")
     init_db()
     load_db_data(boss_timers, user_stats, user_notifications)
