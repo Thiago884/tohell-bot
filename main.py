@@ -12,6 +12,7 @@ from boss_commands import setup_boss_commands
 from utility_commands import setup_utility_commands
 from database import init_db, load_db_data
 from shared_functions import get_next_bosses
+import time  # Adicionado para tratamento de rate limits
 
 # Configuração do Flask (keep-alive)
 app = Flask(__name__)
@@ -139,8 +140,15 @@ if __name__ == "__main__":
     print("\n🔑 Token encontrado, iniciando bot...")
     try:
         bot.run(token)
-    except discord.LoginError:
+    except discord.errors.LoginFailure:
         print("\n❌ Falha no login: Token inválido!")
+    except discord.errors.HTTPException as e:
+        if e.status == 429:
+            print("\n⚠ Muitas requisições, aguardando antes de tentar novamente...")
+            time.sleep(10)  # Espera 10 segundos
+            bot.run(token)  # Tenta novamente
+        else:
+            raise
     except Exception as e:
         print(f"\n❌ Erro inesperado: {type(e).__name__}: {e}")
         traceback.print_exc()
