@@ -12,7 +12,6 @@ from boss_commands import setup_boss_commands
 from utility_commands import setup_utility_commands
 from database import init_db, load_db_data
 from shared_functions import get_next_bosses
-import time
 
 # Configuração do Flask (keep-alive)
 app = Flask(__name__)
@@ -138,37 +137,12 @@ if __name__ == "__main__":
         exit(1)
     
     print("\n🔑 Token encontrado, iniciando bot...")
-    
-    max_attempts = 3
-    attempt = 0
-    wait_time = 30  # segundos
-    
-    while attempt < max_attempts:
-        try:
-            bot.run(token)
-            break
-        except discord.errors.LoginFailure:
-            print("\n❌ Falha no login: Token inválido!")
-            break
-        except discord.errors.HTTPException as e:
-            if e.status == 429:
-                attempt += 1
-                print(f"\n⚠ Muitas requisições (tentativa {attempt}/{max_attempts}), aguardando {wait_time} segundos...")
-                time.sleep(wait_time)
-                wait_time *= 2  # Aumenta o tempo de espera exponencialmente
-            else:
-                raise
-        except RuntimeError as e:
-            if "Session is closed" in str(e):
-                print("\n⚠ Sessão fechada, tentando reiniciar...")
-                attempt += 1
-                time.sleep(wait_time)
-                wait_time *= 2
-            else:
-                raise
-        except Exception as e:
-            print(f"\n❌ Erro inesperado: {type(e).__name__}: {e}")
-            traceback.print_exc()
-            break
-    
-    print("\n🛑 Bot encerrado")
+    try:
+        bot.run(token)
+    except discord.LoginError:
+        print("\n❌ Falha no login: Token inválido!")
+    except Exception as e:
+        print(f"\n❌ Erro inesperado: {type(e).__name__}: {e}")
+        traceback.print_exc()
+    finally:
+        print("\n🛑 Bot encerrado")
