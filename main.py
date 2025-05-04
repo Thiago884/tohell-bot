@@ -107,10 +107,10 @@ async def on_ready():
     
     # Configura comandos e tasks
     print("\nConfigurando comandos de boss...")
-    await setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
+    boss_funcs = await setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
     
     print("\nConfigurando comandos utilitários...")
-    await setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
+    await setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, *boss_funcs)
     
     print("\n✅ Bot totalmente inicializado e pronto para uso!")
 
