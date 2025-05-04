@@ -203,79 +203,96 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
 
     # Mapeamento de drops dos bosses
     BOSS_DROPS = {
-        "Super Red Dragon": {
-            "abreviações": ["red", "red dragon"],
-            "drops": [
-                "50% Jewel of Bless (pacote 30 ~ 60 unidades)",
-                "50% Jewel of Soul (pacote 30 ~ 60 unidades)"
-            ]
-        },
-        "Hell Maine": {
-            "abreviações": ["hell", "hell maine"],
-            "drops": [
-                "50% Jewel of Bless (pacote 30 ~ 60 unidades)",
-                "50% Jewel of Soul (pacote 30 ~ 60 unidades)"
-            ]
-        },
-        "Illusion of Kundun": {
-            "abreviações": ["illusion", "kundun", "iok"],
-            "drops": [
-                "25% Jewel of Bless (pacote 10 unidades)",
-                "25% Jewel of Soul (pacote 10 unidades)",
-                "5% Jewel of Bless (pacote 20 unidades)",
-                "5% Jewel of Soul (pacote 20 unidades)",
-                "5% Jewel of Bless (pacote 30 unidades)",
-                "5% Jewel of Soul (pacote 30 unidades)",
-                "5% SD Potion +13 (100 unidades)",
-                "5% Complex Potion +13 (100 unidades)",
-                "5% SD Potion +13 (50 unidades)",
-                "5% Complex Potion +13 (50 unidades)",
-                "5% 5x Large Healing Potion +13 (100 unidades)",
-                "5% 5x Healing Potion +13 (60 unidades)",
-                "10% 5x E-Zen"
-            ]
-        },
-        "Death Beam Knight": {
-            "abreviações": ["dbk", "death beam", "beam knight"],
-            "drops": [
-                "20% Small Complex Potion +13 (30 ~ 100 unidades)",
-                "25% Complex Potion +13 (30 ~ 100 unidades)",
-                "20% Small SD Potion +13 (30 ~ 100 unidades)",
-                "25% SD Potion +13 (30 ~ 100 unidades)",
-                "5% Sign of lord (255 unidades)",
-                "5% 5~10x Jewel of Guardian"
-            ]
-        },
-        "Genocider": {
-            "abreviações": ["geno", "genocider"],
-            "drops": [
-                "20% 1 ~ 10x Jewel of Harmony",
-                "80% 5 ~ 10x Gemstone"
-            ]
-        },
-        "Phoenix of Darkness": {
-            "abreviações": ["phoenix", "dark phoenix"],
-            "drops": [
-                "40% 1 ~ 4x Loch's Feather",
-                "30% 1 ~ 3x Crest of monarch",
-                "30% 1 ~ 2x Spirit of Dark Horse / Spirit of Dark Spirit"
-            ]
-        },
-        "Hydra": {
-            "abreviações": ["hydra"],
-            "drops": [
-                "50% 10x Jewel of Chaos",
-                "50% SD Potion (15 unidades) / Complex Potion (15 unidades)"
-            ]
-        },
-        "Rei Kundun": {
-            "abreviações": ["rei", "rei kundun"],
-            "drops": [
-                "Informações de drops não disponíveis"
-            ]
-        }
+    "Super Red Dragon": {
+        "abreviações": ["red", "red dragon"],
+        "drops": [
+            "50% Jewel of Bless (pacote 30 ~ 60 unidades)",
+            "50% Jewel of Soul (pacote 30 ~ 60 unidades)"
+        ]
+    },
+    "Hell Maine": {
+        "abreviações": ["hell", "hell maine"],
+        "drops": [
+            "50% Jewel of Bless (pacote 30 ~ 60 unidades)",
+            "50% Jewel of Soul (pacote 30 ~ 60 unidades)"
+        ]
+    },
+    "Illusion of Kundun": {
+        "abreviações": ["illusion", "kundun", "iok"],
+        "drops": [
+            "25% Jewel of Bless (pacote 10 unidades)",
+            "25% Jewel of Soul (pacote 10 unidades)",
+            "5% Jewel of Bless (pacote 20 unidades)",
+            "5% Jewel of Soul (pacote 20 unidades)",
+            "5% Jewel of Bless (pacote 30 unidades)",
+            "5% Jewel of Soul (pacote 30 unidades)",
+            "5% SD Potion +13 (100 unidades)",
+            "5% Complex Potion +13 (100 unidades)",
+            "5% SD Potion +13 (50 unidades)",
+            "5% Complex Potion +13 (50 unidades)",
+            "5% 5x Large Healing Potion +13 (100 unidades)",
+            "5% 5x Healing Potion +13 (60 unidades)",
+            "10% 5x E-Zen"
+        ]
+    },
+    "Death Beam Knight": {
+        "abreviações": ["dbk", "death beam", "beam knight"],
+        "drops": [
+            "20% Small Complex Potion +13 (30 ~ 100 unidades)",
+            "25% Complex Potion +13 (30 ~ 100 unidades)",
+            "20% Small SD Potion +13 (30 ~ 100 unidades)",
+            "25% SD Potion +13 (30 ~ 100 unidades)",
+            "5% Sign of lord (255 unidades)",
+            "5% 5~10x Jewel of Guardian"
+        ]
+    },
+    "Genocider": {
+        "abreviações": ["geno", "genocider"],
+        "drops": [
+            "20% 1 ~ 10x Jewel of Harmony",
+            "80% 5 ~ 10x Gemstone"
+        ]
+    },
+    "Phoenix of Darkness": {
+        "abreviações": ["phoenix", "dark phoenix"],
+        "drops": [
+            "40% 1 ~ 4x Loch's Feather",
+            "30% 1 ~ 3x Crest of monarch",
+            "30% 1 ~ 2x Spirit of Dark Horse / Spirit of Dark Spirit"
+        ]
+    },
+    "Hydra": {
+        "abreviações": ["hydra"],
+        "drops": [
+            "50% 10x Jewel of Chaos",
+            "50% SD Potion (15 unidades) / Complex Potion (15 unidades)"
+        ]
+    },
+    "Rei Kundun": {
+        "abreviações": ["rei", "rei kundun"],
+        "drops": [
+            "3x (três vezes os seguintes itens e porcentagem respectiva):",
+            "100% Drop garantido",
+            "53,85% Jewel of Bless (pacote 10 unidades)",
+            "30,77% Jewel of Soul (pacote 10 unidades)",
+            "7,69% Jewel of Bless (pacote 20 ~ 60 unidades)",
+            "7,69% Jewel of Soul (pacote 20 ~ 60 unidades)",
+            "3x (três vezes os seguintes itens e porcentagem respectiva):",
+            "100% Drop possível",
+            "25% Item Ancient Aleatório",
+            "75% Sem drop",
+            "Notas adicionais:",
+            "Existem 2 tipos de drop no Kundun: joias e/ou Item Ancient.",
+            "Para cada tipo é feito o cálculo acima (3 sorteios cada).",
+            "Sempre haverá drop de joias, mas nem sempre de Item Ancient.",
+            "Probabilidades aproximadas para Item Ancient após os 3 sorteios:",
+            "0 Itens Ancient: 42%",
+            "1 Item Ancient: 42%",
+            "2 Itens Ancient: 14%",
+            "3 Itens Ancient: 2%"
+        ]
     }
-
+}
     # Comandos
     @bot.command(name='ranking')
     async def ranking_command(ctx):
