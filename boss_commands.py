@@ -16,20 +16,10 @@ from database import (
     create_backup, restore_backup, connect_db
 )
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time, get_next_bosses
+from utility_commands import BossControlView  # Importando a view unificada
 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
-
-# Mapeamento de abreviações
-BOSS_ABBREVIATIONS = {
-    "super red dragon": "red",
-    "hell maine": "hell",
-    "illusion of kundun": "illusion",
-    "death beam knight": "dbk",
-    "phoenix of darkness": "phoenix",
-    "rei kundun": "rei",
-    "genocider": "geno",
-}
 
 async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID):
     def create_boss_embed(compact=False):
@@ -97,29 +87,28 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                     await table_message.edit(embed=embed, view=view)
                     return
                 except discord.NotFound:
-                    table_message = await channel.send(embed=embed, view=view)
-                    return
+                    table_message = None
                 except Exception as e:
                     print(f"Erro ao editar mensagem da tabela: {e}")
-                    table_message = await channel.send(embed=embed, view=view)
-                    return
+                    table_message = None
             
-            async for message in channel.history(limit=50):
-                if message.author == bot.user and message.embeds and message.embeds[0].title.startswith("BOSS TIMER"):
-                    try:
-                        await message.edit(embed=embed, view=view)
-                        table_message = message
-                        return
-                    except:
-                        continue
+            if not table_message:
+                async for message in channel.history(limit=50):
+                    if message.author == bot.user and message.embeds and "BOSS TIMER" in message.embeds[0].title:
+                        try:
+                            await message.edit(embed=embed, view=view)
+                            table_message = message
+                            return
+                        except:
+                            continue
             
             table_message = await channel.send(embed=embed, view=view)
         except Exception as e:
             print(f"Erro ao atualizar tabela: {e}")
             try:
                 table_message = await channel.send(embed=create_boss_embed(), view=BossControlView())
-            except:
-                pass
+            except Exception as e:
+                print(f"Erro ao enviar nova mensagem de tabela: {e}")
 
     async def create_next_bosses_embed():
         next_bosses = get_next_bosses(boss_timers)
@@ -277,9 +266,6 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                     
                     channel = interaction.channel
                     if channel:
-                        embed = create_boss_embed()
-                        view = BossControlView()
-                        await channel.send("**Tabela atualizada:**", embed=embed, view=view)
                         await update_table(channel)
                         
                 except ValueError:
@@ -375,70 +361,6 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                     ephemeral=True
                 )
 
-    # Views
-    class BossControlView(discord.ui.View):
-        def __init__(self):
-            super().__init__(timeout=None)
-        
-        @discord.ui.button(label="Anotar Horário", style=discord.ButtonStyle.green, custom_id="boss_control:anotar", emoji="📝")
-        async def boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-            try:
-                if not interaction.response.is_done():
-                    modal = AnotarBossModal()
-                    await interaction.response.send_modal(modal)
-                else:
-                    await interaction.followup.send("Por favor, tente novamente.", ephemeral=True)
-            except Exception as e:
-                print(f"ERRO DETALHADO no botão de anotar: {str(e)}")
-                traceback.print_exc()
-                try:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            "Ocorreu um erro ao abrir o formulário.",
-                            ephemeral=True
-                        )
-                    else:
-                        await interaction.followup.send(
-                            "Ocorreu um erro ao abrir o formulário.",
-                            ephemeral=True
-                        )
-                except Exception as e:
-                    print(f"Erro ao enviar mensagem de erro: {e}")
-        
-        @discord.ui.button(label="Limpar Boss", style=discord.ButtonStyle.red, custom_id="boss_control:limpar", emoji="❌")
-        async def clear_boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-            try:
-                if not interaction.response.is_done():
-                    modal = LimparBossModal()
-                    await interaction.response.send_modal(modal)
-                else:
-                    await interaction.followup.send("Por favor, tente novamente.", ephemeral=True)
-            except Exception as e:
-                print(f"ERRO DETALHADO no botão de limpar: {str(e)}")
-                traceback.print_exc()
-                try:
-                    await interaction.followup.send(
-                        "Ocorreu um erro ao processar sua solicitação.",
-                        ephemeral=True
-                    )
-                except:
-                    pass
-        
-        @discord.ui.button(label="Próximos", style=discord.ButtonStyle.blurple, custom_id="boss_control:proximos", emoji="⏳")
-        async def next_bosses_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
-            try:
-                if not interaction.response.is_done():
-                    await interaction.response.defer()
-                embed = await create_next_bosses_embed()
-                await interaction.followup.send(embed=embed)
-            except Exception as e:
-                print(f"ERRO DETALHADO no botão de próximos bosses: {str(e)}")
-                traceback.print_exc()
-                try:
-                    await interaction.followup.send("Ocorreu um erro ao buscar os próximos bosses.", ephemeral=True)
-                except:
-                    pass
-
     # Tasks
     @tasks.loop(seconds=30)
     async def live_table_updater():
@@ -524,9 +446,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
     async def periodic_table_update():
         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
         if channel:
-            embed = create_boss_embed()
-            view = BossControlView()
-            await channel.send("**Atualização periódica dos horários de boss:**", embed=embed, view=view)
+            await update_table(channel)
         
         periodic_table_update.change_interval(minutes=random.randint(30, 60))
 
@@ -595,12 +515,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                 f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT"
             )
             
-            channel = ctx.channel
-            if channel:
-                embed = create_boss_embed()
-                view = BossControlView()
-                await channel.send("**Tabela atualizada:**", embed=embed, view=view)
-                await update_table(channel)
+            await update_table(ctx.channel)
                 
         except ValueError:
             await ctx.send("Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)")
@@ -676,10 +591,17 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
         view = BossControlView()
         await ctx.send(embed=embed, view=view)
 
+    @bot.command(name='resettable')
+    async def reset_table(ctx):
+        if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
+            return
+        
+        global table_message
+        table_message = None
+        await update_table(ctx.channel)
+        await ctx.send("✅ Tabela recriada com sucesso!", delete_after=5)
+
     # Iniciar as tasks
     check_boss_respawns.start()
     live_table_updater.start()
     periodic_table_update.start()
-
-    # Adicionar a view persistente
-    bot.add_view(BossControlView())
