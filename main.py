@@ -3,6 +3,7 @@ from discord.ext import commands, tasks
 from discord import app_commands, HTTPException
 import os
 import asyncio
+import time
 from flask import Flask, send_from_directory
 from threading import Thread
 from collections import defaultdict
@@ -98,18 +99,30 @@ async def on_ready():
     
     # Inicialização do banco de dados e carregamento de dados
     print("\nInicializando banco de dados...")
-    init_db()
-    load_db_data(boss_timers, user_stats, user_notifications)
-    print("✅ Banco de dados pronto!")
+    try:
+        if not init_db():
+            print("⚠ Falha ao inicializar banco de dados!")
+        else:
+            if not load_db_data(boss_timers, user_stats, user_notifications):
+                print("⚠ Falha ao carregar dados do banco!")
+            else:
+                print("✅ Banco de dados pronto!")
+    except Exception as e:
+        print(f"❌ Erro durante inicialização do banco: {str(e)}")
+        traceback.print_exc()
     
     # Configura comandos e tasks
     print("\nConfigurando comandos de boss...")
-    boss_funcs = await setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
-    
-    print("\nConfigurando comandos utilitários...")
-    await setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, *boss_funcs)
-    
-    print("\n✅ Bot totalmente inicializado e pronto para uso!")
+    try:
+        boss_funcs = await setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
+        
+        print("\nConfigurando comandos utilitários...")
+        await setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, *boss_funcs)
+        
+        print("\n✅ Bot totalmente inicializado e pronto para uso!")
+    except Exception as e:
+        print(f"❌ Erro ao configurar comandos: {str(e)}")
+        traceback.print_exc()
 
 @bot.tree.command(name="teste", description="Verifica se o bot está respondendo")
 async def teste(interaction: discord.Interaction):

@@ -3,109 +3,93 @@ import pytz
 from datetime import datetime, timedelta
 import json
 import os
-from threading import Lock
-import logging
+import time
 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
-# Configuração de logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Variável para pool de conexões (opcional)
-connection_pool = None
-pool_lock = Lock()
-
-# Conexão com o banco de dados MySQL com timeout
-def connect_db():
-    try:
-        conn = mysql.connector.connect(
-            host="192.185.214.113",
-            user="thia5326_tohell",
-            password="Thi@goba1102@@",
-            database="thia5326_tohell_bot",
-            connect_timeout=5,  # Timeout de 5 segundos
-            pool_name="bot_pool",
-            pool_size=5
-        )
-        logger.info("Conexão com o banco de dados estabelecida com sucesso")
-        return conn
-    except mysql.connector.Error as err:
-        logger.error(f"Erro ao conectar ao banco de dados: {err}")
-        return None
-
-# Inicializar o banco de dados
-def init_db():
-    max_retries = 3
-    retry_delay = 2  # segundos
-    
+def connect_db(max_retries=3, retry_delay=5):
+    """Tenta conectar ao banco de dados com múltiplas tentativas"""
     for attempt in range(max_retries):
-        conn = connect_db()
-        if conn is None:
-            if attempt < max_retries - 1:
-                logger.warning(f"Tentativa {attempt + 1} de {max_retries} falhou. Tentando novamente em {retry_delay} segundos...")
-                import time
-                time.sleep(retry_delay)
-                continue
-            else:
-                logger.error("Falha ao conectar ao banco de dados após várias tentativas")
-                return
-        
         try:
-            cursor = conn.cursor()
-            
-            # Tabela de timers de boss
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS boss_timers (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                boss_name VARCHAR(50) NOT NULL,
-                sala INT NOT NULL,
-                death_time DATETIME NOT NULL,
-                respawn_time DATETIME NOT NULL,
-                closed_time DATETIME NOT NULL,
-                recorded_by VARCHAR(50) NOT NULL,
-                opened_notified BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE KEY boss_sala (boss_name, sala)
+            conn = mysql.connector.connect(
+                host="192.185.214.113",
+                user="thia5326_tohell",
+                password="Thi@goba1102@@",
+                database="thia5326_tohell_bot",
+                connect_timeout=10,
+                connection_timeout=10,
+                pool_timeout=10
             )
-            """)
-            
-            # Tabela de estatísticas de usuários
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS user_stats (
-                user_id VARCHAR(20) PRIMARY KEY,
-                username VARCHAR(50) NOT NULL,
-                count INT DEFAULT 0,
-                last_recorded DATETIME,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-            )
-            """)
-            
-            # Tabela de notificações personalizadas
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS user_notifications (
-                user_id VARCHAR(20) NOT NULL,
-                boss_name VARCHAR(50) NOT NULL,
-                PRIMARY KEY (user_id, boss_name)
-            )
-            """)
-            
-            conn.commit()
-            logger.info("Banco de dados inicializado com sucesso!")
+            return conn
         except mysql.connector.Error as err:
-            logger.error(f"Erro ao inicializar banco de dados: {err}")
-        finally:
-            if conn.is_connected():
-                cursor.close()
-                conn.close()
+            print(f"Tentativa {attempt + 1} de {max_retries} falhou. Erro ao conectar ao banco: {err}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+    return None
 
-# Carregar dados do banco de dados
-def load_db_data(boss_timers, user_stats, user_notifications):
+def init_db():
+    """Inicializa o banco de dados e cria tabelas se não existirem"""
     conn = connect_db()
     if conn is None:
-        logger.error("Não foi possível conectar ao banco de dados para carregar dados")
-        return
+        print("❌ Não foi possível conectar ao banco para inicialização")
+        return False
+    
+    try:
+        cursor = conn.cursor()
+        
+        # Tabela de timers de boss
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS boss_timers (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            boss_name VARCHAR(50) NOT NULL,
+            sala INT NOT NULL,
+            death_time DATETIME NOT NULL,
+            respawn_time DATETIME NOT NULL,
+            closed_time DATETIME NOT NULL,
+            recorded_by VARCHAR(50) NOT NULL,
+            opened_notified BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY boss_sala (boss_name, sala)
+        )
+        """)
+        
+        # Tabela de estatísticas de usuários
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_stats (
+            user_id VARCHAR(20) PRIMARY KEY,
+            username VARCHAR(50) NOT NULL,
+            count INT DEFAULT 0,
+            last_recorded DATETIME,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+        """)
+        
+        # Tabela de notificações personalizadas
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_notifications (
+            user_id VARCHAR(20) NOT NULL,
+            boss_name VARCHAR(50) NOT NULL,
+            PRIMARY KEY (user_id, boss_name)
+        )
+        """)
+        
+        conn.commit()
+        print("✅ Tabelas criadas/verificadas com sucesso!")
+        return True
+    except mysql.connector.Error as err:
+        print(f"❌ Erro ao inicializar banco de dados: {err}")
+        return False
+    finally:
+        if conn.is_connected():
+            conn.close()
+
+def load_db_data(boss_timers, user_stats, user_notifications):
+    """Carrega dados do banco de dados para as estruturas em memória"""
+    conn = connect_db()
+    if conn is None:
+        print("❌ Não foi possível conectar ao banco para carregar dados")
+        return False
     
     try:
         cursor = conn.cursor(dictionary=True)
@@ -151,20 +135,21 @@ def load_db_data(boss_timers, user_stats, user_notifications):
             if boss_name not in user_notifications[user_id]:
                 user_notifications[user_id].append(boss_name)
         
-        logger.info("Dados carregados do banco de dados com sucesso!")
+        print(f"✅ Dados carregados: {len(timers)} timers, {len(stats)} usuários, {len(notifications)} notificações")
+        return True
+        
     except mysql.connector.Error as err:
-        logger.error(f"Erro ao carregar dados do banco: {err}")
+        print(f"❌ Erro ao carregar dados do banco: {err}")
+        return False
     finally:
         if conn.is_connected():
-            cursor.close()
             conn.close()
 
-# Salvar dados no banco de dados
 def save_timer(boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified=False):
+    """Salva ou atualiza um timer de boss no banco de dados"""
     conn = connect_db()
     if conn is None:
-        logger.error("Não foi possível conectar ao banco de dados para salvar timer")
-        return
+        return False
     
     try:
         cursor = conn.cursor()
@@ -181,19 +166,19 @@ def save_timer(boss_name, sala, death_time, respawn_time, closed_time, recorded_
         """, (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified))
         
         conn.commit()
-        logger.debug(f"Timer salvo: {boss_name} (Sala {sala})")
+        return True
     except mysql.connector.Error as err:
-        logger.error(f"Erro ao salvar timer: {err}")
+        print(f"❌ Erro ao salvar timer: {err}")
+        return False
     finally:
         if conn.is_connected():
-            cursor.close()
             conn.close()
 
 def save_user_stats(user_id, username, count, last_recorded):
+    """Salva ou atualiza estatísticas de usuário no banco de dados"""
     conn = connect_db()
     if conn is None:
-        logger.error("Não foi possível conectar ao banco de dados para salvar estatísticas do usuário")
-        return
+        return False
     
     try:
         cursor = conn.cursor()
@@ -208,42 +193,41 @@ def save_user_stats(user_id, username, count, last_recorded):
         """, (user_id, username, count, last_recorded))
         
         conn.commit()
-        logger.debug(f"Estatísticas do usuário salvas: {username} (ID: {user_id})")
+        return True
     except mysql.connector.Error as err:
-        logger.error(f"Erro ao salvar estatísticas do usuário: {err}")
+        print(f"❌ Erro ao salvar estatísticas do usuário: {err}")
+        return False
     finally:
         if conn.is_connected():
-            cursor.close()
             conn.close()
 
 def clear_timer(boss_name, sala=None):
+    """Remove um timer de boss do banco de dados"""
     conn = connect_db()
     if conn is None:
-        logger.error("Não foi possível conectar ao banco de dados para limpar timer")
-        return
+        return False
     
     try:
         cursor = conn.cursor()
         
         if sala is None:
             cursor.execute("DELETE FROM boss_timers WHERE boss_name = %s", (boss_name,))
-            logger.debug(f"Todos os timers do boss {boss_name} foram limpos")
         else:
             cursor.execute("DELETE FROM boss_timers WHERE boss_name = %s AND sala = %s", (boss_name, sala))
-            logger.debug(f"Timer do boss {boss_name} (Sala {sala}) foi limpo")
         
         conn.commit()
+        return True
     except mysql.connector.Error as err:
-        logger.error(f"Erro ao limpar timer: {err}")
+        print(f"❌ Erro ao limpar timer: {err}")
+        return False
     finally:
         if conn.is_connected():
-            cursor.close()
             conn.close()
 
 def add_user_notification(user_id, boss_name):
+    """Adiciona uma notificação de boss para um usuário"""
     conn = connect_db()
     if conn is None:
-        logger.error("Não foi possível conectar ao banco de dados para adicionar notificação")
         return False
     
     try:
@@ -258,20 +242,18 @@ def add_user_notification(user_id, boss_name):
         """, (user_id, boss_name))
         
         conn.commit()
-        logger.debug(f"Notificação adicionada: Usuário {user_id} para {boss_name}")
         return True
     except mysql.connector.Error as err:
-        logger.error(f"Erro ao adicionar notificação: {err}")
+        print(f"❌ Erro ao adicionar notificação: {err}")
         return False
     finally:
         if conn.is_connected():
-            cursor.close()
             conn.close()
 
 def remove_user_notification(user_id, boss_name):
+    """Remove uma notificação de boss de um usuário"""
     conn = connect_db()
     if conn is None:
-        logger.error("Não foi possível conectar ao banco de dados para remover notificação")
         return False
     
     try:
@@ -283,20 +265,18 @@ def remove_user_notification(user_id, boss_name):
         """, (user_id, boss_name))
         
         conn.commit()
-        logger.debug(f"Notificação removida: Usuário {user_id} para {boss_name}")
         return cursor.rowcount > 0
     except mysql.connector.Error as err:
-        logger.error(f"Erro ao remover notificação: {err}")
+        print(f"❌ Erro ao remover notificação: {err}")
         return False
     finally:
         if conn.is_connected():
-            cursor.close()
             conn.close()
 
 def get_user_notifications(user_id):
+    """Obtém todas as notificações de um usuário"""
     conn = connect_db()
     if conn is None:
-        logger.error("Não foi possível conectar ao banco de dados para obter notificações")
         return []
     
     try:
@@ -307,26 +287,22 @@ def get_user_notifications(user_id):
         WHERE user_id = %s
         """, (user_id,))
         
-        notifications = [row['boss_name'] for row in cursor.fetchall()]
-        logger.debug(f"Notificações obtidas para usuário {user_id}: {notifications}")
-        return notifications
+        return [row['boss_name'] for row in cursor.fetchall()]
     except mysql.connector.Error as err:
-        logger.error(f"Erro ao obter notificações: {err}")
+        print(f"❌ Erro ao obter notificações: {err}")
         return []
     finally:
         if conn.is_connected():
-            cursor.close()
             conn.close()
 
-# Funções para backup do banco de dados
 def create_backup():
+    """Cria um backup dos dados em formato JSON"""
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_file = f"backup_{timestamp}.json"
         
         conn = connect_db()
         if conn is None:
-            logger.error("Não foi possível conectar ao banco de dados para criar backup")
             return None
             
         cursor = conn.cursor(dictionary=True)
@@ -353,25 +329,24 @@ def create_backup():
         with open(backup_file, 'w') as f:
             json.dump(backup_data, f, indent=4, default=str)
             
-        logger.info(f"Backup criado com sucesso: {backup_file}")
+        print(f"✅ Backup criado com sucesso: {backup_file}")
         return backup_file
         
     except Exception as e:
-        logger.error(f"Erro ao criar backup: {e}")
+        print(f"❌ Erro ao criar backup: {e}")
         return None
     finally:
         if conn and conn.is_connected():
-            cursor.close()
             conn.close()
 
 def restore_backup(backup_file):
+    """Restaura um backup dos dados"""
     try:
         with open(backup_file, 'r') as f:
             backup_data = json.load(f)
             
         conn = connect_db()
         if conn is None:
-            logger.error("Não foi possível conectar ao banco de dados para restaurar backup")
             return False
             
         cursor = conn.cursor()
@@ -393,7 +368,7 @@ def restore_backup(backup_file):
                 timer['respawn_time'],
                 timer['closed_time'],
                 timer['recorded_by'],
-                timer['opened_notified']
+                timer.get('opened_notified', False)
             ))
         
         # Restaurar estatísticas de usuários
@@ -420,13 +395,12 @@ def restore_backup(backup_file):
                 ))
         
         conn.commit()
-        logger.info(f"Backup restaurado com sucesso: {backup_file}")
+        print(f"✅ Backup restaurado com sucesso: {backup_file}")
         return True
         
     except Exception as e:
-        logger.error(f"Erro ao restaurar backup: {e}")
+        print(f"❌ Erro ao restaurar backup: {e}")
         return False
     finally:
         if conn and conn.is_connected():
-            cursor.close()
             conn.close()
