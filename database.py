@@ -18,8 +18,7 @@ def connect_db(max_retries=3, retry_delay=5):
                 password="Thi@goba1102@@",
                 database="thia5326_tohell_bot",
                 connect_timeout=10,
-                connection_timeout=10,
-                pool_timeout=10
+                connection_timeout=10
             )
             return conn
         except mysql.connector.Error as err:
