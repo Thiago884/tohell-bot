@@ -17,6 +17,7 @@ from database import (
 )
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time, get_next_bosses
 from views import BossControlView
+from shared_functions import send_notification_dm
 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
