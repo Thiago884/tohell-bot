@@ -288,8 +288,302 @@ async def save_timer(boss_name: str, sala: int, death_time: datetime, respawn_ti
         if conn:
             await release_connection(conn)
 
-# ... (mantenha todas as outras funções originais como save_user_stats, clear_timer, etc.)
-# As implementações das outras funções permanecem exatamente as mesmas, apenas adicione os logs similares
+async def save_user_stats(user_id: str, username: str, count: int, last_recorded: datetime) -> bool:
+    """Salva ou atualiza as estatísticas de um usuário no banco de dados"""
+    conn = None
+    try:
+        print(f"💾 Salvando estatísticas do usuário: {username} (ID: {user_id})")
+        
+        conn = await get_connection()
+        if conn is None:
+            print("❌ Falha ao obter conexão!")
+            return False
+            
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+            INSERT INTO user_stats (user_id, username, count, last_recorded)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                username = VALUES(username),
+                count = VALUES(count),
+                last_recorded = VALUES(last_recorded)
+            """, (
+                user_id,
+                username,
+                count,
+                last_recorded.astimezone(brazil_tz) if last_recorded else None
+            ))
+            
+            print(f"✅ Estatísticas do usuário salvas com sucesso: {username} (ID: {user_id})")
+            return True
+    except Exception as err:
+        print("\n" + "="*50)
+        print(f"❌ ERRO AO SALVAR ESTATÍSTICAS DO USUÁRIO:")
+        print(f"User ID: {user_id}, Username: {username}")
+        print(f"Tipo: {type(err).__name__}")
+        print(f"Detalhes: {str(err)}")
+        traceback.print_exc()
+        print("="*50 + "\n")
+        return False
+    finally:
+        if conn:
+            await release_connection(conn)
+
+async def clear_timer(boss_name: str, sala: int = None) -> bool:
+    """Limpa um timer de boss do banco de dados"""
+    conn = None
+    try:
+        print(f"🧹 Limpando timer: {boss_name}" + (f" (Sala {sala})" if sala else ""))
+        
+        conn = await get_connection()
+        if conn is None:
+            print("❌ Falha ao obter conexão!")
+            return False
+            
+        async with conn.cursor() as cursor:
+            if sala is None:
+                await cursor.execute("DELETE FROM boss_timers WHERE boss_name = %s", (boss_name,))
+            else:
+                await cursor.execute("DELETE FROM boss_timers WHERE boss_name = %s AND sala = %s", (boss_name, sala))
+            
+            print(f"✅ Timer limpo com sucesso: {boss_name}" + (f" (Sala {sala})" if sala else ""))
+            return True
+    except Exception as err:
+        print("\n" + "="*50)
+        print(f"❌ ERRO AO LIMPAR TIMER:")
+        print(f"Boss: {boss_name}, Sala: {sala if sala else 'Todas'}")
+        print(f"Tipo: {type(err).__name__}")
+        print(f"Detalhes: {str(err)}")
+        traceback.print_exc()
+        print("="*50 + "\n")
+        return False
+    finally:
+        if conn:
+            await release_connection(conn)
+
+async def add_user_notification(user_id: str, boss_name: str) -> bool:
+    """Adiciona uma notificação personalizada para um usuário"""
+    conn = None
+    try:
+        print(f"🔔 Adicionando notificação: {user_id} -> {boss_name}")
+        
+        conn = await get_connection()
+        if conn is None:
+            print("❌ Falha ao obter conexão!")
+            return False
+            
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+            INSERT IGNORE INTO user_notifications (user_id, boss_name)
+            VALUES (%s, %s)
+            """, (user_id, boss_name))
+            
+            print(f"✅ Notificação adicionada com sucesso: {user_id} -> {boss_name}")
+            return True
+    except Exception as err:
+        print("\n" + "="*50)
+        print(f"❌ ERRO AO ADICIONAR NOTIFICAÇÃO:")
+        print(f"User ID: {user_id}, Boss: {boss_name}")
+        print(f"Tipo: {type(err).__name__}")
+        print(f"Detalhes: {str(err)}")
+        traceback.print_exc()
+        print("="*50 + "\n")
+        return False
+    finally:
+        if conn:
+            await release_connection(conn)
+
+async def remove_user_notification(user_id: str, boss_name: str) -> bool:
+    """Remove uma notificação personalizada de um usuário"""
+    conn = None
+    try:
+        print(f"🔕 Removendo notificação: {user_id} -> {boss_name}")
+        
+        conn = await get_connection()
+        if conn is None:
+            print("❌ Falha ao obter conexão!")
+            return False
+            
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+            DELETE FROM user_notifications
+            WHERE user_id = %s AND boss_name = %s
+            """, (user_id, boss_name))
+            
+            print(f"✅ Notificação removida com sucesso: {user_id} -> {boss_name}")
+            return True
+    except Exception as err:
+        print("\n" + "="*50)
+        print(f"❌ ERRO AO REMOVER NOTIFICAÇÃO:")
+        print(f"User ID: {user_id}, Boss: {boss_name}")
+        print(f"Tipo: {type(err).__name__}")
+        print(f"Detalhes: {str(err)}")
+        traceback.print_exc()
+        print("="*50 + "\n")
+        return False
+    finally:
+        if conn:
+            await release_connection(conn)
+
+async def get_user_notifications(user_id: str) -> List[str]:
+    """Obtém todas as notificações personalizadas de um usuário"""
+    conn = None
+    try:
+        print(f"📩 Obtendo notificações do usuário: {user_id}")
+        
+        conn = await get_connection()
+        if conn is None:
+            print("❌ Falha ao obter conexão!")
+            return []
+            
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            await cursor.execute("""
+            SELECT boss_name FROM user_notifications
+            WHERE user_id = %s
+            """, (user_id,))
+            
+            results = await cursor.fetchall()
+            notifications = [row['boss_name'] for row in results]
+            
+            print(f"✅ Notificações obtidas com sucesso: {user_id} -> {notifications}")
+            return notifications
+    except Exception as err:
+        print("\n" + "="*50)
+        print(f"❌ ERRO AO OBTER NOTIFICAÇÕES:")
+        print(f"User ID: {user_id}")
+        print(f"Tipo: {type(err).__name__}")
+        print(f"Detalhes: {str(err)}")
+        traceback.print_exc()
+        print("="*50 + "\n")
+        return []
+    finally:
+        if conn:
+            await release_connection(conn)
+
+async def create_backup() -> Optional[str]:
+    """Cria um backup dos dados em um arquivo JSON"""
+    conn = None
+    try:
+        print("💾 Criando backup do banco de dados...")
+        
+        conn = await get_connection()
+        if conn is None:
+            print("❌ Falha ao obter conexão!")
+            return None
+            
+        backup_data = {
+            'boss_timers': [],
+            'user_stats': [],
+            'user_notifications': []
+        }
+        
+        async with conn.cursor(aiomysql.DictCursor) as cursor:
+            # Backup dos timers de boss
+            await cursor.execute("SELECT * FROM boss_timers")
+            backup_data['boss_timers'] = await cursor.fetchall()
+            
+            # Backup das estatísticas de usuários
+            await cursor.execute("SELECT * FROM user_stats")
+            backup_data['user_stats'] = await cursor.fetchall()
+            
+            # Backup das notificações personalizadas
+            await cursor.execute("SELECT * FROM user_notifications")
+            backup_data['user_notifications'] = await cursor.fetchall()
+        
+        # Criar nome do arquivo de backup com timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_file = f"backup_{timestamp}.json"
+        
+        # Salvar dados no arquivo JSON
+        with open(backup_file, 'w') as f:
+            json.dump(backup_data, f, indent=2, default=str)
+        
+        print(f"✅ Backup criado com sucesso: {backup_file}")
+        return backup_file
+    except Exception as err:
+        print("\n" + "="*50)
+        print(f"❌ ERRO AO CRIAR BACKUP:")
+        print(f"Tipo: {type(err).__name__}")
+        print(f"Detalhes: {str(err)}")
+        traceback.print_exc()
+        print("="*50 + "\n")
+        return None
+    finally:
+        if conn:
+            await release_connection(conn)
+
+async def restore_backup(backup_file: str) -> bool:
+    """Restaura um backup a partir de um arquivo JSON"""
+    conn = None
+    try:
+        print(f"🔄 Restaurando backup: {backup_file}")
+        
+        # Ler dados do arquivo de backup
+        with open(backup_file, 'r') as f:
+            backup_data = json.load(f)
+        
+        conn = await get_connection()
+        if conn is None:
+            print("❌ Falha ao obter conexão!")
+            return False
+            
+        async with conn.cursor() as cursor:
+            # Limpar tabelas existentes
+            await cursor.execute("TRUNCATE TABLE boss_timers")
+            await cursor.execute("TRUNCATE TABLE user_stats")
+            await cursor.execute("TRUNCATE TABLE user_notifications")
+            
+            # Restaurar timers de boss
+            for timer in backup_data['boss_timers']:
+                await cursor.execute("""
+                INSERT INTO boss_timers (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """, (
+                    timer['boss_name'],
+                    timer['sala'],
+                    timer['death_time'],
+                    timer['respawn_time'],
+                    timer['closed_time'],
+                    timer['recorded_by'],
+                    timer.get('opened_notified', False)
+                ))
+            
+            # Restaurar estatísticas de usuários
+            for stat in backup_data['user_stats']:
+                await cursor.execute("""
+                INSERT INTO user_stats (user_id, username, count, last_recorded)
+                VALUES (%s, %s, %s, %s)
+                """, (
+                    stat['user_id'],
+                    stat['username'],
+                    stat['count'],
+                    stat['last_recorded']
+                ))
+            
+            # Restaurar notificações personalizadas
+            for notification in backup_data['user_notifications']:
+                await cursor.execute("""
+                INSERT INTO user_notifications (user_id, boss_name)
+                VALUES (%s, %s)
+                """, (
+                    notification['user_id'],
+                    notification['boss_name']
+                ))
+        
+        print(f"✅ Backup restaurado com sucesso: {backup_file}")
+        return True
+    except Exception as err:
+        print("\n" + "="*50)
+        print(f"❌ ERRO AO RESTAURAR BACKUP:")
+        print(f"Arquivo: {backup_file}")
+        print(f"Tipo: {type(err).__name__}")
+        print(f"Detalhes: {str(err)}")
+        traceback.print_exc()
+        print("="*50 + "\n")
+        return False
+    finally:
+        if conn:
+            await release_connection(conn)
 
 async def close_pool():
     """Fecha o pool de conexões com logs detalhados"""
