@@ -11,7 +11,7 @@ import traceback
 from datetime import datetime
 from boss_commands import setup_boss_commands
 from utility_commands import setup_utility_commands
-from database import init_db, load_db_data
+from database import init_db, load_db_data, create_pool, close_pool
 from shared_functions import get_next_bosses
 
 # Configuração do Flask (keep-alive)
@@ -37,7 +37,9 @@ intents = discord.Intents.all()
 bot = commands.Bot(
     command_prefix='!',
     intents=intents,
-    help_command=None
+    help_command=None,
+    max_messages=None,
+    heartbeat_timeout=60.0
 )
 
 # Variáveis Globais
@@ -81,6 +83,9 @@ async def on_ready():
     print(f'🕒 Hora do servidor: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}')
     print("="*50 + "\n")
     
+    # Inicializa o pool de conexões do banco de dados
+    await create_pool()
+    
     # Verifica o canal de notificação
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
     if channel:
@@ -100,10 +105,10 @@ async def on_ready():
     # Inicialização do banco de dados e carregamento de dados
     print("\nInicializando banco de dados...")
     try:
-        if not init_db():
+        if not await init_db():
             print("⚠ Falha ao inicializar banco de dados!")
         else:
-            if not load_db_data(boss_timers, user_stats, user_notifications):
+            if not await load_db_data(boss_timers, user_stats, user_notifications):
                 print("⚠ Falha ao carregar dados do banco!")
             else:
                 print("✅ Banco de dados pronto!")
@@ -124,18 +129,29 @@ async def on_ready():
         print(f"❌ Erro ao configurar comandos: {str(e)}")
         traceback.print_exc()
 
+@bot.event
+async def on_disconnect():
+    """Evento disparado quando o bot se desconecta"""
+    await close_pool()
+
 @bot.tree.command(name="teste", description="Verifica se o bot está respondendo")
 async def teste(interaction: discord.Interaction):
     await interaction.response.send_message("✅ Bot funcionando corretamente!", ephemeral=True)
 
 @bot.command()
 async def ping(ctx):
+    """Verifica a latência do bot"""
     await ctx.send(f'🏓 Pong! Latência: {round(bot.latency * 1000)}ms')
 
 def keep_alive():
     """Inicia o servidor Flask em thread separada"""
     t = Thread(target=run_flask, daemon=True)
     t.start()
+
+async def shutdown():
+    """Rotina de desligamento limpo"""
+    await close_pool()
+    await bot.close()
 
 if __name__ == "__main__":
     keep_alive()
@@ -151,8 +167,12 @@ if __name__ == "__main__":
         bot.run(token)
     except discord.LoginError:
         print("\n❌ Falha no login: Token inválido!")
+    except KeyboardInterrupt:
+        print("\n🛑 Bot sendo encerrado pelo usuário...")
     except Exception as e:
         print(f"\n❌ Erro inesperado: {type(e).__name__}: {e}")
         traceback.print_exc()
     finally:
         print("\n🛑 Bot encerrado")
+        # Garante que o pool será fechado
+        asyncio.run(close_pool())

@@ -13,7 +13,8 @@ import os
 from database import (
     save_timer, save_user_stats, clear_timer,
     add_user_notification, remove_user_notification, get_user_notifications,
-    create_backup, restore_backup, connect_db, load_db_data
+    create_backup, restore_backup, load_db_data,
+    get_connection, release_connection
 )
 from shared_functions import (
     get_boss_by_abbreviation, format_time_remaining, 
@@ -79,14 +80,14 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         return embed
 
     async def create_unrecorded_embed():
-        conn = connect_db()
+        conn = await get_connection()
         if conn is None:
             return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
         
         try:
-            cursor = conn.cursor(dictionary=True)
+            cursor = await conn.cursor(aiomysql.DictCursor)
             
-            cursor.execute("""
+            await cursor.execute("""
             SELECT 
                 boss_name, 
                 sala, 
@@ -105,7 +106,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             LIMIT 10
             """)
             
-            unrecorded = cursor.fetchall()
+            unrecorded = await cursor.fetchall()
             
             if not unrecorded:
                 return discord.Embed(
@@ -142,17 +143,18 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 color=discord.Color.red()
             )
         finally:
-            conn.close()
+            if conn:
+                await release_connection(conn)
 
     async def create_history_embed():
-        conn = connect_db()
+        conn = await get_connection()
         if conn is None:
             return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
         
         try:
-            cursor = conn.cursor(dictionary=True)
+            cursor = await conn.cursor(aiomysql.DictCursor)
             
-            cursor.execute("""
+            await cursor.execute("""
             SELECT boss_name, sala, death_time, respawn_time, recorded_by 
             FROM boss_timers 
             WHERE death_time IS NOT NULL
@@ -160,7 +162,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             LIMIT 10
             """)
             
-            history = cursor.fetchall()
+            history = await cursor.fetchall()
             
             if not history:
                 return discord.Embed(title="Histórico de Anotações", description="Nenhuma anotação registrada ainda.", color=discord.Color.blue())
@@ -185,7 +187,8 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             print(f"Erro ao buscar histórico: {e}")
             return discord.Embed(title="Erro", description="Ocorreu um erro ao buscar o histórico", color=discord.Color.red())
         finally:
-            conn.close()
+            if conn:
+                await release_connection(conn)
 
     # Mapeamento de drops dos bosses
     BOSS_DROPS = {
@@ -287,7 +290,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
         
-        embed = await create_ranking_embed()
+        embed = await create_ranking_embed_func()
         await ctx.send(embed=embed)
 
     @bot.command(name='notify')
@@ -315,7 +318,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         
         if action.lower() in ['add', 'adicionar', 'a']:
             if boss_name not in user_notifications[user_id]:
-                if add_user_notification(user_id, boss_name):
+                if await add_user_notification(user_id, boss_name):
                     user_notifications[user_id].append(boss_name)
                     await ctx.send(f"✅ Você será notificado quando **{boss_name}** estiver disponível!")
                 else:
@@ -325,7 +328,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         
         elif action.lower() in ['rem', 'remover', 'r']:
             if boss_name in user_notifications[user_id]:
-                if remove_user_notification(user_id, boss_name):
+                if await remove_user_notification(user_id, boss_name):
                     user_notifications[user_id].remove(boss_name)
                     await ctx.send(f"✅ Você NÃO será mais notificado para **{boss_name}**.")
                 else:
@@ -359,7 +362,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
         
-        embed = await create_history_embed()
+        embed = await create_history_embed_func()
         await ctx.send(embed=embed)
 
     @bot.command(name='naoanotados')
@@ -368,7 +371,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
         
-        embed = await create_unrecorded_embed()
+        embed = await create_unrecorded_embed_func()
         await ctx.send(embed=embed)
 
     @bot.command(name='drops')
@@ -443,7 +446,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             return
         
         if action.lower() == 'create':
-            backup_file = create_backup()
+            backup_file = await create_backup()
             if backup_file:
                 try:
                     with open(backup_file, 'rb') as f:
@@ -472,8 +475,8 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 await interaction.response.defer()
                 backup_file = select.values[0]
                 
-                if restore_backup(backup_file):
-                    load_db_data(boss_timers, user_stats, user_notifications)
+                if await restore_backup(backup_file):
+                    await load_db_data(boss_timers, user_stats, user_notifications)
                     
                     await interaction.followup.send(
                         f"✅ Backup **{backup_file}** restaurado com sucesso!"
@@ -587,7 +590,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
     @tasks.loop(hours=24)
     async def daily_backup():
         try:
-            backup_file = create_backup()
+            backup_file = await create_backup()
             if backup_file:
                 print(f"Backup diário realizado com sucesso: {backup_file}")
             else:
@@ -607,7 +610,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         NOTIFICATION_CHANNEL_ID,
         update_table_func,
         create_next_bosses_embed_func,
-        create_ranking_embed,
-        create_history_embed,
-        create_unrecorded_embed
+        create_ranking_embed_func,
+        create_history_embed_func,
+        create_unrecorded_embed_func
     ))
