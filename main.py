@@ -14,7 +14,8 @@ from utility_commands import setup_utility_commands
 from database import init_db, load_db_data, create_pool, close_pool
 from shared_functions import get_next_bosses
 from dotenv import load_dotenv
-load_dotenv() 
+
+load_dotenv()
 
 # Configuração do Flask (keep-alive)
 app = Flask(__name__)
@@ -32,7 +33,8 @@ def serve_static(filename):
     return send_from_directory('static', filename)
 
 def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
 
 # Configuração do Bot Discord
 intents = discord.Intents.all()
@@ -156,14 +158,16 @@ async def shutdown():
     await bot.close()
 
 if __name__ == "__main__":
+    # Inicia o servidor Flask
     keep_alive()
     
+    # Obtém o token do ambiente
     token = os.getenv('DISCORD_TOKEN')
-if not token:
-    print("\n❌ ERRO: Token não encontrado!")
-    print("Verifique se você configurou a variável de ambiente 'DISCORD_TOKEN'")
-    exit(1)
-    
+    if not token:
+        print("\n❌ ERRO: Token não encontrado!")
+        print("Verifique se você configurou a variável de ambiente 'DISCORD_TOKEN'")
+        exit(1)
+        
     print("\n🔑 Token encontrado, iniciando bot...")
     try:
         bot.run(token)
