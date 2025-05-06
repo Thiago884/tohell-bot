@@ -28,12 +28,13 @@ async def connect_db():
 
 async def init_db():
     """Inicializa a estrutura do banco de dados, criando tabelas se não existirem"""
-    conn = await connect_db()
-    if conn is None:
-        logger.error("Não foi possível conectar ao banco para inicialização")
-        return False
-    
+    conn = None
     try:
+        conn = await connect_db()
+        if conn is None:
+            logger.error("Não foi possível conectar ao banco para inicialização")
+            return False
+        
         async with conn.cursor() as cursor:
             # Tabela de timers de boss
             await cursor.execute("""
@@ -75,44 +76,47 @@ async def init_db():
         logger.info("Estrutura do banco de dados verificada com sucesso")
         return True
     except Exception as err:
-        logger.error(f"Erro ao inicializar banco de dados: {err}")
+        logger.error(f"Erro ao inicializar banco de dados: {err}", exc_info=True)
         return False
     finally:
-        await conn.ensure_closed()
+        if conn:
+            await conn.ensure_closed()
 
 async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: Dict):
     """Carrega dados do banco de dados para as estruturas em memória"""
-    conn = await connect_db()
-    if conn is None:
-        logger.error("Não foi possível conectar ao banco para carregar dados")
-        return False
-    
+    conn = None
     try:
+        conn = await connect_db()
+        if conn is None:
+            logger.error("Não foi possível conectar ao banco para carregar dados")
+            return False
+        
         async with conn.cursor() as cursor:
             # Carregar timers de boss
-            await cursor.execute("SELECT * FROM boss_timers")
+            await cursor.execute("""
+                SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
+                FROM boss_timers
+            """)
             timers = await cursor.fetchall()
             
             for timer in timers:
                 boss_name = timer['boss_name']
                 sala = timer['sala']
                 
-                # Verifica se o boss e a sala existem na estrutura
-                if boss_name not in boss_timers:
-                    continue
-                if sala not in boss_timers[boss_name]:
-                    continue
-                
-                boss_timers[boss_name][sala] = {
-                    'death_time': timer['death_time'].replace(tzinfo=brazil_tz) if timer['death_time'] else None,
-                    'respawn_time': timer['respawn_time'].replace(tzinfo=brazil_tz) if timer['respawn_time'] else None,
-                    'closed_time': timer['closed_time'].replace(tzinfo=brazil_tz) if timer['closed_time'] else None,
-                    'recorded_by': timer['recorded_by'],
-                    'opened_notified': timer['opened_notified']
-                }
+                if boss_name in boss_timers and sala in boss_timers[boss_name]:
+                    boss_timers[boss_name][sala] = {
+                        'death_time': timer['death_time'].replace(tzinfo=brazil_tz) if timer['death_time'] else None,
+                        'respawn_time': timer['respawn_time'].replace(tzinfo=brazil_tz) if timer['respawn_time'] else None,
+                        'closed_time': timer['closed_time'].replace(tzinfo=brazil_tz) if timer['closed_time'] else None,
+                        'recorded_by': timer['recorded_by'],
+                        'opened_notified': bool(timer['opened_notified'])
+                    }
             
             # Carregar estatísticas de usuários
-            await cursor.execute("SELECT * FROM user_stats")
+            await cursor.execute("""
+                SELECT user_id, username, count, last_recorded 
+                FROM user_stats
+            """)
             stats = await cursor.fetchall()
             
             for stat in stats:
@@ -123,7 +127,10 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                 }
             
             # Carregar notificações personalizadas
-            await cursor.execute("SELECT * FROM user_notifications")
+            await cursor.execute("""
+                SELECT user_id, boss_name 
+                FROM user_notifications
+            """)
             notifications = await cursor.fetchall()
             
             for notification in notifications:
@@ -138,20 +145,22 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
         logger.info("Dados carregados do banco de dados com sucesso")
         return True
     except Exception as err:
-        logger.error(f"Erro ao carregar dados do banco: {err}")
+        logger.error(f"Erro ao carregar dados do banco: {err}", exc_info=True)
         return False
     finally:
-        await conn.ensure_closed()
+        if conn:
+            await conn.ensure_closed()
 
 async def save_timer(boss_name: str, sala: int, death_time: Optional[datetime], 
                     respawn_time: Optional[datetime], closed_time: Optional[datetime], 
                     recorded_by: str, opened_notified: bool = False) -> bool:
     """Salva ou atualiza um timer de boss no banco de dados"""
-    conn = await connect_db()
-    if conn is None:
-        return False
-    
+    conn = None
     try:
+        conn = await connect_db()
+        if conn is None:
+            return False
+        
         async with conn.cursor() as cursor:
             await cursor.execute("""
             INSERT INTO boss_timers (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified)
@@ -167,18 +176,20 @@ async def save_timer(boss_name: str, sala: int, death_time: Optional[datetime],
             await conn.commit()
         return True
     except Exception as err:
-        logger.error(f"Erro ao salvar timer: {err}")
+        logger.error(f"Erro ao salvar timer: {err}", exc_info=True)
         return False
     finally:
-        await conn.ensure_closed()
+        if conn:
+            await conn.ensure_closed()
 
 async def save_user_stats(user_id: str, username: str, count: int, last_recorded: datetime) -> bool:
     """Salva ou atualiza estatísticas de usuário no banco de dados"""
-    conn = await connect_db()
-    if conn is None:
-        return False
-    
+    conn = None
     try:
+        conn = await connect_db()
+        if conn is None:
+            return False
+        
         async with conn.cursor() as cursor:
             await cursor.execute("""
             INSERT INTO user_stats (user_id, username, count, last_recorded)
@@ -192,18 +203,20 @@ async def save_user_stats(user_id: str, username: str, count: int, last_recorded
             await conn.commit()
         return True
     except Exception as err:
-        logger.error(f"Erro ao salvar estatísticas do usuário: {err}")
+        logger.error(f"Erro ao salvar estatísticas do usuário: {err}", exc_info=True)
         return False
     finally:
-        await conn.ensure_closed()
+        if conn:
+            await conn.ensure_closed()
 
 async def clear_timer(boss_name: str, sala: Optional[int] = None) -> bool:
     """Remove um timer de boss do banco de dados"""
-    conn = await connect_db()
-    if conn is None:
-        return False
-    
+    conn = None
     try:
+        conn = await connect_db()
+        if conn is None:
+            return False
+        
         async with conn.cursor() as cursor:
             if sala is None:
                 await cursor.execute("DELETE FROM boss_timers WHERE boss_name = %s", (boss_name,))
@@ -213,18 +226,20 @@ async def clear_timer(boss_name: str, sala: Optional[int] = None) -> bool:
             await conn.commit()
         return True
     except Exception as err:
-        logger.error(f"Erro ao limpar timer: {err}")
+        logger.error(f"Erro ao limpar timer: {err}", exc_info=True)
         return False
     finally:
-        await conn.ensure_closed()
+        if conn:
+            await conn.ensure_closed()
 
 async def add_user_notification(user_id: str, boss_name: str) -> bool:
     """Adiciona uma notificação de boss para um usuário"""
-    conn = await connect_db()
-    if conn is None:
-        return False
-    
+    conn = None
     try:
+        conn = await connect_db()
+        if conn is None:
+            return False
+        
         async with conn.cursor() as cursor:
             await cursor.execute("""
             INSERT INTO user_notifications (user_id, boss_name)
@@ -237,18 +252,20 @@ async def add_user_notification(user_id: str, boss_name: str) -> bool:
             await conn.commit()
         return True
     except Exception as err:
-        logger.error(f"Erro ao adicionar notificação: {err}")
+        logger.error(f"Erro ao adicionar notificação: {err}", exc_info=True)
         return False
     finally:
-        await conn.ensure_closed()
+        if conn:
+            await conn.ensure_closed()
 
 async def remove_user_notification(user_id: str, boss_name: str) -> bool:
     """Remove uma notificação de boss de um usuário"""
-    conn = await connect_db()
-    if conn is None:
-        return False
-    
+    conn = None
     try:
+        conn = await connect_db()
+        if conn is None:
+            return False
+        
         async with conn.cursor() as cursor:
             await cursor.execute("""
             DELETE FROM user_notifications
@@ -258,18 +275,20 @@ async def remove_user_notification(user_id: str, boss_name: str) -> bool:
             await conn.commit()
         return cursor.rowcount > 0
     except Exception as err:
-        logger.error(f"Erro ao remover notificação: {err}")
+        logger.error(f"Erro ao remover notificação: {err}", exc_info=True)
         return False
     finally:
-        await conn.ensure_closed()
+        if conn:
+            await conn.ensure_closed()
 
 async def get_user_notifications(user_id: str) -> List[str]:
     """Obtém a lista de bosses que um usuário quer ser notificado"""
-    conn = await connect_db()
-    if conn is None:
-        return []
-    
+    conn = None
     try:
+        conn = await connect_db()
+        if conn is None:
+            return []
+        
         async with conn.cursor() as cursor:
             await cursor.execute("""
             SELECT boss_name FROM user_notifications
@@ -278,13 +297,15 @@ async def get_user_notifications(user_id: str) -> List[str]:
             
             return [row['boss_name'] for row in await cursor.fetchall()]
     except Exception as err:
-        logger.error(f"Erro ao obter notificações: {err}")
+        logger.error(f"Erro ao obter notificações: {err}", exc_info=True)
         return []
     finally:
-        await conn.ensure_closed()
+        if conn:
+            await conn.ensure_closed()
 
 async def create_backup() -> Optional[str]:
     """Cria um backup completo do banco de dados em formato JSON"""
+    conn = None
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_file = f"backup_{timestamp}.json"
@@ -321,7 +342,7 @@ async def create_backup() -> Optional[str]:
         return backup_file
         
     except Exception as e:
-        logger.error(f"Erro ao criar backup: {e}")
+        logger.error(f"Erro ao criar backup: {e}", exc_info=True)
         return None
     finally:
         if conn:
@@ -329,6 +350,7 @@ async def create_backup() -> Optional[str]:
 
 async def restore_backup(backup_file: str) -> bool:
     """Restaura um backup do banco de dados a partir de um arquivo JSON"""
+    conn = None
     try:
         with open(backup_file, 'r', encoding='utf-8') as f:
             backup_data = json.load(f)
@@ -385,7 +407,7 @@ async def restore_backup(backup_file: str) -> bool:
         return True
         
     except Exception as e:
-        logger.error(f"Erro ao restaurar backup: {e}")
+        logger.error(f"Erro ao restaurar backup: {e}", exc_info=True)
         return False
     finally:
         if conn:
