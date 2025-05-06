@@ -23,9 +23,9 @@ async def create_pool():
             password=os.getenv('DB_PASSWORD', 'Thi@goba1102@@'),
             db=os.getenv('DB_NAME', 'thia5326_tohell_bot'),
             port=int(os.getenv('DB_PORT', 3306)),
-            minsize=1,
+              minsize=1,
             maxsize=10,
-            connect_timeout=10,
+            connect_timeout=30,  # Aumente o timeout se necessário
             autocommit=True
         )
     return pool
