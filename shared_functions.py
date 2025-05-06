@@ -112,21 +112,3 @@ def validate_time(hour, minute):
     if minute < 0 or minute > 59:
         return False
     return True 
-    # Adicione isso ao final de shared_functions.py
-async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, closed_time):
-    try:
-        user = await bot.fetch_user(int(user_id))
-        if user:
-            await user.send(
-                f"🔔 **Notificação de Boss** 🔔\n"
-                f"O boss **{boss_name} (Sala {sala})** que você marcou está disponível AGORA!\n"
-                f"✅ Aberto até: {closed_time.strftime('%d/%m %H:%M')} BRT\n"
-                f"Corra para pegar seu loot! 🏆"
-            )
-            return True
-    except discord.Forbidden:
-        print(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
-    except Exception as e:
-        print(f"Erro ao enviar DM para {user_id}: {e}")
-    
-    return False

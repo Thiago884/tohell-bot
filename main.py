@@ -3,19 +3,15 @@ from discord.ext import commands, tasks
 from discord import app_commands, HTTPException
 import os
 import asyncio
-import time
-from flask import Flask, send_from_directory
+from flask import Flask
 from threading import Thread
 from collections import defaultdict
 import traceback
 from datetime import datetime
 from boss_commands import setup_boss_commands
 from utility_commands import setup_utility_commands
-from database import init_db, load_db_data, create_pool, close_pool
+from database import init_db, load_db_data
 from shared_functions import get_next_bosses
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # Configuração do Flask (keep-alive)
 app = Flask(__name__)
@@ -28,23 +24,22 @@ def home():
 def health():
     return "OK", 200
 
-@app.route('/static/<path:filename>')
-def serve_static(filename):
-    return send_from_directory('static', filename)
+@app.route('/status')
+def status():
+    if bot.is_ready():
+        return "Bot is online and ready", 200
+    else:
+        return "Bot is connecting", 503
 
 def run_flask():
-    port = int(os.environ.get("PORT", 10000))  # Usando 10000 como padrão para o Render
-    print(f"🔄 Iniciando servidor Flask na porta {port}")
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    app.run(host='0.0.0.0', port=8080)
 
 # Configuração do Bot Discord
 intents = discord.Intents.all()
 bot = commands.Bot(
     command_prefix='!',
     intents=intents,
-    help_command=None,
-    max_messages=None,
-    heartbeat_timeout=60.0
+    help_command=None
 )
 
 # Variáveis Globais
@@ -88,9 +83,6 @@ async def on_ready():
     print(f'🕒 Hora do servidor: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}')
     print("="*50 + "\n")
     
-    # Inicializa o pool de conexões do banco de dados
-    await create_pool()
-    
     # Verifica o canal de notificação
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
     if channel:
@@ -109,45 +101,18 @@ async def on_ready():
     
     # Inicialização do banco de dados e carregamento de dados
     print("\nInicializando banco de dados...")
-    try:
-        if not await init_db():
-            print("⚠ Falha ao inicializar banco de dados!")
-        else:
-            if not await load_db_data(boss_timers, user_stats, user_notifications):
-                print("⚠ Falha ao carregar dados do banco!")
-            else:
-                print("✅ Banco de dados pronto!")
-    except Exception as e:
-        print(f"❌ Erro durante inicialização do banco: {str(e)}")
-        traceback.print_exc()
+    init_db()
+    load_db_data(boss_timers, user_stats, user_notifications)
+    print("✅ Banco de dados pronto!")
     
     # Configura comandos e tasks
     print("\nConfigurando comandos de boss...")
-    try:
-        boss_funcs = await setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
-        
-        print("\nConfigurando comandos utilitários...")
-        await setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, *boss_funcs)
-        
-        print("\n✅ Bot totalmente inicializado e pronto para uso!")
-        
-        # Mostra todos os comandos registrados para debug
-        print("\n📋 Comandos registrados:")
-        for command in bot.commands:
-            print(f"- {command.name}")
-            
-    except Exception as e:
-        print(f"❌ Erro ao configurar comandos: {str(e)}")
-        traceback.print_exc()
-
-@bot.event
-async def on_command_error(ctx, error):
-    """Tratamento de erros de comandos"""
-    if isinstance(error, commands.CommandNotFound):
-        await ctx.send("❌ Comando não encontrado. Use !bosshelp para ver a lista de comandos.")
-    else:
-        print(f"\n❌ Erro no comando: {type(error).__name__}: {error}")
-        traceback.print_exc()
+    boss_funcs = await setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
+    
+    print("\nConfigurando comandos utilitários...")
+    await setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, *boss_funcs)
+    
+    print("\n✅ Bot totalmente inicializado e pronto para uso!")
 
 @bot.tree.command(name="teste", description="Verifica se o bot está respondendo")
 async def teste(interaction: discord.Interaction):
@@ -155,7 +120,6 @@ async def teste(interaction: discord.Interaction):
 
 @bot.command()
 async def ping(ctx):
-    """Verifica a latência do bot"""
     await ctx.send(f'🏓 Pong! Latência: {round(bot.latency * 1000)}ms')
 
 def keep_alive():
@@ -163,33 +127,22 @@ def keep_alive():
     t = Thread(target=run_flask, daemon=True)
     t.start()
 
-async def shutdown():
-    """Rotina de desligamento limpo"""
-    await close_pool()
-    await bot.close()
-
 if __name__ == "__main__":
-    # Inicia o servidor Flask
     keep_alive()
     
-    # Obtém o token do ambiente
     token = os.getenv('DISCORD_TOKEN')
     if not token:
         print("\n❌ ERRO: Token não encontrado!")
         print("Verifique se você configurou a variável de ambiente 'DISCORD_TOKEN'")
         exit(1)
-        
+    
     print("\n🔑 Token encontrado, iniciando bot...")
     try:
         bot.run(token)
     except discord.LoginError:
         print("\n❌ Falha no login: Token inválido!")
-    except KeyboardInterrupt:
-        print("\n🛑 Bot sendo encerrado pelo usuário...")
     except Exception as e:
         print(f"\n❌ Erro inesperado: {type(e).__name__}: {e}")
         traceback.print_exc()
     finally:
         print("\n🛑 Bot encerrado")
-        # Garante que o pool será fechado
-        asyncio.run(close_pool())

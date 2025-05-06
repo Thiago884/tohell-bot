@@ -13,14 +13,9 @@ import os
 from database import (
     save_timer, save_user_stats, clear_timer,
     add_user_notification, remove_user_notification, get_user_notifications,
-    create_backup, restore_backup, load_db_data,
-    get_connection, release_connection
+    create_backup, restore_backup, connect_db, load_db_data
 )
-from shared_functions import (
-    get_boss_by_abbreviation, format_time_remaining, 
-    parse_time_input, validate_time, get_next_bosses,
-    send_notification_dm
-)
+from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time, get_next_bosses
 from views import BossControlView
 
 # Configuração do fuso horário do Brasil
@@ -30,18 +25,6 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                                create_boss_embed_func, update_table_func, create_next_bosses_embed_func,
                                create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
     
-    # Mapeamento de imagens dos bosses
-    BOSS_IMAGES = {
-        "Super Red Dragon": f"{os.getenv('PUBLIC_URL', '')}/static/super-red-dragon.jpg",
-        "Hell Maine": f"{os.getenv('PUBLIC_URL', '')}/static/hellmaine.png",
-        "Illusion of Kundun": f"{os.getenv('PUBLIC_URL', '')}/static/relics-of-kundun.jpg",
-        "Death Beam Knight": f"{os.getenv('PUBLIC_URL', '')}/static/DBK.png",
-        "Genocider": f"{os.getenv('PUBLIC_URL', '')}/static/GENOCIDER.png",
-        "Phoenix of Darkness": f"{os.getenv('PUBLIC_URL', '')}/static/Phoenix.png",
-        "Hydra": f"{os.getenv('PUBLIC_URL', '')}/static/hydra.png",
-        "Rei Kundun": f"{os.getenv('PUBLIC_URL', '')}/static/Rei_Kundun.jpg"
-    }
-
     async def create_ranking_embed():
         sorted_users = sorted(user_stats.items(), key=lambda x: x[1]['count'], reverse=True)
         
@@ -80,14 +63,14 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         return embed
 
     async def create_unrecorded_embed():
-        conn = await get_connection()
+        conn = connect_db()
         if conn is None:
             return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
         
         try:
-            cursor = await conn.cursor(aiomysql.DictCursor)
+            cursor = conn.cursor(dictionary=True)
             
-            await cursor.execute("""
+            cursor.execute("""
             SELECT 
                 boss_name, 
                 sala, 
@@ -106,7 +89,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             LIMIT 10
             """)
             
-            unrecorded = await cursor.fetchall()
+            unrecorded = cursor.fetchall()
             
             if not unrecorded:
                 return discord.Embed(
@@ -143,18 +126,35 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 color=discord.Color.red()
             )
         finally:
-            if conn:
-                await release_connection(conn)
+            conn.close()
+
+    async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, closed_time):
+        try:
+            user = await bot.fetch_user(int(user_id))
+            if user:
+                await user.send(
+                    f"🔔 **Notificação de Boss** 🔔\n"
+                    f"O boss **{boss_name} (Sala {sala})** que você marcou está disponível AGORA!\n"
+                    f"✅ Aberto até: {closed_time.strftime('%d/%m %H:%M')} BRT\n"
+                    f"Corra para pegar seu loot! 🏆"
+                )
+                return True
+        except discord.Forbidden:
+            print(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
+        except Exception as e:
+            print(f"Erro ao enviar DM para {user_id}: {e}")
+        
+        return False
 
     async def create_history_embed():
-        conn = await get_connection()
+        conn = connect_db()
         if conn is None:
             return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
         
         try:
-            cursor = await conn.cursor(aiomysql.DictCursor)
+            cursor = conn.cursor(dictionary=True)
             
-            await cursor.execute("""
+            cursor.execute("""
             SELECT boss_name, sala, death_time, respawn_time, recorded_by 
             FROM boss_timers 
             WHERE death_time IS NOT NULL
@@ -162,7 +162,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             LIMIT 10
             """)
             
-            history = await cursor.fetchall()
+            history = cursor.fetchall()
             
             if not history:
                 return discord.Embed(title="Histórico de Anotações", description="Nenhuma anotação registrada ainda.", color=discord.Color.blue())
@@ -187,101 +187,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             print(f"Erro ao buscar histórico: {e}")
             return discord.Embed(title="Erro", description="Ocorreu um erro ao buscar o histórico", color=discord.Color.red())
         finally:
-            if conn:
-                await release_connection(conn)
-
-    # Mapeamento de drops dos bosses
-    BOSS_DROPS = {
-        "Super Red Dragon": {
-            "abreviações": ["red", "red dragon"],
-            "drops": [
-                "50% Jewel of Bless (pacote 30 ~ 60 unidades)",
-                "50% Jewel of Soul (pacote 30 ~ 60 unidades)"
-            ]
-        },
-        "Hell Maine": {
-            "abreviações": ["hell", "hell maine"],
-            "drops": [
-                "50% Jewel of Bless (pacote 30 ~ 60 unidades)",
-                "50% Jewel of Soul (pacote 30 ~ 60 unidades)"
-            ]
-        },
-        "Illusion of Kundun": {
-            "abreviações": ["illusion", "kundun", "iok"],
-            "drops": [
-                "25% Jewel of Bless (pacote 10 unidades)",
-                "25% Jewel of Soul (pacote 10 unidades)",
-                "5% Jewel of Bless (pacote 20 unidades)",
-                "5% Jewel of Soul (pacote 20 unidades)",
-                "5% Jewel of Bless (pacote 30 unidades)",
-                "5% Jewel of Soul (pacote 30 unidades)",
-                "5% SD Potion +13 (100 unidades)",
-                "5% Complex Potion +13 (100 unidades)",
-                "5% SD Potion +13 (50 unidades)",
-                "5% Complex Potion +13 (50 unidades)",
-                "5% 5x Large Healing Potion +13 (100 unidades)",
-                "5% 5x Healing Potion +13 (60 unidades)",
-                "10% 5x E-Zen"
-            ]
-        },
-        "Death Beam Knight": {
-            "abreviações": ["dbk", "death beam", "beam knight"],
-            "drops": [
-                "20% Small Complex Potion +13 (30 ~ 100 unidades)",
-                "25% Complex Potion +13 (30 ~ 100 unidades)",
-                "20% Small SD Potion +13 (30 ~ 100 unidades)",
-                "25% SD Potion +13 (30 ~ 100 unidades)",
-                "5% Sign of lord (255 unidades)",
-                "5% 5~10x Jewel of Guardian"
-            ]
-        },
-        "Genocider": {
-            "abreviações": ["geno", "genocider"],
-            "drops": [
-                "20% 1 ~ 10x Jewel of Harmony",
-                "80% 5 ~ 10x Gemstone"
-            ]
-        },
-        "Phoenix of Darkness": {
-            "abreviações": ["phoenix", "dark phoenix"],
-            "drops": [
-                "40% 1 ~ 4x Loch's Feather",
-                "30% 1 ~ 3x Crest of monarch",
-                "30% 1 ~ 2x Spirit of Dark Horse / Spirit of Dark Spirit"
-            ]
-        },
-        "Hydra": {
-            "abreviações": ["hydra"],
-            "drops": [
-                "50% 10x Jewel of Chaos",
-                "50% SD Potion (15 unidades) / Complex Potion (15 unidades)"
-            ]
-        },
-        "Rei Kundun": {
-            "abreviações": ["rei", "rei kundun"],
-            "drops": [
-                "3x (três vezes os seguintes itens e porcentagem respectiva):",
-                "100% Drop garantido",
-                "53,85% Jewel of Bless (pacote 10 unidades)",
-                "30,77% Jewel of Soul (pacote 10 unidades)",
-                "7,69% Jewel of Bless (pacote 20 ~ 60 unidades)",
-                "7,69% Jewel of Soul (pacote 20 ~ 60 unidades)",
-                "3x (três vezes os seguintes itens e porcentagem respectiva):",
-                "100% Drop possível",
-                "25% Item Ancient Aleatório",
-                "75% Sem drop",
-                "Notas adicionais:",
-                "Existem 2 tipos de drop no Kundun: joias e/ou Item Ancient.",
-                "Para cada tipo é feito o cálculo acima (3 sorteios cada).",
-                "Sempre haverá drop de joias, mas nem sempre de Item Ancient.",
-                "Probabilidades aproximadas para Item Ancient após os 3 sorteios:",
-                "0 Itens Ancient: 42%",
-                "1 Item Ancient: 42%",
-                "2 Itens Ancient: 14%",
-                "3 Itens Ancient: 2%"
-            ]
-        }
-    }
+            conn.close()
 
     # Comandos
     @bot.command(name='ranking')
@@ -290,7 +196,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
         
-        embed = await create_ranking_embed_func()
+        embed = await create_ranking_embed()
         await ctx.send(embed=embed)
 
     @bot.command(name='notify')
@@ -318,7 +224,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         
         if action.lower() in ['add', 'adicionar', 'a']:
             if boss_name not in user_notifications[user_id]:
-                if await add_user_notification(user_id, boss_name):
+                if add_user_notification(user_id, boss_name):
                     user_notifications[user_id].append(boss_name)
                     await ctx.send(f"✅ Você será notificado quando **{boss_name}** estiver disponível!")
                 else:
@@ -328,7 +234,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         
         elif action.lower() in ['rem', 'remover', 'r']:
             if boss_name in user_notifications[user_id]:
-                if await remove_user_notification(user_id, boss_name):
+                if remove_user_notification(user_id, boss_name):
                     user_notifications[user_id].remove(boss_name)
                     await ctx.send(f"✅ Você NÃO será mais notificado para **{boss_name}**.")
                 else:
@@ -362,7 +268,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
         
-        embed = await create_history_embed_func()
+        embed = await create_history_embed()
         await ctx.send(embed=embed)
 
     @bot.command(name='naoanotados')
@@ -371,64 +277,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
         
-        embed = await create_unrecorded_embed_func()
-        await ctx.send(embed=embed)
-
-    @bot.command(name='drops')
-    async def drops_command(ctx, boss_name: str = None):
-        if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
-            return
-
-        if boss_name is None:
-            # Mostrar lista de bosses com abreviações
-            embed = discord.Embed(
-                title="📚 Drops dos Bosses",
-                description="Use `!drops <nome_do_boss>` para ver informações específicas\nExemplo: `!drops hydra`",
-                color=discord.Color.blue()
-            )
-            
-            for boss, info in BOSS_DROPS.items():
-                embed.add_field(
-                    name=f"**{boss}**",
-                    value=f"Abreviações: {', '.join(info['abreviações'])}",
-                    inline=False
-                )
-            
-            await ctx.send(embed=embed)
-            return
-
-        # Encontrar o boss pelo nome ou abreviação
-        boss_found = None
-        boss_name_lower = boss_name.lower()
-        
-        for boss, info in BOSS_DROPS.items():
-            if boss_name_lower in [b.lower() for b in info['abreviações']] or boss_name_lower in boss.lower():
-                boss_found = boss
-                break
-
-        if not boss_found:
-            await ctx.send(f"Boss não encontrado. Use `!drops` sem argumentos para ver a lista de bosses.")
-            return
-
-        # Criar embed com os drops do boss
-        embed = discord.Embed(
-            title=f"🎁 Drops do {boss_found}",
-            color=discord.Color.green()
-        )
-        
-        # Adicionar thumbnail se existir
-        if boss_found in BOSS_IMAGES:
-            embed.set_thumbnail(url=BOSS_IMAGES[boss_found])
-        
-        for drop in BOSS_DROPS[boss_found]['drops']:
-            embed.add_field(
-                name="\u200b",
-                value=f"• {drop}",
-                inline=False
-            )
-        
-        embed.set_footer(text=f"Abreviações: {', '.join(BOSS_DROPS[boss_found]['abreviações'])}")
+        embed = await create_unrecorded_embed()
         await ctx.send(embed=embed)
 
     @bot.command(name='backup')
@@ -446,7 +295,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             return
         
         if action.lower() == 'create':
-            backup_file = await create_backup()
+            backup_file = create_backup()
             if backup_file:
                 try:
                     with open(backup_file, 'rb') as f:
@@ -475,8 +324,8 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 await interaction.response.defer()
                 backup_file = select.values[0]
                 
-                if await restore_backup(backup_file):
-                    await load_db_data(boss_timers, user_stats, user_notifications)
+                if restore_backup(backup_file):
+                    load_db_data(boss_timers, user_stats, user_notifications)
                     
                     await interaction.followup.send(
                         f"✅ Backup **{backup_file}** restaurado com sucesso!"
@@ -559,11 +408,6 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             inline=False
         )
         embed.add_field(
-            name="!drops [boss]",
-            value="Mostra os possíveis drops de um boss específico ou lista todos os bosses\nEx: `!drops hydra` ou `!drops` para lista completa",
-            inline=False
-        )
-        embed.add_field(
             name="!backup <create|restore>",
             value="Cria ou restaura um backup dos dados (apenas admins)",
             inline=False
@@ -590,7 +434,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
     @tasks.loop(hours=24)
     async def daily_backup():
         try:
-            backup_file = await create_backup()
+            backup_file = create_backup()
             if backup_file:
                 print(f"Backup diário realizado com sucesso: {backup_file}")
             else:
@@ -610,7 +454,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         NOTIFICATION_CHANNEL_ID,
         update_table_func,
         create_next_bosses_embed_func,
-        create_ranking_embed_func,
-        create_history_embed_func,
-        create_unrecorded_embed_func
+        create_ranking_embed,
+        create_history_embed,
+        create_unrecorded_embed
     ))
