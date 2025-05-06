@@ -143,23 +143,40 @@ def keep_alive():
 
 async def main():
     keep_alive()
-    
+
     token = os.getenv('DISCORD_TOKEN')
     if not token:
         print("\n❌ ERRO: Token não encontrado!")
         print("Verifique se você configurou a variável de ambiente 'DISCORD_TOKEN'")
-        exit(1)
-    
+        return
+
     print("\n🔑 Token encontrado, iniciando bot...")
+
     try:
-        await bot.start(token)
+        async with bot:
+            await bot.start(token)
     except discord.LoginError:
         print("\n❌ Falha no login: Token inválido!")
     except Exception as e:
         print(f"\n❌ Erro inesperado: {type(e).__name__}: {e}")
         traceback.print_exc()
     finally:
-        print("\n🛑 Bot encerrado")
+        print("\n🛑 Finalizando bot e limpando tarefas...")
+
+        # Cancela todas as tasks pendentes, exceto a atual
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        for task in tasks:
+            task.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                print(f"⚠ Task {i} gerou exceção ao ser cancelada: {result}")
+
+        print("✅ Bot desligado corretamente.")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\n🛑 Execução interrompida manualmente.")

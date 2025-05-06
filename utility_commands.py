@@ -10,6 +10,7 @@ import traceback
 import re
 import json
 import os
+import logging
 from database import (
     save_timer, save_user_stats, clear_timer,
     add_user_notification, remove_user_notification, get_user_notifications,
@@ -20,6 +21,9 @@ from views import BossControlView
 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
+
+# Configuração de logging
+logger = logging.getLogger(__name__)
 
 async def setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID,
                                create_boss_embed_func, update_table_func, create_next_bosses_embed_func,
@@ -118,7 +122,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 return embed
                 
         except Exception as e:
-            print(f"Erro ao buscar bosses fechados: {e}")
+            logger.error(f"Erro ao buscar bosses fechados: {e}")
             return discord.Embed(
                 title="Erro",
                 description="Ocorreu um erro ao buscar os bosses fechados",
@@ -139,9 +143,9 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 )
                 return True
         except discord.Forbidden:
-            print(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
+            logger.warning(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
         except Exception as e:
-            print(f"Erro ao enviar DM para {user_id}: {e}")
+            logger.error(f"Erro ao enviar DM para {user_id}: {e}")
         
         return False
 
@@ -182,7 +186,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 return embed
                 
         except Exception as e:
-            print(f"Erro ao buscar histórico: {e}")
+            logger.error(f"Erro ao buscar histórico: {e}")
             return discord.Embed(title="Erro", description="Ocorreu um erro ao buscar o histórico", color=discord.Color.red())
         finally:
             await conn.ensure_closed()
@@ -463,18 +467,25 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         
         await ctx.send(embed=embed)
 
-    # Tasks
+    # Task de backup com as correções solicitadas
     @tasks.loop(hours=24)
     async def daily_backup():
         try:
+            logger.info("Iniciando backup diário...")
             backup_file = await create_backup()
             if backup_file:
-                print(f"Backup diário realizado com sucesso: {backup_file}")
+                logger.info(f"Backup criado: {backup_file}")
             else:
-                print("Falha ao realizar backup diário")
+                logger.error("Falha ao criar backup")
         except Exception as e:
-            print(f"Erro na rotina de backup: {e}")
+            logger.error(f"Erro no backup diário: {e}")
 
+    # Configuração da task de backup
+    daily_backup.before_loop(lambda: logger.info("Agendando backup diário..."))
+    daily_backup.after_loop(lambda: logger.info("Backup diário finalizado"))
+    daily_backup.error(lambda e: logger.error(f"Erro na task de backup: {e}"))
+
+    # Iniciar a task de backup
     daily_backup.start()
 
     # Adicionar a view persistente

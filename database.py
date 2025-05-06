@@ -30,7 +30,7 @@ async def init_db():
     
     try:
         async with conn.cursor() as cursor:
-            # Tabela de timers de boss
+            # Verifica se a tabela já existe antes de criar
             await cursor.execute("""
             CREATE TABLE IF NOT EXISTS boss_timers (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -46,7 +46,6 @@ async def init_db():
             )
             """)
             
-            # Tabela de estatísticas de usuários
             await cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_stats (
                 user_id VARCHAR(20) PRIMARY KEY,
@@ -57,7 +56,6 @@ async def init_db():
             )
             """)
             
-            # Tabela de notificações personalizadas
             await cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_notifications (
                 user_id VARCHAR(20) NOT NULL,
@@ -67,7 +65,7 @@ async def init_db():
             """)
             
             await conn.commit()
-        print("Banco de dados inicializado com sucesso!")
+        print("Banco de dados verificado com sucesso!")
     except Exception as err:
         print(f"Erro ao inicializar banco de dados: {err}")
     finally:
