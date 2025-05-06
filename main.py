@@ -33,8 +33,9 @@ def serve_static(filename):
     return send_from_directory('static', filename)
 
 def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    port = int(os.environ.get("PORT", 10000))  # Usando 10000 como padrão para o Render
+    print(f"🔄 Iniciando servidor Flask na porta {port}")
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 # Configuração do Bot Discord
 intents = discord.Intents.all()
@@ -129,14 +130,24 @@ async def on_ready():
         await setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, *boss_funcs)
         
         print("\n✅ Bot totalmente inicializado e pronto para uso!")
+        
+        # Mostra todos os comandos registrados para debug
+        print("\n📋 Comandos registrados:")
+        for command in bot.commands:
+            print(f"- {command.name}")
+            
     except Exception as e:
         print(f"❌ Erro ao configurar comandos: {str(e)}")
         traceback.print_exc()
 
 @bot.event
-async def on_disconnect():
-    """Evento disparado quando o bot se desconecta"""
-    await close_pool()
+async def on_command_error(ctx, error):
+    """Tratamento de erros de comandos"""
+    if isinstance(error, commands.CommandNotFound):
+        await ctx.send("❌ Comando não encontrado. Use !bosshelp para ver a lista de comandos.")
+    else:
+        print(f"\n❌ Erro no comando: {type(error).__name__}: {error}")
+        traceback.print_exc()
 
 @bot.tree.command(name="teste", description="Verifica se o bot está respondendo")
 async def teste(interaction: discord.Interaction):
