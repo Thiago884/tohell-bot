@@ -91,7 +91,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             logger.error("Não foi possível conectar ao banco para carregar dados")
             return False
         
-        async with conn.cursor() as cursor:
+        async with conn.cursor(dictionary=True) as cursor:  # Usando dictionary=True para retornar dicionários
             # Carregar timers de boss
             await cursor.execute("""
                 SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
@@ -289,7 +289,7 @@ async def get_user_notifications(user_id: str) -> List[str]:
         if conn is None:
             return []
         
-        async with conn.cursor() as cursor:
+        async with conn.cursor(dictionary=True) as cursor:
             await cursor.execute("""
             SELECT boss_name FROM user_notifications
             WHERE user_id = %s
@@ -314,7 +314,7 @@ async def create_backup() -> Optional[str]:
         if conn is None:
             return None
             
-        async with conn.cursor() as cursor:
+        async with conn.cursor(dictionary=True) as cursor:
             # Backup dos timers de boss
             await cursor.execute("SELECT * FROM boss_timers")
             boss_timers_data = await cursor.fetchall()
