@@ -58,6 +58,53 @@ async def create_pool():
             return None
     return pool
 
+async def get_connection():
+    """Obtém uma conexão do pool com logs detalhados"""
+    global pool
+    try:
+        if pool is None:
+            print("⚠ Pool não inicializado, tentando criar...")
+            await create_pool()
+        
+        if pool is None:
+            print("❌ Falha ao obter conexão: Pool não inicializado!")
+            return None
+            
+        print("🔌 Obtendo conexão do pool...")
+        conn = await pool.acquire()
+        print("✅ Conexão obtida com sucesso!")
+        return conn
+    except aiomysql.MySQLError as e:
+        print("\n" + "="*50)
+        print(f"❌ ERRO AO OBTER CONEXÃO:")
+        print(f"Tipo: {type(e).__name__}")
+        print(f"Detalhes: {str(e)}")
+        print("="*50 + "\n")
+        return None
+    except Exception as e:
+        print("\n" + "="*50)
+        print(f"❌ ERRO INESPERADO AO OBTER CONEXÃO:")
+        traceback.print_exc()
+        print("="*50 + "\n")
+        return None
+
+async def release_connection(conn):
+    """Libera uma conexão de volta para o pool"""
+    global pool
+    try:
+        if pool is None or conn is None:
+            return
+            
+        print("🔌 Liberando conexão para o pool...")
+        await pool.release(conn)
+        print("✅ Conexão liberada com sucesso!")
+    except Exception as e:
+        print("\n" + "="*50)
+        print(f"❌ ERRO AO LIBERAR CONEXÃO:")
+        print(f"Tipo: {type(e).__name__}")
+        print(f"Detalhes: {str(e)}")
+        print("="*50 + "\n")
+
 async def init_db():
     """Inicializa o banco de dados e cria tabelas se não existirem"""
     conn = None
@@ -565,3 +612,20 @@ async def close_pool():
             print(f"Detalhes: {str(e)}")
             traceback.print_exc()
             print("="*50 + "\n")
+
+__all__ = [
+    'create_pool',
+    'get_connection',
+    'release_connection',
+    'init_db',
+    'load_db_data',
+    'save_timer',
+    'save_user_stats',
+    'clear_timer',
+    'add_user_notification',
+    'remove_user_notification',
+    'get_user_notifications',
+    'create_backup',
+    'restore_backup',
+    'close_pool'
+]
