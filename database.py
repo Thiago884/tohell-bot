@@ -91,25 +91,26 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             logger.error("Não foi possível conectar ao banco para carregar dados")
             return False
         
-        async with conn.cursor(dictionary=True) as cursor:  # Usando dictionary=True para retornar dicionários
+        async with conn.cursor() as cursor:
             # Carregar timers de boss
             await cursor.execute("""
                 SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
                 FROM boss_timers
+                ORDER BY boss_name, sala
             """)
             timers = await cursor.fetchall()
             
             for timer in timers:
-                boss_name = timer['boss_name']
-                sala = timer['sala']
+                boss_name = timer[0]  # Índice 0 para boss_name
+                sala = timer[1]       # Índice 1 para sala
                 
                 if boss_name in boss_timers and sala in boss_timers[boss_name]:
                     boss_timers[boss_name][sala] = {
-                        'death_time': timer['death_time'].replace(tzinfo=brazil_tz) if timer['death_time'] else None,
-                        'respawn_time': timer['respawn_time'].replace(tzinfo=brazil_tz) if timer['respawn_time'] else None,
-                        'closed_time': timer['closed_time'].replace(tzinfo=brazil_tz) if timer['closed_time'] else None,
-                        'recorded_by': timer['recorded_by'],
-                        'opened_notified': bool(timer['opened_notified'])
+                        'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
+                        'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
+                        'closed_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
+                        'recorded_by': timer[5],
+                        'opened_notified': bool(timer[6])
                     }
             
             # Carregar estatísticas de usuários
@@ -120,22 +121,23 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             stats = await cursor.fetchall()
             
             for stat in stats:
-                user_stats[stat['user_id']] = {
-                    'count': stat['count'],
-                    'last_recorded': stat['last_recorded'].replace(tzinfo=brazil_tz) if stat['last_recorded'] else None,
-                    'username': stat['username']
+                user_stats[stat[0]] = {
+                    'count': stat[2],
+                    'last_recorded': stat[3].replace(tzinfo=brazil_tz) if stat[3] else None,
+                    'username': stat[1]
                 }
             
             # Carregar notificações personalizadas
             await cursor.execute("""
                 SELECT user_id, boss_name 
                 FROM user_notifications
+                ORDER BY user_id, boss_name
             """)
             notifications = await cursor.fetchall()
             
             for notification in notifications:
-                user_id = notification['user_id']
-                boss_name = notification['boss_name']
+                user_id = notification[0]
+                boss_name = notification[1]
                 
                 if user_id not in user_notifications:
                     user_notifications[user_id] = []
@@ -289,13 +291,13 @@ async def get_user_notifications(user_id: str) -> List[str]:
         if conn is None:
             return []
         
-        async with conn.cursor(dictionary=True) as cursor:
+        async with conn.cursor() as cursor:
             await cursor.execute("""
             SELECT boss_name FROM user_notifications
             WHERE user_id = %s
             """, (user_id,))
             
-            return [row['boss_name'] for row in await cursor.fetchall()]
+            return [row[0] for row in await cursor.fetchall()]
     except Exception as err:
         logger.error(f"Erro ao obter notificações: {err}", exc_info=True)
         return []
@@ -314,18 +316,40 @@ async def create_backup() -> Optional[str]:
         if conn is None:
             return None
             
-        async with conn.cursor(dictionary=True) as cursor:
+        async with conn.cursor() as cursor:
             # Backup dos timers de boss
             await cursor.execute("SELECT * FROM boss_timers")
-            boss_timers_data = await cursor.fetchall()
+            boss_timers_data = []
+            for row in await cursor.fetchall():
+                boss_timers_data.append({
+                    'boss_name': row[1],
+                    'sala': row[2],
+                    'death_time': row[3],
+                    'respawn_time': row[4],
+                    'closed_time': row[5],
+                    'recorded_by': row[6],
+                    'opened_notified': bool(row[7])
+                })
             
             # Backup das estatísticas de usuários
             await cursor.execute("SELECT * FROM user_stats")
-            user_stats_data = await cursor.fetchall()
+            user_stats_data = []
+            for row in await cursor.fetchall():
+                user_stats_data.append({
+                    'user_id': row[0],
+                    'username': row[1],
+                    'count': row[2],
+                    'last_recorded': row[3]
+                })
             
             # Backup das notificações personalizadas
             await cursor.execute("SELECT * FROM user_notifications")
-            user_notifications_data = await cursor.fetchall()
+            user_notifications_data = []
+            for row in await cursor.fetchall():
+                user_notifications_data.append({
+                    'user_id': row[0],
+                    'boss_name': row[1]
+                })
             
             backup_data = {
                 'boss_timers': boss_timers_data,
