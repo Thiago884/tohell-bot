@@ -13,6 +13,8 @@ from boss_commands import setup_boss_commands
 from utility_commands import setup_utility_commands
 from database import init_db, load_db_data, create_pool, close_pool
 from shared_functions import get_next_bosses
+from dotenv import load_dotenv
+load_dotenv() 
 
 # Configuração do Flask (keep-alive)
 app = Flask(__name__)
@@ -157,10 +159,10 @@ if __name__ == "__main__":
     keep_alive()
     
     token = os.getenv('DISCORD_TOKEN')
-    if not token:
-        print("\n❌ ERRO: Token não encontrado!")
-        print("Verifique se você configurou a variável de ambiente 'DISCORD_TOKEN'")
-        exit(1)
+if not token:
+    print("\n❌ ERRO: Token não encontrado!")
+    print("Verifique se você configurou a variável de ambiente 'DISCORD_TOKEN'")
+    exit(1)
     
     print("\n🔑 Token encontrado, iniciando bot...")
     try:

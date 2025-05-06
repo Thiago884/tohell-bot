@@ -35,12 +35,8 @@ async def create_pool():
                 port=int(os.getenv('DB_PORT', 3306)),
                 minsize=1,
                 maxsize=10,
-                connect_timeout=60,  # Aumentado para 60 segundos
-                read_timeout=60,     # Timeout de leitura aumentado
-                write_timeout=60,    # Timeout de escrita aumentado
                 autocommit=True,
-                charset='utf8mb4',   # Suporte a caracteres especiais
-                cursorclass=aiomysql.DictCursor
+                charset='utf8mb4'   # Suporte a caracteres especiais
             )
             print("✅ Pool de conexões criado com sucesso!")
             print("="*50 + "\n")
@@ -61,41 +57,6 @@ async def create_pool():
             pool = None
             return None
     return pool
-
-async def get_connection():
-    """Obtém uma conexão do pool com logs detalhados"""
-    try:
-        print("🔌 Obtendo conexão do pool...")
-        if pool is None or pool._closed:
-            print("⚠ Pool não existe ou está fechado, criando novo...")
-            await create_pool()
-        
-        start_time = time.time()
-        conn = await pool.acquire()
-        elapsed = time.time() - start_time
-        print(f"✅ Conexão obtida com sucesso! (Tempo: {elapsed:.2f}s)")
-        return conn
-    except Exception as e:
-        print("\n" + "="*50)
-        print(f"❌ ERRO AO OBTER CONEXÃO:")
-        print(f"Tipo: {type(e).__name__}")
-        print(f"Detalhes: {str(e)}")
-        print("="*50 + "\n")
-        return None
-
-async def release_connection(conn):
-    """Libera uma conexão de volta para o pool"""
-    try:
-        if pool and conn:
-            print("🔌 Liberando conexão...")
-            await pool.release(conn)
-            print("✅ Conexão liberada com sucesso!")
-    except Exception as e:
-        print("\n" + "="*50)
-        print(f"❌ ERRO AO LIBERAR CONEXÃO:")
-        print(f"Tipo: {type(e).__name__}")
-        print(f"Detalhes: {str(e)}")
-        print("="*50 + "\n")
 
 async def init_db():
     """Inicializa o banco de dados e cria tabelas se não existirem"""
