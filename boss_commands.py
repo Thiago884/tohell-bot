@@ -39,6 +39,152 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
     
     return False
 
+async def create_history_embed(bot, boss_timers):
+    """Cria embed com histórico de anotações (versão corrigida)"""
+    conn = None
+    try:
+        print("Iniciando busca por histórico...")
+        conn = await connect_db()
+        if conn is None:
+            print("Erro: Não foi possível conectar ao banco de dados")
+            return discord.Embed(
+                title="Erro de Conexão",
+                description="Não foi possível conectar ao banco de dados",
+                color=discord.Color.red()
+            )
+        
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+            SELECT boss_name, sala, death_time, respawn_time, recorded_by 
+            FROM boss_timers 
+            WHERE death_time IS NOT NULL
+            ORDER BY death_time DESC 
+            LIMIT 10
+            """)
+            
+            history = await cursor.fetchall()
+            print(f"Histórico encontrado: {len(history)} registros")
+            
+            if not history:
+                return discord.Embed(
+                    title="📜 Histórico de Anotações",
+                    description="Nenhuma anotação registrada ainda.",
+                    color=discord.Color.blue()
+                )
+            
+            embed = discord.Embed(
+                title="📜 Histórico das Últimas Anotações",
+                color=discord.Color.gold()
+            )
+            
+            for idx, record in enumerate(history, 1):
+                death_time = record[2].astimezone(brazil_tz) if record[2] else None
+                respawn_time = record[3].astimezone(brazil_tz) if record[3] else None
+                
+                embed.add_field(
+                    name=f"{idx}. {record[0]} (Sala {record[1]})",
+                    value=(
+                        f"⏱ Morte: {death_time.strftime('%d/%m %H:%M') if death_time else 'N/A'}\n"
+                        f"🔄 Abriu: {respawn_time.strftime('%d/%m %H:%M') if respawn_time else 'N/A'}\n"
+                        f"👤 Por: {record[4] or 'Desconhecido'}"
+                    ),
+                    inline=False
+                )
+            
+            return embed
+            
+    except Exception as e:
+        print(f"Erro detalhado ao buscar histórico: {str(e)}")
+        traceback.print_exc()
+        return discord.Embed(
+            title="Erro",
+            description=f"Ocorreu um erro ao buscar o histórico: {str(e)}",
+            color=discord.Color.red()
+        )
+    finally:
+        if conn:
+            await conn.ensure_closed()
+
+async def create_unrecorded_embed(bot, boss_timers):
+    """Cria embed com bosses que fecharam sem registro (versão corrigida)"""
+    conn = None
+    try:
+        print("Iniciando busca por bosses não anotados...")
+        conn = await connect_db()
+        if conn is None:
+            print("Erro: Não foi possível conectar ao banco de dados")
+            return discord.Embed(
+                title="Erro de Conexão",
+                description="Não foi possível conectar ao banco de dados",
+                color=discord.Color.red()
+            )
+        
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+            SELECT 
+                boss_name, 
+                sala, 
+                death_time, 
+                respawn_time, 
+                closed_time,
+                recorded_by
+            FROM 
+                boss_timers
+            WHERE 
+                closed_time IS NOT NULL AND
+                closed_time < NOW() AND
+                death_time IS NOT NULL
+            ORDER BY 
+                closed_time DESC 
+            LIMIT 10
+            """)
+            
+            unrecorded = await cursor.fetchall()
+            print(f"Bosses não anotados encontrados: {len(unrecorded)} registros")
+            
+            if not unrecorded:
+                return discord.Embed(
+                    title="🔴 Bosses Fechados Recentemente",
+                    description="Nenhum boss foi fechado recentemente sem registro.",
+                    color=discord.Color.blue()
+                )
+            
+            embed = discord.Embed(
+                title="🔴 Últimos Bosses Fechados",
+                description="Estes bosses foram fechados recentemente:",
+                color=discord.Color.red()
+            )
+            
+            for idx, record in enumerate(unrecorded, 1):
+                death_time = record[2].astimezone(brazil_tz) if record[2] else None
+                respawn_time = record[3].astimezone(brazil_tz) if record[3] else None
+                closed_time = record[4].astimezone(brazil_tz) if record[4] else None
+                
+                embed.add_field(
+                    name=f"{idx}. {record[0]} (Sala {record[1]})",
+                    value=(
+                        f"⏱ Morte registrada: {death_time.strftime('%d/%m %H:%M') if death_time else 'N/A'}\n"
+                        f"🔄 Período aberto: {respawn_time.strftime('%d/%m %H:%M') if respawn_time else 'N/A'} "
+                        f"até {closed_time.strftime('%d/%m %H:%M') if closed_time else 'N/A'}\n"
+                        f"👤 Registrado por: {record[5] or 'Ninguém'}"
+                    ),
+                    inline=False
+                )
+            
+            return embed
+            
+    except Exception as e:
+        print(f"Erro detalhado ao buscar bosses fechados: {str(e)}")
+        traceback.print_exc()
+        return discord.Embed(
+            title="Erro",
+            description=f"Ocorreu um erro ao buscar os bosses fechados: {str(e)}",
+            color=discord.Color.red()
+        )
+    finally:
+        if conn:
+            await conn.ensure_closed()
+
 async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID):
     async def create_ranking_embed():
         """Cria embed com o ranking de usuários que mais registraram bosses"""
@@ -59,7 +205,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                 user = await bot.fetch_user(int(user_id))
                 username = user.name
             except:
-                username = f"Usuário {user_id}"
+                username = stats.get('username', f"Usuário {user_id}")
             
             medal = ""
             if idx == 0:
@@ -346,6 +492,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
         
         if sala not in boss_timers.get(list(boss_timers.keys())[0], {}).keys():
             await ctx.send(f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers.get(list(boss_timers.keys())[0], {}).keys()))}")
+
             return
         
         full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
@@ -531,116 +678,3 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
         lambda: create_history_embed(bot, boss_timers),
         lambda: create_unrecorded_embed(bot, boss_timers)
     )
-
-async def create_history_embed(bot, boss_timers):
-    """Cria embed com histórico de anotações (versão corrigida)"""
-    conn = None
-    try:
-        conn = await connect_db()
-        if conn is None:
-            return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
-        
-        async with conn.cursor() as cursor:
-            await cursor.execute("""
-            SELECT boss_name, sala, death_time, respawn_time, recorded_by 
-            FROM boss_timers 
-            WHERE death_time IS NOT NULL
-            ORDER BY death_time DESC 
-            LIMIT 10
-            """)
-            
-            history = await cursor.fetchall()
-            
-            if not history:
-                return discord.Embed(title="Histórico de Anotações", description="Nenhuma anotação registrada ainda.", color=discord.Color.blue())
-            
-            embed = discord.Embed(
-                title="📜 Histórico das Últimas Anotações",
-                color=discord.Color.gold()
-            )
-            
-            for idx, record in enumerate(history, 1):
-                embed.add_field(
-                    name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
-                    value=f"⏱ Morte: {record['death_time'].strftime('%d/%m %H:%M')}\n"
-                         f"🔄 Abriu: {record['respawn_time'].strftime('%d/%m %H:%M')}\n"
-                         f"👤 Por: {record['recorded_by']}",
-                    inline=False
-                )
-            
-            return embed
-            
-    except Exception as e:
-        print(f"Erro ao buscar histórico: {e}")
-        return discord.Embed(title="Erro", description="Ocorreu um erro ao buscar o histórico", color=discord.Color.red())
-    finally:
-        if conn:
-            await conn.ensure_closed()
-
-async def create_unrecorded_embed(bot, boss_timers):
-    """Cria embed com bosses que fecharam sem registro (versão corrigida)"""
-    conn = None
-    try:
-        conn = await connect_db()
-        if conn is None:
-            return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
-        
-        async with conn.cursor() as cursor:
-            await cursor.execute("""
-            SELECT 
-                boss_name, 
-                sala, 
-                death_time, 
-                respawn_time, 
-                closed_time,
-                recorded_by
-            FROM 
-                boss_timers
-            WHERE 
-                closed_time IS NOT NULL AND
-                closed_time < NOW() AND
-                death_time IS NOT NULL
-            ORDER BY 
-                closed_time DESC 
-            LIMIT 10
-            """)
-            
-            unrecorded = await cursor.fetchall()
-            
-            if not unrecorded:
-                return discord.Embed(
-                    title="Bosses Fechados Recentemente",
-                    description="Nenhum boss foi fechado recentemente.",
-                    color=discord.Color.blue()
-                )
-            
-            embed = discord.Embed(
-                title="🔴 Últimos Bosses Fechados",
-                description="Estes bosses foram fechados recentemente:",
-                color=discord.Color.red()
-            )
-            
-            for idx, record in enumerate(unrecorded, 1):
-                embed.add_field(
-                    name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
-                    value=(
-                        f"⏱ Morte registrada: {record['death_time'].strftime('%d/%m %H:%M')}\n"
-                        f"🔄 Período aberto: {record['respawn_time'].strftime('%d/%m %H:%M')} "
-                        f"até {record['closed_time'].strftime('%d/%m %H:%M')}\n"
-                        f"👤 Registrado por: {record['recorded_by'] or 'Ninguém'}"
-                    ),
-                    inline=False
-                )
-            
-            return embed
-            
-    except Exception as e:
-        print(f"Erro ao buscar bosses fechados: {e}")
-        return discord.Embed(
-            title="Erro",
-            description="Ocorreu um erro ao buscar os bosses fechados",
-            color=discord.Color.red()
-        )
-    finally:
-        if conn:
-            await conn.ensure_closed()
