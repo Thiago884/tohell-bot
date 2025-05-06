@@ -533,17 +533,39 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 return
                 
             async with conn.cursor() as cursor:
-                # Backup dos timers de boss
-                await cursor.execute("SELECT * FROM boss_timers")
-                boss_timers_data = await cursor.fetchall()
+                # Backup dos timers de boss - convertendo para dicionário serializável
+                await cursor.execute("SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified FROM boss_timers")
+                boss_timers_data = []
+                for row in await cursor.fetchall():
+                    boss_timers_data.append({
+                        'boss_name': row[0],
+                        'sala': row[1],
+                        'death_time': row[2].isoformat() if row[2] else None,
+                        'respawn_time': row[3].isoformat() if row[3] else None,
+                        'closed_time': row[4].isoformat() if row[4] else None,
+                        'recorded_by': row[5],
+                        'opened_notified': bool(row[6])
+                    })
                 
-                # Backup das estatísticas de usuários
-                await cursor.execute("SELECT * FROM user_stats")
-                user_stats_data = await cursor.fetchall()
+                # Backup das estatísticas de usuários - convertendo para dicionário serializável
+                await cursor.execute("SELECT user_id, username, count, last_recorded FROM user_stats")
+                user_stats_data = []
+                for row in await cursor.fetchall():
+                    user_stats_data.append({
+                        'user_id': row[0],
+                        'username': row[1],
+                        'count': row[2],
+                        'last_recorded': row[3].isoformat() if row[3] else None
+                    })
                 
-                # Backup das notificações personalizadas
-                await cursor.execute("SELECT * FROM user_notifications")
-                user_notifications_data = await cursor.fetchall()
+                # Backup das notificações personalizadas - convertendo para dicionário serializável
+                await cursor.execute("SELECT user_id, boss_name FROM user_notifications")
+                user_notifications_data = []
+                for row in await cursor.fetchall():
+                    user_notifications_data.append({
+                        'user_id': row[0],
+                        'boss_name': row[1]
+                    })
                 
                 backup_data = {
                     'boss_timers': boss_timers_data,
@@ -554,7 +576,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 }
                 
                 with open(backup_file, 'w', encoding='utf-8') as f:
-                    json.dump(backup_data, f, indent=4, default=str)
+                    json.dump(backup_data, f, indent=4)
                     
             logger.info(f"Backup criado com sucesso: {backup_file}")
         except Exception as e:
@@ -567,30 +589,48 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
     @daily_backup.before_loop
     async def before_daily_backup():
         logger.info("Agendando backup diário...")
+        await bot.wait_until_ready()
 
     @daily_backup.after_loop
     async def after_daily_backup():
-        logger.info("Backup diário finalizado")
+        if daily_backup.failed():
+            logger.error("Backup diário falhou!")
+        else:
+            logger.info("Backup diário finalizado com sucesso")
 
     @daily_backup.error
     async def on_daily_backup_error(error):
         logger.error(f"Erro na task de backup: {error}", exc_info=True)
+        try:
+            # Tentar reiniciar a task após 1 hora se falhar
+            await asyncio.sleep(3600)
+            daily_backup.restart()
+        except Exception as e:
+            logger.error(f"Falha ao reiniciar task de backup: {e}")
 
-    # Iniciar a task de backup
+    # Iniciar a task de backup com tratamento de erro
     if not daily_backup.is_running():
-        daily_backup.start()
+        try:
+            daily_backup.start()
+            logger.info("Task de backup diário iniciada com sucesso")
+        except Exception as e:
+            logger.error(f"Falha ao iniciar task de backup diário: {e}", exc_info=True)
 
     # Adicionar a view persistente
-    bot.add_view(BossControlView(
-        bot, 
-        boss_timers, 
-        user_stats, 
-        user_notifications, 
-        table_message, 
-        NOTIFICATION_CHANNEL_ID,
-        update_table_func,
-        create_next_bosses_embed_func,
-        create_ranking_embed,
-        create_history_embed,
-        create_unrecorded_embed
-    ))
+    try:
+        bot.add_view(BossControlView(
+            bot, 
+            boss_timers, 
+            user_stats, 
+            user_notifications, 
+            table_message, 
+            NOTIFICATION_CHANNEL_ID,
+            update_table_func,
+            create_next_bosses_embed_func,
+            create_ranking_embed,
+            create_history_embed,
+            create_unrecorded_embed
+        ))
+        logger.info("View persistente adicionada com sucesso")
+    except Exception as e:
+        logger.error(f"Erro ao adicionar view persistente: {e}", exc_info=True)
