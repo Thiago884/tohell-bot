@@ -12,6 +12,12 @@ from boss_commands import setup_boss_commands
 from utility_commands import setup_utility_commands
 from database import init_db, load_db_data
 from shared_functions import get_next_bosses
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 
 # Configuração do Flask (keep-alive)
 app = Flask(__name__)
@@ -101,9 +107,13 @@ async def on_ready():
     
     # Inicialização do banco de dados e carregamento de dados
     print("\nInicializando banco de dados...")
-    await init_db()
-    await load_db_data(boss_timers, user_stats, user_notifications)
-    print("✅ Banco de dados pronto!")
+    try:
+        await init_db()
+        await load_db_data(boss_timers, user_stats, user_notifications)
+        print("✅ Dados carregados com sucesso!")
+    except Exception as e:
+        print(f"❌ Erro ao inicializar banco de dados: {e}")
+        traceback.print_exc()
     
     # Configura comandos e tasks
     print("\nConfigurando comandos de boss...")
