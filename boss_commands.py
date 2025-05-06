@@ -41,6 +41,7 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
 
 async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID):
     async def create_ranking_embed():
+        """Cria embed com o ranking de usuários que mais registraram bosses"""
         sorted_users = sorted(user_stats.items(), key=lambda x: x[1]['count'], reverse=True)
         
         embed = discord.Embed(
@@ -77,114 +78,8 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
         embed.description = "\n\n".join(ranking_text)
         return embed
 
-    async def create_history_embed():
-        conn = await connect_db()
-        if conn is None:
-            return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
-        
-        try:
-            async with conn.cursor() as cursor:
-                await cursor.execute("""
-                SELECT boss_name, sala, death_time, respawn_time, recorded_by 
-                FROM boss_timers 
-                WHERE death_time IS NOT NULL
-                ORDER BY death_time DESC 
-                LIMIT 10
-                """)
-                
-                history = await cursor.fetchall()
-                
-                if not history:
-                    return discord.Embed(title="Histórico de Anotações", description="Nenhuma anotação registrada ainda.", color=discord.Color.blue())
-                
-                embed = discord.Embed(
-                    title="📜 Histórico das Últimas Anotações",
-                    color=discord.Color.gold()
-                )
-                
-                for idx, record in enumerate(history, 1):
-                    embed.add_field(
-                        name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
-                        value=f"⏱ Morte: {record['death_time'].strftime('%d/%m %H:%M')}\n"
-                             f"🔄 Abriu: {record['respawn_time'].strftime('%d/%m %H:%M')}\n"
-                             f"👤 Por: {record['recorded_by']}",
-                        inline=False
-                    )
-                
-                return embed
-                
-        except Exception as e:
-            print(f"Erro ao buscar histórico: {e}")
-            return discord.Embed(title="Erro", description="Ocorreu um erro ao buscar o histórico", color=discord.Color.red())
-        finally:
-            await conn.ensure_closed()
-
-    async def create_unrecorded_embed():
-        conn = await connect_db()
-        if conn is None:
-            return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
-        
-        try:
-            async with conn.cursor() as cursor:
-                await cursor.execute("""
-                SELECT 
-                    boss_name, 
-                    sala, 
-                    death_time, 
-                    respawn_time, 
-                    closed_time,
-                    recorded_by
-                FROM 
-                    boss_timers
-                WHERE 
-                    closed_time IS NOT NULL AND
-                    closed_time < NOW() AND
-                    death_time IS NOT NULL
-                ORDER BY 
-                    closed_time DESC 
-                LIMIT 10
-                """)
-                
-                unrecorded = await cursor.fetchall()
-                
-                if not unrecorded:
-                    return discord.Embed(
-                        title="Bosses Fechados Recentemente",
-                        description="Nenhum boss foi fechado recentemente.",
-                        color=discord.Color.blue()
-                    )
-                
-                embed = discord.Embed(
-                    title="🔴 Últimos Bosses Fechados",
-                    description="Estes bosses foram fechados recentemente:",
-                    color=discord.Color.red()
-                )
-                
-                for idx, record in enumerate(unrecorded, 1):
-                    embed.add_field(
-                        name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
-                        value=(
-                            f"⏱ Morte registrada: {record['death_time'].strftime('%d/%m %H:%M')}\n"
-                            f"🔄 Período aberto: {record['respawn_time'].strftime('%d/%m %H:%M')} "
-                            f"até {record['closed_time'].strftime('%d/%m %H:%M')}\n"
-                            f"👤 Registrado por: {record['recorded_by'] or 'Ninguém'}"
-                        ),
-                        inline=False
-                    )
-                
-                return embed
-                
-        except Exception as e:
-            print(f"Erro ao buscar bosses fechados: {e}")
-            return discord.Embed(
-                title="Erro",
-                description="Ocorreu um erro ao buscar os bosses fechados",
-                color=discord.Color.red()
-            )
-        finally:
-            await conn.ensure_closed()
-
     def create_boss_embed(compact=False):
+        """Cria embed com a tabela de timers de boss"""
         now = datetime.now(brazil_tz)
         
         embed = discord.Embed(
@@ -238,6 +133,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
         return embed
 
     async def create_next_bosses_embed(boss_timers):
+        """Cria embed com os próximos bosses a abrir"""
         next_bosses = get_next_bosses(boss_timers)
         
         embed = discord.Embed(
@@ -268,6 +164,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
         return embed
 
     async def update_table(channel):
+        """Atualiza a mensagem da tabela de bosses"""
         nonlocal table_message
         
         try:
@@ -282,8 +179,8 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                 update_table,
                 create_next_bosses_embed,
                 create_ranking_embed,
-                create_history_embed,
-                create_unrecorded_embed
+                lambda: create_history_embed(bot, boss_timers),
+                lambda: create_unrecorded_embed(bot, boss_timers)
             )
             
             if table_message:
@@ -320,8 +217,8 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                     update_table,
                     create_next_bosses_embed,
                     create_ranking_embed,
-                    create_history_embed,
-                    create_unrecorded_embed
+                    lambda: create_history_embed(bot, boss_timers),
+                    lambda: create_unrecorded_embed(bot, boss_timers)
                 ))
             except Exception as e:
                 print(f"Erro ao enviar nova mensagem de tabela: {e}")
@@ -329,12 +226,14 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
     # Tasks
     @tasks.loop(seconds=30)
     async def live_table_updater():
+        """Atualiza a tabela periodicamente"""
         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
         if channel:
             await update_table(channel)
 
     @tasks.loop(minutes=1)
     async def check_boss_respawns():
+        """Verifica os respawns de boss e envia notificações"""
         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
         if channel is None:
             print(f"Erro: Canal com ID {NOTIFICATION_CHANNEL_ID} não encontrado!")
@@ -410,6 +309,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
 
     @tasks.loop(minutes=30)
     async def periodic_table_update():
+        """Atualiza a tabela periodicamente com novo post"""
         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
         if channel:
             # Enviar nova mensagem com a tabela atualizada
@@ -424,8 +324,8 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                 update_table,
                 create_next_bosses_embed,
                 create_ranking_embed,
-                create_history_embed,
-                create_unrecorded_embed
+                lambda: create_history_embed(bot, boss_timers),
+                lambda: create_unrecorded_embed(bot, boss_timers)
             )
             await channel.send(embed=embed, view=view)
         
@@ -435,6 +335,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
     # Comandos
     @bot.command(name='boss')
     async def boss_command(ctx, boss_name: str = None, sala: int = None, hora_morte: str = None):
+        """Registra a morte de um boss"""
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
@@ -507,6 +408,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
 
     @bot.command(name='bosses')
     async def bosses_command(ctx, mode: str = None):
+        """Mostra a tabela de timers de boss"""
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
@@ -523,13 +425,14 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
             update_table,
             create_next_bosses_embed,
             create_ranking_embed,
-            create_history_embed,
-            create_unrecorded_embed
+            lambda: create_history_embed(bot, boss_timers),
+            lambda: create_unrecorded_embed(bot, boss_timers)
         )
         await ctx.send(embed=embed, view=view)
 
     @bot.command(name='nextboss')
     async def next_boss_command(ctx):
+        """Mostra os próximos bosses a abrir"""
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
@@ -539,6 +442,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
 
     @bot.command(name='clearboss')
     async def clear_boss(ctx, boss_name: str, sala: int = None):
+        """Limpa o timer de um boss"""
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
@@ -581,6 +485,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
 
     @bot.command(name='setupboss')
     async def setup_boss(ctx):
+        """Recria a tabela de bosses com botões de controle"""
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
             return
@@ -596,13 +501,14 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
             update_table,
             create_next_bosses_embed,
             create_ranking_embed,
-            create_history_embed,
-            create_unrecorded_embed
+            lambda: create_history_embed(bot, boss_timers),
+            lambda: create_unrecorded_embed(bot, boss_timers)
         )
         await ctx.send(embed=embed, view=view)
 
     @bot.command(name='resettable')
     async def reset_table(ctx):
+        """Reseta a referência da tabela principal"""
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
             return
         
@@ -622,6 +528,119 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
         update_table,
         create_next_bosses_embed,
         create_ranking_embed,
-        create_history_embed,
-        create_unrecorded_embed
+        lambda: create_history_embed(bot, boss_timers),
+        lambda: create_unrecorded_embed(bot, boss_timers)
     )
+
+async def create_history_embed(bot, boss_timers):
+    """Cria embed com histórico de anotações (versão corrigida)"""
+    conn = None
+    try:
+        conn = await connect_db()
+        if conn is None:
+            return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
+        
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+            SELECT boss_name, sala, death_time, respawn_time, recorded_by 
+            FROM boss_timers 
+            WHERE death_time IS NOT NULL
+            ORDER BY death_time DESC 
+            LIMIT 10
+            """)
+            
+            history = await cursor.fetchall()
+            
+            if not history:
+                return discord.Embed(title="Histórico de Anotações", description="Nenhuma anotação registrada ainda.", color=discord.Color.blue())
+            
+            embed = discord.Embed(
+                title="📜 Histórico das Últimas Anotações",
+                color=discord.Color.gold()
+            )
+            
+            for idx, record in enumerate(history, 1):
+                embed.add_field(
+                    name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
+                    value=f"⏱ Morte: {record['death_time'].strftime('%d/%m %H:%M')}\n"
+                         f"🔄 Abriu: {record['respawn_time'].strftime('%d/%m %H:%M')}\n"
+                         f"👤 Por: {record['recorded_by']}",
+                    inline=False
+                )
+            
+            return embed
+            
+    except Exception as e:
+        print(f"Erro ao buscar histórico: {e}")
+        return discord.Embed(title="Erro", description="Ocorreu um erro ao buscar o histórico", color=discord.Color.red())
+    finally:
+        if conn:
+            await conn.ensure_closed()
+
+async def create_unrecorded_embed(bot, boss_timers):
+    """Cria embed com bosses que fecharam sem registro (versão corrigida)"""
+    conn = None
+    try:
+        conn = await connect_db()
+        if conn is None:
+            return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
+        
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+            SELECT 
+                boss_name, 
+                sala, 
+                death_time, 
+                respawn_time, 
+                closed_time,
+                recorded_by
+            FROM 
+                boss_timers
+            WHERE 
+                closed_time IS NOT NULL AND
+                closed_time < NOW() AND
+                death_time IS NOT NULL
+            ORDER BY 
+                closed_time DESC 
+            LIMIT 10
+            """)
+            
+            unrecorded = await cursor.fetchall()
+            
+            if not unrecorded:
+                return discord.Embed(
+                    title="Bosses Fechados Recentemente",
+                    description="Nenhum boss foi fechado recentemente.",
+                    color=discord.Color.blue()
+                )
+            
+            embed = discord.Embed(
+                title="🔴 Últimos Bosses Fechados",
+                description="Estes bosses foram fechados recentemente:",
+                color=discord.Color.red()
+            )
+            
+            for idx, record in enumerate(unrecorded, 1):
+                embed.add_field(
+                    name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
+                    value=(
+                        f"⏱ Morte registrada: {record['death_time'].strftime('%d/%m %H:%M')}\n"
+                        f"🔄 Período aberto: {record['respawn_time'].strftime('%d/%m %H:%M')} "
+                        f"até {record['closed_time'].strftime('%d/%m %H:%M')}\n"
+                        f"👤 Registrado por: {record['recorded_by'] or 'Ninguém'}"
+                    ),
+                    inline=False
+                )
+            
+            return embed
+            
+    except Exception as e:
+        print(f"Erro ao buscar bosses fechados: {e}")
+        return discord.Embed(
+            title="Erro",
+            description="Ocorreu um erro ao buscar os bosses fechados",
+            color=discord.Color.red()
+        )
+    finally:
+        if conn:
+            await conn.ensure_closed()
