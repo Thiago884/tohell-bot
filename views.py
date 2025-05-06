@@ -175,8 +175,8 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 self.user_stats[user_id]['count'] += 1
                 self.user_stats[user_id]['last_recorded'] = now
                 
-                save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
-                save_user_stats(user_id, interaction.user.name, self.user_stats[user_id]['count'], now)
+                await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
+                await save_user_stats(user_id, interaction.user.name, self.user_stats[user_id]['count'], now)
                 
                 await interaction.response.send_message(
                     f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
@@ -264,7 +264,7 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                         'recorded_by': None,
                         'opened_notified': False
                     }
-                clear_timer(boss_name)
+                await clear_timer(boss_name)
                 await interaction.response.send_message(
                     f"✅ Todos os timers do boss **{boss_name}** foram resetados.",
                     ephemeral=True
@@ -286,7 +286,7 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                         'recorded_by': None,
                         'opened_notified': False
                     }
-                    clear_timer(boss_name, sala)
+                    await clear_timer(boss_name, sala)
                     await interaction.response.send_message(
                         f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
                         ephemeral=True
@@ -359,7 +359,7 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
                 if user_id not in self.user_notifications:
                     self.user_notifications[user_id] = []
                 if boss_name not in self.user_notifications[user_id]:
-                    if add_user_notification(user_id, boss_name):
+                    if await add_user_notification(user_id, boss_name):
                         self.user_notifications[user_id].append(boss_name)
                         await interaction.response.send_message(
                             f"✅ Você será notificado quando **{boss_name}** estiver disponível!",
@@ -378,7 +378,7 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
             
             elif action in ['rem', 'remover', 'r']:
                 if user_id in self.user_notifications and boss_name in self.user_notifications[user_id]:
-                    if remove_user_notification(user_id, boss_name):
+                    if await remove_user_notification(user_id, boss_name):
                         self.user_notifications[user_id].remove(boss_name)
                         await interaction.response.send_message(
                             f"✅ Você NÃO será mais notificado para **{boss_name}**.",
@@ -624,7 +624,7 @@ class BossControlView(View):
             async def backup_callback(interaction: discord.Interaction):
                 if not interaction.response.is_done():
                     await interaction.response.defer(ephemeral=True)
-                backup_file = create_backup()
+                backup_file = await create_backup()
                 if backup_file:
                     try:
                         with open(backup_file, 'rb') as f:
@@ -664,8 +664,8 @@ class BossControlView(View):
                         await interaction.response.defer(ephemeral=True)
                     backup_file = select.values[0]
                     
-                    if restore_backup(backup_file):
-                        load_db_data(self.boss_timers, self.user_stats, self.user_notifications)
+                    if await restore_backup(backup_file):
+                        await load_db_data(self.boss_timers, self.user_stats, self.user_notifications)
                         
                         await interaction.followup.send(
                             f"✅ Backup **{backup_file}** restaurado com sucesso!",

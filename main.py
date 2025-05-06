@@ -101,8 +101,8 @@ async def on_ready():
     
     # Inicialização do banco de dados e carregamento de dados
     print("\nInicializando banco de dados...")
-    init_db()
-    load_db_data(boss_timers, user_stats, user_notifications)
+    await init_db()
+    await load_db_data(boss_timers, user_stats, user_notifications)
     print("✅ Banco de dados pronto!")
     
     # Configura comandos e tasks
@@ -110,7 +110,15 @@ async def on_ready():
     boss_funcs = await setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
     
     print("\nConfigurando comandos utilitários...")
-    await setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, *boss_funcs)
+    await setup_utility_commands(
+        bot, 
+        boss_timers, 
+        user_stats, 
+        user_notifications, 
+        table_message, 
+        NOTIFICATION_CHANNEL_ID,
+        *boss_funcs
+    )
     
     print("\n✅ Bot totalmente inicializado e pronto para uso!")
 
@@ -120,14 +128,20 @@ async def teste(interaction: discord.Interaction):
 
 @bot.command()
 async def ping(ctx):
-    await ctx.send(f'🏓 Pong! Latência: {round(bot.latency * 1000)}ms')
+    latency = round(bot.latency * 1000)
+    embed = discord.Embed(
+        title="🏓 Pong!",
+        description=f"Latência: {latency}ms",
+        color=discord.Color.green()
+    )
+    await ctx.send(embed=embed)
 
 def keep_alive():
     """Inicia o servidor Flask em thread separada"""
     t = Thread(target=run_flask, daemon=True)
     t.start()
 
-if __name__ == "__main__":
+async def main():
     keep_alive()
     
     token = os.getenv('DISCORD_TOKEN')
@@ -138,7 +152,7 @@ if __name__ == "__main__":
     
     print("\n🔑 Token encontrado, iniciando bot...")
     try:
-        bot.run(token)
+        await bot.start(token)
     except discord.LoginError:
         print("\n❌ Falha no login: Token inválido!")
     except Exception as e:
@@ -146,3 +160,6 @@ if __name__ == "__main__":
         traceback.print_exc()
     finally:
         print("\n🛑 Bot encerrado")
+
+if __name__ == "__main__":
+    asyncio.run(main())

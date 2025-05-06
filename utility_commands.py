@@ -63,61 +63,60 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         return embed
 
     async def create_unrecorded_embed():
-        conn = connect_db()
+        conn = await connect_db()
         if conn is None:
             return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
         
         try:
-            cursor = conn.cursor(dictionary=True)
-            
-            cursor.execute("""
-            SELECT 
-                boss_name, 
-                sala, 
-                death_time, 
-                respawn_time, 
-                closed_time,
-                recorded_by
-            FROM 
-                boss_timers
-            WHERE 
-                closed_time IS NOT NULL AND
-                closed_time < NOW() AND
-                death_time IS NOT NULL
-            ORDER BY 
-                closed_time DESC 
-            LIMIT 10
-            """)
-            
-            unrecorded = cursor.fetchall()
-            
-            if not unrecorded:
-                return discord.Embed(
-                    title="Bosses Fechados Recentemente",
-                    description="Nenhum boss foi fechado recentemente.",
-                    color=discord.Color.blue()
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                SELECT 
+                    boss_name, 
+                    sala, 
+                    death_time, 
+                    respawn_time, 
+                    closed_time,
+                    recorded_by
+                FROM 
+                    boss_timers
+                WHERE 
+                    closed_time IS NOT NULL AND
+                    closed_time < NOW() AND
+                    death_time IS NOT NULL
+                ORDER BY 
+                    closed_time DESC 
+                LIMIT 10
+                """)
+                
+                unrecorded = await cursor.fetchall()
+                
+                if not unrecorded:
+                    return discord.Embed(
+                        title="Bosses Fechados Recentemente",
+                        description="Nenhum boss foi fechado recentemente.",
+                        color=discord.Color.blue()
+                    )
+                
+                embed = discord.Embed(
+                    title="🔴 Últimos Bosses Fechados",
+                    description="Estes bosses foram fechados recentemente:",
+                    color=discord.Color.red()
                 )
-            
-            embed = discord.Embed(
-                title="🔴 Últimos Bosses Fechados",
-                description="Estes bosses foram fechados recentemente:",
-                color=discord.Color.red()
-            )
-            
-            for idx, record in enumerate(unrecorded, 1):
-                embed.add_field(
-                    name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
-                    value=(
-                        f"⏱ Morte registrada: {record['death_time'].strftime('%d/%m %H:%M')}\n"
-                        f"🔄 Período aberto: {record['respawn_time'].strftime('%d/%m %H:%M')} "
-                        f"até {record['closed_time'].strftime('%d/%m %H:%M')}\n"
-                        f"👤 Registrado por: {record['recorded_by'] or 'Ninguém'}"
-                    ),
-                    inline=False
-                )
-            
-            return embed
-            
+                
+                for idx, record in enumerate(unrecorded, 1):
+                    embed.add_field(
+                        name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
+                        value=(
+                            f"⏱ Morte registrada: {record['death_time'].strftime('%d/%m %H:%M')}\n"
+                            f"🔄 Período aberto: {record['respawn_time'].strftime('%d/%m %H:%M')} "
+                            f"até {record['closed_time'].strftime('%d/%m %H:%M')}\n"
+                            f"👤 Registrado por: {record['recorded_by'] or 'Ninguém'}"
+                        ),
+                        inline=False
+                    )
+                
+                return embed
+                
         except Exception as e:
             print(f"Erro ao buscar bosses fechados: {e}")
             return discord.Embed(
@@ -126,7 +125,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 color=discord.Color.red()
             )
         finally:
-            conn.close()
+            await conn.ensure_closed()
 
     async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, closed_time):
         try:
@@ -147,53 +146,52 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         return False
 
     async def create_history_embed():
-        conn = connect_db()
+        conn = await connect_db()
         if conn is None:
             return discord.Embed(title="Erro", description="Não foi possível conectar ao banco de dados", color=discord.Color.red())
         
         try:
-            cursor = conn.cursor(dictionary=True)
-            
-            cursor.execute("""
-            SELECT boss_name, sala, death_time, respawn_time, recorded_by 
-            FROM boss_timers 
-            WHERE death_time IS NOT NULL
-            ORDER BY death_time DESC 
-            LIMIT 10
-            """)
-            
-            history = cursor.fetchall()
-            
-            if not history:
-                return discord.Embed(title="Histórico de Anotações", description="Nenhuma anotação registrada ainda.", color=discord.Color.blue())
-            
-            embed = discord.Embed(
-                title="📜 Histórico das Últimas Anotações",
-                color=discord.Color.gold()
-            )
-            
-            for idx, record in enumerate(history, 1):
-                embed.add_field(
-                    name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
-                    value=f"⏱ Morte: {record['death_time'].strftime('%d/%m %H:%M')}\n"
-                         f"🔄 Abriu: {record['respawn_time'].strftime('%d/%m %H:%M')}\n"
-                         f"👤 Por: {record['recorded_by']}",
-                    inline=False
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                SELECT boss_name, sala, death_time, respawn_time, recorded_by 
+                FROM boss_timers 
+                WHERE death_time IS NOT NULL
+                ORDER BY death_time DESC 
+                LIMIT 10
+                """)
+                
+                history = await cursor.fetchall()
+                
+                if not history:
+                    return discord.Embed(title="Histórico de Anotações", description="Nenhuma anotação registrada ainda.", color=discord.Color.blue())
+                
+                embed = discord.Embed(
+                    title="📜 Histórico das Últimas Anotações",
+                    color=discord.Color.gold()
                 )
-            
-            return embed
-            
+                
+                for idx, record in enumerate(history, 1):
+                    embed.add_field(
+                        name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
+                        value=f"⏱ Morte: {record['death_time'].strftime('%d/%m %H:%M')}\n"
+                             f"🔄 Abriu: {record['respawn_time'].strftime('%d/%m %H:%M')}\n"
+                             f"👤 Por: {record['recorded_by']}",
+                        inline=False
+                    )
+                
+                return embed
+                
         except Exception as e:
             print(f"Erro ao buscar histórico: {e}")
             return discord.Embed(title="Erro", description="Ocorreu um erro ao buscar o histórico", color=discord.Color.red())
         finally:
-            conn.close()
+            await conn.ensure_closed()
 
     # Comandos
     @bot.command(name='ranking')
     async def ranking_command(ctx):
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
             return
         
         embed = await create_ranking_embed()
@@ -202,7 +200,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
     @bot.command(name='notify')
     async def notify_command(ctx, boss_name: str = None, action: str = None):
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
             return
         
         if boss_name is None or action is None:
@@ -210,62 +208,91 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 "Uso: `!notify <boss> <add/rem>`\n"
                 "Exemplo: `!notify Hydra add` - Para receber DM quando Hydra abrir\n"
                 "`!notify Hydra rem` - Para parar de receber notificações\n\n"
-                "Bosses disponíveis: " + ", ".join(boss_timers.keys())
+                "Bosses disponíveis: " + ", ".join(boss_timers.keys()),
+                ephemeral=True
             )
             return
         
         full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
         if full_boss_name is None:
-            await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
+            await ctx.send(
+                f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
+                ephemeral=True
+            )
             return
         
         boss_name = full_boss_name
         user_id = str(ctx.author.id)
         
         if action.lower() in ['add', 'adicionar', 'a']:
+            if user_id not in user_notifications:
+                user_notifications[user_id] = []
+            
             if boss_name not in user_notifications[user_id]:
-                if add_user_notification(user_id, boss_name):
+                if await add_user_notification(user_id, boss_name):
                     user_notifications[user_id].append(boss_name)
-                    await ctx.send(f"✅ Você será notificado quando **{boss_name}** estiver disponível!")
+                    await ctx.send(
+                        f"✅ Você será notificado quando **{boss_name}** estiver disponível!",
+                        ephemeral=True
+                    )
                 else:
-                    await ctx.send("❌ Ocorreu um erro ao salvar sua preferência. Tente novamente.")
+                    await ctx.send(
+                        "❌ Ocorreu um erro ao salvar sua preferência. Tente novamente.",
+                        ephemeral=True
+                    )
             else:
-                await ctx.send(f"ℹ Você já está sendo notificado para **{boss_name}**.")
+                await ctx.send(
+                    f"ℹ Você já está sendo notificado para **{boss_name}**.",
+                    ephemeral=True
+                )
         
         elif action.lower() in ['rem', 'remover', 'r']:
-            if boss_name in user_notifications[user_id]:
-                if remove_user_notification(user_id, boss_name):
+            if user_id in user_notifications and boss_name in user_notifications[user_id]:
+                if await remove_user_notification(user_id, boss_name):
                     user_notifications[user_id].remove(boss_name)
-                    await ctx.send(f"✅ Você NÃO será mais notificado para **{boss_name}**.")
+                    await ctx.send(
+                        f"✅ Você NÃO será mais notificado para **{boss_name}**.",
+                        ephemeral=True
+                    )
                 else:
-                    await ctx.send("❌ Ocorreu um erro ao remover sua notificação. Tente novamente.")
+                    await ctx.send(
+                        "❌ Ocorreu um erro ao remover sua notificação. Tente novamente.",
+                        ephemeral=True
+                    )
             else:
-                await ctx.send(f"ℹ Você não tinha notificação ativa para **{boss_name}**.")
+                await ctx.send(
+                    f"ℹ Você não tinha notificação ativa para **{boss_name}**.",
+                    ephemeral=True
+                )
         else:
-            await ctx.send("Ação inválida. Use 'add' para adicionar ou 'rem' para remover.")
+            await ctx.send(
+                "Ação inválida. Use 'add' para adicionar ou 'rem' para remover.",
+                ephemeral=True
+            )
 
     @bot.command(name='mynotifications')
     async def my_notifications_command(ctx):
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
             return
         
         user_id = str(ctx.author.id)
         notifications = user_notifications.get(user_id, [])
         
         if not notifications:
-            await ctx.send("Você não tem notificações ativas para nenhum boss.")
+            await ctx.send("Você não tem notificações ativas para nenhum boss.", ephemeral=True)
         else:
             await ctx.send(
                 f"🔔 **Suas notificações ativas:**\n"
                 + "\n".join(f"- {boss}" for boss in notifications)
-                + "\n\nUse `!notify <boss> rem` para remover notificações."
+                + "\n\nUse `!notify <boss> rem` para remover notificações.",
+                ephemeral=True
             )
 
     @bot.command(name='historico')
     async def history_command(ctx):
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
             return
         
         embed = await create_history_embed()
@@ -274,7 +301,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
     @bot.command(name='naoanotados')
     async def unrecorded_command(ctx):
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
             return
         
         embed = await create_unrecorded_embed()
@@ -283,35 +310,39 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
     @bot.command(name='backup')
     async def backup_command(ctx, action: str = None):
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
             return
         
         if not ctx.author.guild_permissions.administrator:
-            await ctx.send("❌ Apenas administradores podem usar este comando.")
+            await ctx.send("❌ Apenas administradores podem usar este comando.", ephemeral=True)
             return
         
         if action is None:
-            await ctx.send("Uso: `!backup create` ou `!backup restore`")
+            await ctx.send("Uso: `!backup create` ou `!backup restore`", ephemeral=True)
             return
         
         if action.lower() == 'create':
-            backup_file = create_backup()
+            backup_file = await create_backup()
             if backup_file:
                 try:
                     with open(backup_file, 'rb') as f:
                         await ctx.send(
                             f"✅ Backup criado com sucesso!",
-                            file=discord.File(f, filename=backup_file)
+                            file=discord.File(f, filename=backup_file),
+                            ephemeral=True
                         )
                 except Exception as e:
-                    await ctx.send(f"✅ Backup criado, mas erro ao enviar arquivo: {e}")
+                    await ctx.send(
+                        f"✅ Backup criado, mas erro ao enviar arquivo: {e}",
+                        ephemeral=True
+                    )
             else:
-                await ctx.send("❌ Falha ao criar backup!")
+                await ctx.send("❌ Falha ao criar backup!", ephemeral=True)
         
         elif action.lower() == 'restore':
             backup_files = [f for f in os.listdir() if f.startswith('backup_') and f.endswith('.json')]
             if not backup_files:
-                await ctx.send("Nenhum arquivo de backup encontrado.")
+                await ctx.send("Nenhum arquivo de backup encontrado.", ephemeral=True)
                 return
             
             view = discord.ui.View(timeout=120)
@@ -321,34 +352,36 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             )
             
             async def restore_selected(interaction: discord.Interaction):
-                await interaction.response.defer()
+                await interaction.response.defer(ephemeral=True)
                 backup_file = select.values[0]
                 
-                if restore_backup(backup_file):
-                    load_db_data(boss_timers, user_stats, user_notifications)
+                if await restore_backup(backup_file):
+                    await load_db_data(boss_timers, user_stats, user_notifications)
                     
                     await interaction.followup.send(
-                        f"✅ Backup **{backup_file}** restaurado com sucesso!"
+                        f"✅ Backup **{backup_file}** restaurado com sucesso!",
+                        ephemeral=True
                     )
                     
                     await update_table_func(interaction.channel)
                 else:
                     await interaction.followup.send(
-                        f"❌ Falha ao restaurar backup **{backup_file}**!"
+                        f"❌ Falha ao restaurar backup **{backup_file}**!",
+                        ephemeral=True
                     )
             
             select.callback = restore_selected
             view.add_item(select)
             
-            await ctx.send("Selecione o backup para restaurar:", view=view)
+            await ctx.send("Selecione o backup para restaurar:", view=view, ephemeral=True)
         
         else:
-            await ctx.send("Ação inválida. Use `create` ou `restore`")
+            await ctx.send("Ação inválida. Use `create` ou `restore`", ephemeral=True)
 
     @bot.command(name='bosshelp')
     async def boss_help(ctx):
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
+            await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
             return
 
         embed = discord.Embed(
@@ -430,11 +463,11 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         
         await ctx.send(embed=embed)
 
-    # Iniciar as tasks
+    # Tasks
     @tasks.loop(hours=24)
     async def daily_backup():
         try:
-            backup_file = create_backup()
+            backup_file = await create_backup()
             if backup_file:
                 print(f"Backup diário realizado com sucesso: {backup_file}")
             else:
