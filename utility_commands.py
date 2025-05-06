@@ -467,7 +467,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         
         await ctx.send(embed=embed)
 
-    # Task de backup com as correções solicitadas
+    # Task de backup
     @tasks.loop(hours=24)
     async def daily_backup():
         try:
@@ -481,9 +481,17 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             logger.error(f"Erro no backup diário: {e}")
 
     # Configuração da task de backup
-    daily_backup.before_loop(lambda: logger.info("Agendando backup diário..."))
-    daily_backup.after_loop(lambda: logger.info("Backup diário finalizado"))
-    daily_backup.error(lambda e: logger.error(f"Erro na task de backup: {e}"))
+    @daily_backup.before_loop
+    async def before_daily_backup():
+        logger.info("Agendando backup diário...")
+
+    @daily_backup.after_loop
+    async def after_daily_backup():
+        logger.info("Backup diário finalizado")
+
+    @daily_backup.error
+    async def on_daily_backup_error(error):
+        logger.error(f"Erro na task de backup: {error}")
 
     # Iniciar a task de backup
     daily_backup.start()

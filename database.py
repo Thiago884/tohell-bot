@@ -97,14 +97,19 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                 boss_name = timer['boss_name']
                 sala = timer['sala']
                 
-                if boss_name in boss_timers and sala in boss_timers[boss_name]:
-                    boss_timers[boss_name][sala] = {
-                        'death_time': timer['death_time'].replace(tzinfo=brazil_tz) if timer['death_time'] else None,
-                        'respawn_time': timer['respawn_time'].replace(tzinfo=brazil_tz) if timer['respawn_time'] else None,
-                        'closed_time': timer['closed_time'].replace(tzinfo=brazil_tz) if timer['closed_time'] else None,
-                        'recorded_by': timer['recorded_by'],
-                        'opened_notified': timer['opened_notified']
-                    }
+                # Verifica se o boss e a sala existem na estrutura
+                if boss_name not in boss_timers:
+                    continue
+                if sala not in boss_timers[boss_name]:
+                    continue
+                
+                boss_timers[boss_name][sala] = {
+                    'death_time': timer['death_time'].replace(tzinfo=brazil_tz) if timer['death_time'] else None,
+                    'respawn_time': timer['respawn_time'].replace(tzinfo=brazil_tz) if timer['respawn_time'] else None,
+                    'closed_time': timer['closed_time'].replace(tzinfo=brazil_tz) if timer['closed_time'] else None,
+                    'recorded_by': timer['recorded_by'],
+                    'opened_notified': timer['opened_notified']
+                }
             
             # Carregar estatísticas de usuários
             await cursor.execute("SELECT * FROM user_stats")
