@@ -17,17 +17,21 @@ async def create_pool():
     """Cria o pool de conexões global"""
     global pool
     if pool is None:
-        pool = await aiomysql.create_pool(
-            host=os.getenv('DB_HOST', '192.185.214.113'),
-            user=os.getenv('DB_USER', 'thia5326_tohell'),
-            password=os.getenv('DB_PASSWORD', 'Thi@goba1102@@'),
-            db=os.getenv('DB_NAME', 'thia5326_tohell_bot'),
-            port=int(os.getenv('DB_PORT', 3306)),
-              minsize=1,
-            maxsize=10,
-            connect_timeout=30,  # Aumente o timeout se necessário
-            autocommit=True
-        )
+        try:
+            pool = await aiomysql.create_pool(
+                host=os.getenv('DB_HOST', '192.185.214.113'),
+                user=os.getenv('DB_USER', 'thia5326_tohell'),
+                password=os.getenv('DB_PASSWORD', 'Thi@goba1102@@'),
+                db=os.getenv('DB_NAME', 'thia5326_tohell_bot'),
+                port=int(os.getenv('DB_PORT', 3306)),
+                minsize=1,
+                maxsize=10,
+                connect_timeout=30,  # Aumente o timeout se necessário
+                autocommit=True
+            )
+        except aiomysql.MySQLError as e:
+            print(f"❌ Erro ao criar pool de conexões: {e}")
+            pool = None  # Certifique-se de que o pool seja None em caso de erro
     return pool
 
 async def get_connection():
