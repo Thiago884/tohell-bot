@@ -3,13 +3,14 @@ from discord.ext import commands, tasks
 from discord import app_commands, HTTPException
 import os
 import asyncio
-from flask import Flask
+from flask import Flask, send_from_directory
 from threading import Thread
 from collections import defaultdict
 import traceback
 from datetime import datetime
 from boss_commands import setup_boss_commands
 from utility_commands import setup_utility_commands
+from drops import setup_drops_command
 from database import init_db, load_db_data
 from shared_functions import get_next_bosses
 import logging
@@ -32,10 +33,11 @@ def health():
 
 @app.route('/status')
 def status():
-    if bot.is_ready():
-        return "Bot is online and ready", 200
-    else:
-        return "Bot is connecting", 503
+    return "Bot is online and ready" if bot.is_ready() else "Bot is connecting", 200
+
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    return send_from_directory('static', filename)
 
 def run_flask():
     app.run(host='0.0.0.0', port=8080)
@@ -105,7 +107,7 @@ async def on_ready():
     except Exception as e:
         print(f"❌ Erro ao sincronizar comandos slash: {e}")
     
-    # Inicialização do banco de dados e carregamento de dados
+    # Inicialização do banco de dados
     print("\nInicializando banco de dados...")
     try:
         await init_db()
@@ -115,20 +117,16 @@ async def on_ready():
         print(f"❌ Erro ao inicializar banco de dados: {e}")
         traceback.print_exc()
     
-    # Configura comandos e tasks
-    print("\nConfigurando comandos de boss...")
-    boss_funcs = await setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
-    
-    print("\nConfigurando comandos utilitários...")
-    await setup_utility_commands(
-        bot, 
-        boss_timers, 
-        user_stats, 
-        user_notifications, 
-        table_message, 
-        NOTIFICATION_CHANNEL_ID,
-        *boss_funcs
-    )
+    # Configura comandos
+    print("\nConfigurando comandos...")
+    try:
+        boss_funcs = await setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
+        await setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, *boss_funcs)
+        await setup_drops_command(bot)
+        print("✅ Comandos configurados com sucesso!")
+    except Exception as e:
+        print(f"❌ Erro ao configurar comandos: {e}")
+        traceback.print_exc()
     
     print("\n✅ Bot totalmente inicializado e pronto para uso!")
 
@@ -153,40 +151,29 @@ def keep_alive():
 
 async def main():
     keep_alive()
-
+    
     token = os.getenv('DISCORD_TOKEN')
     if not token:
         print("\n❌ ERRO: Token não encontrado!")
-        print("Verifique se você configurou a variável de ambiente 'DISCORD_TOKEN'")
         return
-
-    print("\n🔑 Token encontrado, iniciando bot...")
-
+    
+    print("\n🔑 Iniciando bot...")
     try:
         async with bot:
             await bot.start(token)
-    except discord.LoginError:
-        print("\n❌ Falha no login: Token inválido!")
     except Exception as e:
-        print(f"\n❌ Erro inesperado: {type(e).__name__}: {e}")
+        print(f"\n❌ Erro: {type(e).__name__}: {e}")
         traceback.print_exc()
     finally:
-        print("\n🛑 Finalizando bot e limpando tarefas...")
-
-        # Cancela todas as tasks pendentes, exceto a atual
+        print("\n🛑 Finalizando bot...")
         tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
         for task in tasks:
             task.cancel()
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        for i, result in enumerate(results):
-            if isinstance(result, Exception):
-                print(f"⚠ Task {i} gerou exceção ao ser cancelada: {result}")
-
-        print("✅ Bot desligado corretamente.")
+        await asyncio.gather(*tasks, return_exceptions=True)
+        print("✅ Bot desligado")
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n🛑 Execução interrompida manualmente.")
+        print("\n🛑 Execução interrompida")
