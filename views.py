@@ -25,10 +25,8 @@ def create_boss_embed(boss_timers, compact=False):
         for sala in boss_timers[boss]:
             timers = boss_timers[boss][sala]
             
-            if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
-                continue
-                
-            if compact and timers['death_time'] is None:
+            # Sempre mostra a última anotação, mesmo que o boss já tenha fechado
+            if timers['death_time'] is None:
                 continue
                 
             death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
@@ -36,26 +34,13 @@ def create_boss_embed(boss_timers, compact=False):
             closed_time = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
             recorded_by = f" ({timers['recorded_by']})" if timers['recorded_by'] else ""
             
-            status = ""
-            if timers['respawn_time']:
-                if now >= timers['respawn_time']:
-                    if timers['closed_time'] and now >= timers['closed_time']:
-                        status = "❌"
-                    else:
-                        status = "✅"
-                else:
-                    time_left = format_time_remaining(timers['respawn_time'])
-                    status = f"🕒 ({time_left})"
-            else:
-                status = "❌"
+            status = "✅" if (timers['respawn_time'] and now >= timers['respawn_time'] and 
+                            timers['closed_time'] and now < timers['closed_time']) else "❌"
             
             boss_info.append(
                 f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
             )
         
-        if not boss_info and compact:
-            continue
-            
         if boss_info:
             embed.add_field(
                 name=f"**{boss}**",
