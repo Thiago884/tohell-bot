@@ -238,10 +238,8 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
             for sala in boss_timers[boss]:
                 timers = boss_timers[boss][sala]
                 
-                if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
-                    continue
-                    
-                if compact and timers['death_time'] is None:
+                # Mostra apenas se houver registro de morte
+                if timers['death_time'] is None:
                     continue
                     
                 death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
@@ -249,26 +247,13 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                 closed_time = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
                 recorded_by = f" ({timers['recorded_by']})" if timers['recorded_by'] else ""
                 
-                status = ""
-                if timers['respawn_time']:
-                    if now >= timers['respawn_time']:
-                        if timers['closed_time'] and now >= timers['closed_time']:
-                            status = "❌"
-                        else:
-                            status = "✅"
-                    else:
-                        time_left = format_time_remaining(timers['respawn_time'])
-                        status = f"🕒 ({time_left})"
-                else:
-                    status = "❌"
+                status = "✅" if (timers['respawn_time'] and now >= timers['respawn_time'] and 
+                                timers['closed_time'] and now < timers['closed_time']) else "❌"
                 
                 boss_info.append(
                     f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
                 )
             
-            if not boss_info and compact:
-                continue
-                
             if boss_info:
                 embed.add_field(
                     name=f"**{boss}**",
@@ -480,7 +465,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
 
     # Comandos
     @bot.command(name='boss')
-    async def boss_command(ctx, boss_name: str = None, sala: int = None, hora_morte: str = None):
+    async def boss_command(ctx, boss_name: str = None, sala: int = None, *, hora_morte: str = None):
         """Registra a morte de um boss"""
         if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
             await ctx.send(f"⚠ Comandos só são aceitos no canal designado!")
@@ -492,9 +477,8 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
         
         if sala not in boss_timers.get(list(boss_timers.keys())[0], {}).keys():
             await ctx.send(f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers.get(list(boss_timers.keys())[0], {}).keys()))}")
-
             return
-        
+
         full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
         if full_boss_name is None:
             await ctx.send(f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno")
@@ -548,7 +532,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
             )
             
             # Enviar a tabela atualizada
-            await bosses_command(ctx)
+            await update_table(ctx.channel)
                 
         except ValueError:
             await ctx.send("Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)")
@@ -628,7 +612,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
             await ctx.send(f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.")
         
         # Enviar a tabela atualizada
-        await bosses_command(ctx)
+        await update_table(ctx.channel)
 
     @bot.command(name='setupboss')
     async def setup_boss(ctx):
