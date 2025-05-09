@@ -25,7 +25,7 @@ def create_boss_embed(boss_timers, compact=False):
         for sala in boss_timers[boss]:
             timers = boss_timers[boss][sala]
             
-            # Sempre mostra a última anotação, mesmo que o boss já tenha fechado
+            # Mostra apenas se houver registro de morte
             if timers['death_time'] is None:
                 continue
                 
