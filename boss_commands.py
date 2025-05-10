@@ -3,7 +3,7 @@ import pytz
 import discord
 from discord.ext import commands, tasks
 from discord.ui import Button, View, Select, Modal
-from discord import TextStyle
+from discord import TextStyle, app_commands
 from collections import defaultdict
 import random
 import traceback
@@ -556,142 +556,121 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
         except Exception as e:
             print(f"Erro na atualização periódica: {e}")
 
-    # Comandos
-    @bot.command(name='boss')
-    async def boss_command(ctx, boss_name: str = None, sala: int = None, hora_morte: str = None):
-        """Registra a morte de um boss"""
-        try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                await asyncio.sleep(1)  # Delay para evitar rate limit
-                await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", delete_after=10)
-                return
+    # Comandos Slash
+    async def boss_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        bosses = list(boss_timers.keys())
+        return [
+            app_commands.Choice(name=boss, value=boss)
+            for boss in bosses if current.lower() in boss.lower()
+        ][:25]
 
-            if boss_name is None or sala is None or hora_morte is None:
-                await asyncio.sleep(1)  # Delay para evitar rate limit
-                await ctx.send(
-                    "Por favor, use: `!boss <nome_do_boss> <sala> HH:MM`\n"
-                    "Exemplo: `!boss Hydra 8 14:30`\n"
-                    "Abreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno\n"
-                    "Formatos de hora aceitos: HH:MM ou HHhMM",
-                    delete_after=30
+    async def sala_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[int]]:
+        salas = list(boss_timers[list(boss_timers.keys())[0]].keys())
+        return [
+            app_commands.Choice(name=f"Sala {sala}", value=sala)
+            for sala in salas if current in str(sala)
+        ][:25]
+
+    @bot.tree.command(name="boss", description="Registra a morte de um boss")
+    @app_commands.autocomplete(boss_name=boss_autocomplete, sala=sala_autocomplete)
+    @app_commands.describe(
+        boss_name="Nome do boss",
+        sala="Número da sala (1-8)",
+        hora_morte="Horário da morte (formato HH:MM ou HHhMM)",
+        foi_ontem="Se a morte foi ontem (padrão: não)"
+    )
+    async def boss_slash(
+        interaction: discord.Interaction,
+        boss_name: str,
+        sala: int,
+        hora_morte: str,
+        foi_ontem: bool = False
+    ):
+        """Registra a morte de um boss via comando slash"""
+        try:
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
                 )
                 return
             
-            if sala not in boss_timers.get(list(boss_timers.keys())[0], {}).keys():
-                await asyncio.sleep(1)  # Delay para evitar rate limit
-                await ctx.send(
-                    f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers.get(list(boss_timers.keys())[0], {}).keys()))}",
-                    delete_after=20
-                )
-                return
-
             full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
             if full_boss_name is None:
-                await asyncio.sleep(1)  # Delay para evitar rate limit
-                await ctx.send(
-                    f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\n"
-                    "Abreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
-                    delete_after=30
+                await interaction.response.send_message(
+                    f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
+                    ephemeral=True
                 )
                 return
             
             boss_name = full_boss_name
             
-            try:
-                time_parts = parse_time_input(hora_morte)
-                if not time_parts:
-                    await asyncio.sleep(1)  # Delay para evitar rate limit
-                    await ctx.send(
-                        "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
-                        delete_after=20
-                    )
-                    return
-                
-                hour, minute = time_parts
-                
-                if not validate_time(hour, minute):
-                    await asyncio.sleep(1)  # Delay para evitar rate limit
-                    await ctx.send(
-                        "Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.",
-                        delete_after=20
-                    )
-                    return
-                
-                now = datetime.now(brazil_tz)
-                death_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-                
-                if death_time > now:
-                    death_time -= timedelta(days=1)
-                
-                respawn_time = death_time + timedelta(hours=8)
-                recorded_by = ctx.author.name
-                
-                boss_timers[boss_name][sala] = {
-                    'death_time': death_time,
-                    'respawn_time': respawn_time,
-                    'closed_time': respawn_time + timedelta(hours=4),
-                    'recorded_by': recorded_by,
-                    'opened_notified': False
-                }
-                
-                user_id = str(ctx.author.id)
-                if user_id not in user_stats:
-                    user_stats[user_id] = {'count': 0, 'last_recorded': None}
-                user_stats[user_id]['count'] += 1
-                user_stats[user_id]['last_recorded'] = now
-                
-                await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
-                await save_user_stats(user_id, ctx.author.name, user_stats[user_id]['count'], now)
-                
-                await asyncio.sleep(1)  # Delay para evitar rate limit
-                await ctx.send(
-                    f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
-                    f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
-                    f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
-                    f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
-                    delete_after=60
+            if sala not in boss_timers[boss_name]:
+                await interaction.response.send_message(
+                    f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
+                    ephemeral=True
                 )
-                
-                # Enviar a tabela atualizada com delay
-                await asyncio.sleep(2)
-                await bosses_command(ctx)
-                    
-            except ValueError:
-                await asyncio.sleep(1)  # Delay para evitar rate limit
-                await ctx.send(
-                    "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
-                    delete_after=20
-                )
-        
-        except discord.HTTPException as e:
-            if e.status == 429:
-                retry_after = e.retry_after
-                print(f"Rate limit atingido. Tentando novamente em {retry_after} segundos")
-                await asyncio.sleep(retry_after)
-                await boss_command(ctx, boss_name, sala, hora_morte)
-            else:
-                print(f"Erro HTTP no comando boss: {e}")
-                traceback.print_exc()
-        except Exception as e:
-            print(f"Erro no comando boss: {e}")
-            traceback.print_exc()
-
-    @bot.command(name='bosses')
-    async def bosses_command(ctx, mode: str = None):
-        """Mostra a tabela de timers de boss"""
-        try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
                 return
             
-            compact = mode and mode.lower() in ['compact', 'c', 'resumo']
-            embed = create_boss_embed(compact=compact)
+            time_parts = parse_time_input(hora_morte)
+            if not time_parts:
+                await interaction.response.send_message(
+                    "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
+                    ephemeral=True
+                )
+                return
+            
+            hour, minute = time_parts
+            
+            if not validate_time(hour, minute):
+                await interaction.response.send_message(
+                    "Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.",
+                    ephemeral=True
+                )
+                return
+            
+            now = datetime.now(brazil_tz)
+            death_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            
+            if foi_ontem or death_time > now:
+                death_time -= timedelta(days=1)
+            
+            respawn_time = death_time + timedelta(hours=8)
+            recorded_by = interaction.user.name
+            
+            boss_timers[boss_name][sala] = {
+                'death_time': death_time,
+                'respawn_time': respawn_time,
+                'closed_time': respawn_time + timedelta(hours=4),
+                'recorded_by': recorded_by,
+                'opened_notified': False
+            }
+            
+            user_id = str(interaction.user.id)
+            if user_id not in user_stats:
+                user_stats[user_id] = {'count': 0, 'last_recorded': None}
+            user_stats[user_id]['count'] += 1
+            user_stats[user_id]['last_recorded'] = now
+            
+            await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
+            await save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
+            
+            await interaction.response.send_message(
+                f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
+                f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
+                f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
+                f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
+                ephemeral=False
+            )
+            
+            # Atualiza a tabela
+            embed = create_boss_embed(boss_timers)
             view = BossControlView(
-                bot, 
-                boss_timers, 
-                user_stats, 
-                user_notifications, 
-                table_message, 
+                bot,
+                boss_timers,
+                user_stats,
+                user_notifications,
+                table_message,
                 NOTIFICATION_CHANNEL_ID,
                 update_table,
                 create_next_bosses_embed,
@@ -699,51 +678,40 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                 lambda: create_history_embed(bot, boss_timers),
                 lambda: create_unrecorded_embed(bot, boss_timers)
             )
-            await ctx.send(embed=embed, view=view)
-        except discord.HTTPException as e:
-            if e.status == 429:
-                retry_after = e.retry_after
-                print(f"Rate limit no comando bosses. Tentando novamente em {retry_after} segundos")
-                await asyncio.sleep(retry_after)
-                await bosses_command(ctx, mode)
-            else:
-                print(f"Erro HTTP no comando bosses: {e}")
-        except Exception as e:
-            print(f"Erro no comando bosses: {e}")
-
-    @bot.command(name='nextboss')
-    async def next_boss_command(ctx):
-        """Mostra os próximos bosses a abrir"""
-        try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
-                return
+            await interaction.followup.send(embed=embed, view=view)
             
-            embed = await create_next_bosses_embed(boss_timers)
-            await ctx.send(embed=embed)
-        except discord.HTTPException as e:
-            if e.status == 429:
-                retry_after = e.retry_after
-                print(f"Rate limit no comando nextboss. Tentando novamente em {retry_after} segundos")
-                await asyncio.sleep(retry_after)
-                await next_boss_command(ctx)
-            else:
-                print(f"Erro HTTP no comando nextboss: {e}")
         except Exception as e:
-            print(f"Erro no comando nextboss: {e}")
+            print(f"Erro no comando slash boss: {e}")
+            traceback.print_exc()
+            await interaction.response.send_message(
+                "Ocorreu um erro ao processar seu comando.",
+                ephemeral=True
+            )
 
-    @bot.command(name='clearboss')
-    async def clear_boss(ctx, boss_name: str, sala: int = None):
-        """Limpa o timer de um boss"""
+    @bot.tree.command(name="clearboss", description="Limpa o timer de um boss")
+    @app_commands.autocomplete(boss_name=boss_autocomplete)
+    @app_commands.describe(
+        boss_name="Nome do boss",
+        sala="Número da sala (opcional, deixe em branco para limpar todas)"
+    )
+    async def clearboss_slash(
+        interaction: discord.Interaction,
+        boss_name: str,
+        sala: Optional[int] = None
+    ):
+        """Limpa o timer de um boss via comando slash"""
         try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
+                )
                 return
             
             full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
             if full_boss_name is None:
-                await ctx.send(
-                    f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
+                await interaction.response.send_message(
+                    f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
                     ephemeral=True
                 )
                 return
@@ -760,10 +728,13 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                         'opened_notified': False
                     }
                 await clear_timer(boss_name)
-                await ctx.send(f"✅ Todos os timers do boss **{boss_name}** foram resetados.", ephemeral=True)
+                await interaction.response.send_message(
+                    f"✅ Todos os timers do boss **{boss_name}** foram resetados.",
+                    ephemeral=True
+                )
             else:
                 if sala not in boss_timers[boss_name]:
-                    await ctx.send(
+                    await interaction.response.send_message(
                         f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
                         ephemeral=True
                     )
@@ -777,29 +748,68 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                     'opened_notified': False
                 }
                 await clear_timer(boss_name, sala)
-                await ctx.send(f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.", ephemeral=True)
+                await interaction.response.send_message(
+                    f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
+                    ephemeral=True
+                )
             
-            # Enviar a tabela atualizada
-            await asyncio.sleep(1)
-            await bosses_command(ctx)
-        
-        except discord.HTTPException as e:
-            if e.status == 429:
-                retry_after = e.retry_after
-                print(f"Rate limit no comando clearboss. Tentando novamente em {retry_after} segundos")
-                await asyncio.sleep(retry_after)
-                await clear_boss(ctx, boss_name, sala)
-            else:
-                print(f"Erro HTTP no comando clearboss: {e}")
+            # Atualiza a tabela
+            embed = create_boss_embed(boss_timers)
+            view = BossControlView(
+                bot,
+                boss_timers,
+                user_stats,
+                user_notifications,
+                table_message,
+                NOTIFICATION_CHANNEL_ID,
+                update_table,
+                create_next_bosses_embed,
+                create_ranking_embed,
+                lambda: create_history_embed(bot, boss_timers),
+                lambda: create_unrecorded_embed(bot, boss_timers)
+            )
+            await interaction.followup.send(embed=embed, view=view)
+            
         except Exception as e:
-            print(f"Erro no comando clearboss: {e}")
+            print(f"Erro no comando slash clearboss: {e}")
+            traceback.print_exc()
+            await interaction.response.send_message(
+                "Ocorreu um erro ao processar seu comando.",
+                ephemeral=True
+            )
 
-    @bot.command(name='setupboss')
-    async def setup_boss(ctx):
-        """Recria a tabela de bosses com botões de controle"""
+    @bot.tree.command(name="nextboss", description="Mostra os próximos bosses a abrir")
+    async def nextboss_slash(interaction: discord.Interaction):
+        """Mostra os próximos bosses via comando slash"""
         try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
+                )
+                return
+            
+            await interaction.response.defer()
+            embed = await create_next_bosses_embed(boss_timers)
+            await interaction.followup.send(embed=embed)
+            
+        except Exception as e:
+            print(f"Erro no comando slash nextboss: {e}")
+            traceback.print_exc()
+            await interaction.response.send_message(
+                "Ocorreu um erro ao buscar os próximos bosses.",
+                ephemeral=True
+            )
+
+    @bot.tree.command(name="setupboss", description="Recria a tabela de bosses com botões de controle")
+    async def setup_boss_slash(interaction: discord.Interaction):
+        """Recria a tabela de bosses via comando slash"""
+        try:
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
+                )
                 return
                 
             embed = create_boss_embed()
@@ -816,41 +826,15 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                 lambda: create_history_embed(bot, boss_timers),
                 lambda: create_unrecorded_embed(bot, boss_timers)
             )
-            await ctx.send(embed=embed, view=view)
+            await interaction.response.send_message(embed=embed, view=view)
         
-        except discord.HTTPException as e:
-            if e.status == 429:
-                retry_after = e.retry_after
-                print(f"Rate limit no comando setupboss. Tentando novamente em {retry_after} segundos")
-                await asyncio.sleep(retry_after)
-                await setup_boss(ctx)
-            else:
-                print(f"Erro HTTP no comando setupboss: {e}")
         except Exception as e:
-            print(f"Erro no comando setupboss: {e}")
-
-    @bot.command(name='resettable')
-    async def reset_table(ctx):
-        """Reseta a referência da tabela principal"""
-        try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                return
-            
-            global table_message
-            table_message = None
-            await update_table(ctx.channel)
-            await ctx.send("✅ Tabela recriada com sucesso!", delete_after=5)
-        
-        except discord.HTTPException as e:
-            if e.status == 429:
-                retry_after = e.retry_after
-                print(f"Rate limit no comando resettable. Tentando novamente em {retry_after} segundos")
-                await asyncio.sleep(retry_after)
-                await reset_table(ctx)
-            else:
-                print(f"Erro HTTP no comando resettable: {e}")
-        except Exception as e:
-            print(f"Erro no comando resettable: {e}")
+            print(f"Erro no comando slash setupboss: {e}")
+            traceback.print_exc()
+            await interaction.response.send_message(
+                "Ocorreu um erro ao recriar a tabela.",
+                ephemeral=True
+            )
 
     # Iniciar as tasks
     check_boss_respawns.start()

@@ -1,9 +1,10 @@
+# utility_commands.py
 from datetime import datetime, timedelta
 import pytz
 import discord
 from discord.ext import commands, tasks
 from discord.ui import Button, View, Select, Modal
-from discord import TextStyle
+from discord import TextStyle, app_commands
 from collections import defaultdict
 import random
 import traceback
@@ -309,49 +310,65 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 logger.error(f"Erro no loop de backup: {e}", exc_info=True)
                 await asyncio.sleep(3600)  # Espera 1 hora se ocorrer erro inesperado
 
-    # Comandos
-    @bot.command(name='ranking')
-    async def ranking_command(ctx):
-        """Mostra ranking de usuários que mais registraram bosses"""
+    # Comandos Slash
+    async def boss_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        bosses = list(boss_timers.keys())
+        return [
+            app_commands.Choice(name=boss, value=boss)
+            for boss in bosses if current.lower() in boss.lower()
+        ][:25]
+
+    @bot.tree.command(name="ranking", description="Mostra ranking de usuários que mais registraram bosses")
+    async def ranking_slash(interaction: discord.Interaction):
+        """Mostra ranking via comando slash"""
         try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
+                )
                 return
             
+            await interaction.response.defer()
             embed = await create_ranking_embed()
-            await ctx.send(embed=embed)
+            await interaction.followup.send(embed=embed)
         except Exception as e:
             logger.error(f"Erro no comando ranking: {e}", exc_info=True)
-            await ctx.send("Ocorreu um erro ao gerar o ranking.", ephemeral=True)
+            await interaction.response.send_message(
+                "Ocorreu um erro ao gerar o ranking.",
+                ephemeral=True
+            )
 
-    @bot.command(name='notify')
-    async def notify_command(ctx, boss_name: str = None, action: str = None):
-        """Gerencia notificações por DM quando bosses abrirem"""
+    @bot.tree.command(name="notify", description="Gerencia notificações por DM quando bosses abrirem")
+    @app_commands.autocomplete(boss_name=boss_autocomplete)
+    @app_commands.describe(
+        boss_name="Nome do boss",
+        action="Ação (add/rem)"
+    )
+    async def notify_slash(
+        interaction: discord.Interaction,
+        boss_name: str,
+        action: str
+    ):
+        """Gerencia notificações via comando slash"""
         try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
-                return
-            
-            if boss_name is None or action is None:
-                await ctx.send(
-                    "Uso: `!notify <boss> <add/rem>`\n"
-                    "Exemplo: `!notify Hydra add` - Para receber DM quando Hydra abrir\n"
-                    "`!notify Hydra rem` - Para parar de receber notificações\n\n"
-                    "Bosses disponíveis: " + ", ".join(boss_timers.keys()),
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
                     ephemeral=True
                 )
                 return
             
             full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
             if full_boss_name is None:
-                await ctx.send(
+                await interaction.response.send_message(
                     f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
                     ephemeral=True
                 )
                 return
             
             boss_name = full_boss_name
-            user_id = str(ctx.author.id)
+            user_id = str(interaction.user.id)
             
             if action.lower() in ['add', 'adicionar', 'a']:
                 if user_id not in user_notifications:
@@ -360,17 +377,17 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 if boss_name not in user_notifications[user_id]:
                     if await add_user_notification(user_id, boss_name):
                         user_notifications[user_id].append(boss_name)
-                        await ctx.send(
+                        await interaction.response.send_message(
                             f"✅ Você será notificado quando **{boss_name}** estiver disponível!",
                             ephemeral=True
                         )
                     else:
-                        await ctx.send(
+                        await interaction.response.send_message(
                             "❌ Ocorreu um erro ao salvar sua preferência. Tente novamente.",
                             ephemeral=True
                         )
                 else:
-                    await ctx.send(
+                    await interaction.response.send_message(
                         f"ℹ Você já está sendo notificado para **{boss_name}**.",
                         ephemeral=True
                     )
@@ -379,119 +396,162 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 if user_id in user_notifications and boss_name in user_notifications[user_id]:
                     if await remove_user_notification(user_id, boss_name):
                         user_notifications[user_id].remove(boss_name)
-                        await ctx.send(
+                        await interaction.response.send_message(
                             f"✅ Você NÃO será mais notificado para **{boss_name}**.",
                             ephemeral=True
                         )
                     else:
-                        await ctx.send(
+                        await interaction.response.send_message(
                             "❌ Ocorreu um erro ao remover sua notificação. Tente novamente.",
                             ephemeral=True
                         )
                 else:
-                    await ctx.send(
+                    await interaction.response.send_message(
                         f"ℹ Você não tinha notificação ativa para **{boss_name}**.",
                         ephemeral=True
                     )
             else:
-                await ctx.send(
+                await interaction.response.send_message(
                     "Ação inválida. Use 'add' para adicionar ou 'rem' para remover.",
                     ephemeral=True
                 )
         except Exception as e:
             logger.error(f"Erro no comando notify: {e}", exc_info=True)
-            await ctx.send("Ocorreu um erro ao processar sua solicitação.", ephemeral=True)
+            await interaction.response.send_message(
+                "Ocorreu um erro ao processar sua solicitação.",
+                ephemeral=True
+            )
 
-    @bot.command(name='mynotifications')
-    async def my_notifications_command(ctx):
-        """Mostra notificações ativas do usuário"""
+    @bot.tree.command(name="mynotifications", description="Mostra notificações ativas do usuário")
+    async def my_notifications_slash(interaction: discord.Interaction):
+        """Mostra notificações ativas via comando slash"""
         try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
+                )
                 return
             
-            user_id = str(ctx.author.id)
+            user_id = str(interaction.user.id)
             notifications = user_notifications.get(user_id, [])
             
             if not notifications:
-                await ctx.send("Você não tem notificações ativas para nenhum boss.", ephemeral=True)
+                await interaction.response.send_message(
+                    "Você não tem notificações ativas para nenhum boss.",
+                    ephemeral=True
+                )
             else:
-                await ctx.send(
+                await interaction.response.send_message(
                     f"🔔 **Suas notificações ativas:**\n"
                     + "\n".join(f"- {boss}" for boss in notifications)
-                    + "\n\nUse `!notify <boss> rem` para remover notificações.",
+                    + "\n\nUse `/notify <boss> rem` para remover notificações.",
                     ephemeral=True
                 )
         except Exception as e:
             logger.error(f"Erro no comando mynotifications: {e}", exc_info=True)
-            await ctx.send("Ocorreu um erro ao buscar suas notificações.", ephemeral=True)
+            await interaction.response.send_message(
+                "Ocorreu um erro ao buscar suas notificações.",
+                ephemeral=True
+            )
 
-    @bot.command(name='historico')
-    async def history_command(ctx):
-        """Mostra histórico de anotações"""
+    @bot.tree.command(name="historico", description="Mostra histórico de anotações")
+    async def history_slash(interaction: discord.Interaction):
+        """Mostra histórico via comando slash"""
         try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
+                )
                 return
             
+            await interaction.response.defer()
             embed = await create_history_embed()
-            await ctx.send(embed=embed)
+            await interaction.followup.send(embed=embed)
         except Exception as e:
             logger.error(f"Erro no comando historico: {e}", exc_info=True)
-            await ctx.send("Ocorreu um erro ao buscar o histórico.", ephemeral=True)
+            await interaction.response.send_message(
+                "Ocorreu um erro ao buscar o histórico.",
+                ephemeral=True
+            )
 
-    @bot.command(name='naoanotados')
-    async def unrecorded_command(ctx):
-        """Mostra bosses que fecharam sem registro"""
+    @bot.tree.command(name="naoanotados", description="Mostra bosses que fecharam sem registro")
+    async def unrecorded_slash(interaction: discord.Interaction):
+        """Mostra bosses não anotados via comando slash"""
         try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
+                )
                 return
             
+            await interaction.response.defer()
             embed = await create_unrecorded_embed()
-            await ctx.send(embed=embed)
+            await interaction.followup.send(embed=embed)
         except Exception as e:
             logger.error(f"Erro no comando naoanotados: {e}", exc_info=True)
-            await ctx.send("Ocorreu um erro ao buscar os bosses não anotados.", ephemeral=True)
+            await interaction.response.send_message(
+                "Ocorreu um erro ao buscar os bosses não anotados.",
+                ephemeral=True
+            )
 
-    @bot.command(name='backup')
-    async def backup_command(ctx, action: str = None):
-        """Gerencia backups do banco de dados (apenas admins)"""
+    @bot.tree.command(name="backup", description="Gerencia backups do banco de dados (apenas admins)")
+    @app_commands.describe(
+        action="Ação (create/restore)"
+    )
+    @app_commands.choices(action=[
+        app_commands.Choice(name="create", value="create"),
+        app_commands.Choice(name="restore", value="restore")
+    ])
+    async def backup_slash(interaction: discord.Interaction, action: str):
+        """Gerencia backups via comando slash"""
         try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
+                )
                 return
             
-            if not ctx.author.guild_permissions.administrator:
-                await ctx.send("❌ Apenas administradores podem usar este comando.", ephemeral=True)
-                return
-            
-            if action is None:
-                await ctx.send("Uso: `!backup create` ou `!backup restore`", ephemeral=True)
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message(
+                    "❌ Apenas administradores podem usar este comando.",
+                    ephemeral=True
+                )
                 return
             
             if action.lower() == 'create':
+                await interaction.response.defer(ephemeral=True)
                 backup_file = await create_backup()
                 if backup_file:
                     try:
                         with open(backup_file, 'rb') as f:
-                            await ctx.send(
+                            await interaction.followup.send(
                                 f"✅ Backup criado com sucesso!",
                                 file=discord.File(f, filename=backup_file),
                                 ephemeral=True
                             )
                     except Exception as e:
-                        await ctx.send(
+                        await interaction.followup.send(
                             f"✅ Backup criado, mas erro ao enviar arquivo: {e}",
                             ephemeral=True
                         )
                 else:
-                    await ctx.send("❌ Falha ao criar backup!", ephemeral=True)
+                    await interaction.followup.send(
+                        "❌ Falha ao criar backup!",
+                        ephemeral=True
+                    )
             
             elif action.lower() == 'restore':
+                await interaction.response.defer(ephemeral=True)
                 backup_files = [f for f in os.listdir() if f.startswith('backup_') and f.endswith('.json')]
                 if not backup_files:
-                    await ctx.send("Nenhum arquivo de backup encontrado.", ephemeral=True)
+                    await interaction.followup.send(
+                        "Nenhum arquivo de backup encontrado.",
+                        ephemeral=True
+                    )
                     return
                 
                 view = discord.ui.View(timeout=120)
@@ -522,20 +582,33 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 select.callback = restore_selected
                 view.add_item(select)
                 
-                await ctx.send("Selecione o backup para restaurar:", view=view, ephemeral=True)
+                await interaction.followup.send(
+                    "Selecione o backup para restaurar:",
+                    view=view,
+                    ephemeral=True
+                )
             
             else:
-                await ctx.send("Ação inválida. Use `create` ou `restore`", ephemeral=True)
+                await interaction.response.send_message(
+                    "Ação inválida. Use 'create' ou 'restore'",
+                    ephemeral=True
+                )
         except Exception as e:
             logger.error(f"Erro no comando backup: {e}", exc_info=True)
-            await ctx.send("Ocorreu um erro ao processar o backup.", ephemeral=True)
+            await interaction.response.send_message(
+                "Ocorreu um erro ao processar o backup.",
+                ephemeral=True
+            )
 
-    @bot.command(name='bosshelp')
-    async def boss_help(ctx):
-        """Mostra ajuda com todos os comandos disponíveis"""
+    @bot.tree.command(name="bosshelp", description="Mostra ajuda com todos os comandos disponíveis")
+    async def boss_help_slash(interaction: discord.Interaction):
+        """Mostra ajuda via comando slash"""
         try:
-            if ctx.channel.id != NOTIFICATION_CHANNEL_ID:
-                await ctx.send(f"⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
+                )
                 return
 
             embed = discord.Embed(
@@ -545,8 +618,8 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             )
             
             embed.add_field(
-                name="!boss <nome> <sala> HH:MM",
-                value="Registra a morte de um boss no horário especificado\nExemplo: `!boss Hydra 8 14:30`\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno\nFormatos de hora aceitos: HH:MM ou HHhMM",
+                name="/boss <nome> <sala> <hora_morte> [foi_ontem]",
+                value="Registra a morte de um boss no horário especificado\nExemplo: `/boss Hydra 8 14:30`\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno\nFormatos de hora aceitos: HH:MM ou HHhMM",
                 inline=False
             )
             embed.add_field(
@@ -555,53 +628,48 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 inline=False
             )
             embed.add_field(
-                name="!bosses [compact]",
-                value="Mostra a tabela com os horários (adicione 'compact' para ver apenas bosses ativos)",
-                inline=False
-            )
-            embed.add_field(
-                name="!nextboss",
-                value="Mostra os próximos bosses que vão abrir e os que já estão abertos",
-                inline=False
-            )
-            embed.add_field(
-                name="!clearboss <nome> [sala]",
+                name="/clearboss <nome> [sala]",
                 value="Reseta o timer de um boss (opcional: especifique a sala, senão limpa todas)",
                 inline=False
             )
             embed.add_field(
-                name="!ranking",
+                name="/nextboss",
+                value="Mostra os próximos bosses que vão abrir e os que já estão abertos",
+                inline=False
+            )
+            embed.add_field(
+                name="/ranking",
                 value="Mostra o ranking de quem mais anotou bosses (com medalhas para o Top 3)",
                 inline=False
             )
             embed.add_field(
-                name="!notify <boss> <add/rem>",
-                value="Ativa/desativa notificação por DM quando o boss abrir\nEx: `!notify Hydra add`",
+                name="/notify <boss> <add/rem>",
+                value="Ativa/desativa notificação por DM quando o boss abrir\nEx: `/notify Hydra add`",
                 inline=False
             )
             embed.add_field(
-                name="!mynotifications",
+                name="/mynotifications",
                 value="Mostra seus bosses marcados para notificação",
                 inline=False
             )
             embed.add_field(
-                name="!historico",
+                name="/historico",
                 value="Mostra as últimas 10 anotações de bosses",
                 inline=False
             )
             embed.add_field(
-                name="!naoanotados",
+                name="/naoanotados",
                 value="Mostra os últimos bosses que fecharam sem anotações",
                 inline=False
             )
             embed.add_field(
-                name="!backup <create|restore>",
+                name="/backup <create|restore>",
                 value="Cria ou restaura um backup dos dados (apenas admins)",
                 inline=False
             )
             embed.add_field(
-                name="!setupboss",
-                value="Recria a tabela com botões de controle",
+                name="/drops <boss>",
+                value="Mostra os drops de um boss específico",
                 inline=False
             )
             embed.add_field(
@@ -615,10 +683,13 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 inline=False
             )
             
-            await ctx.send(embed=embed)
+            await interaction.response.send_message(embed=embed)
         except Exception as e:
             logger.error(f"Erro no comando bosshelp: {e}", exc_info=True)
-            await ctx.send("Ocorreu um erro ao exibir a ajuda.", ephemeral=True)
+            await interaction.response.send_message(
+                "Ocorreu um erro ao exibir a ajuda.",
+                ephemeral=True
+            )
 
     # Iniciar a task de backup
     bot.loop.create_task(backup_task_loop())
@@ -634,9 +705,9 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             NOTIFICATION_CHANNEL_ID,
             update_table_func,
             create_next_bosses_embed_func,
-            create_ranking_embed,
-            create_history_embed,
-            create_unrecorded_embed
+            create_ranking_embed_func,
+            create_history_embed_func,
+            create_unrecorded_embed_func
         ))
         logger.info("View persistente adicionada com sucesso")
     except Exception as e:

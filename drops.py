@@ -1,9 +1,11 @@
 # drops.py
 import discord
-from discord import Embed
+from discord import Embed, app_commands
 from discord.ext import commands
 from shared_functions import get_boss_by_abbreviation
 import os
+from typing import Optional
+import traceback
 
 # Dicionário com os drops de cada boss
 BOSS_DROPS = {
@@ -100,54 +102,78 @@ def get_image_url(image_name):
     return f"{base_url}/static/{image_name}"
 
 async def setup_drops_command(bot):
-    @bot.command(name='drops')
-    async def drops_command(ctx, boss_name: str = None):
-        """Mostra os drops de um boss específico"""
-        if boss_name is None:
-            # Mostrar lista de bosses se nenhum for especificado
-            embed = Embed(
-                title="📦 Drops de Bosses",
-                description="Use `!drops <nome_do_boss>` para ver os drops específicos\n\nBosses disponíveis:",
-                color=discord.Color.blue()
-            )
-            
-            for boss in BOSS_DROPS.keys():
-                embed.add_field(
-                    name=boss,
-                    value=f"`!drops {boss.split()[0].lower()}`",
-                    inline=True
+    async def boss_autocomplete(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+        bosses = list(BOSS_DROPS.keys())
+        return [
+            app_commands.Choice(name=boss, value=boss)
+            for boss in bosses if current.lower() in boss.lower()
+        ][:25]
+
+    @bot.tree.command(name="drops", description="Mostra os drops de um boss específico")
+    @app_commands.autocomplete(boss_name=boss_autocomplete)
+    @app_commands.describe(
+        boss_name="Nome do boss (opcional, deixe em branco para lista)"
+    )
+    async def drops_slash(interaction: discord.Interaction, boss_name: Optional[str] = None):
+        """Mostra os drops de um boss específico via comando slash"""
+        try:
+            if boss_name is None:
+                # Mostrar lista de bosses se nenhum for especificado
+                embed = Embed(
+                    title="📦 Drops de Bosses",
+                    description="Use `/drops <nome_do_boss>` para ver os drops específicos\n\nBosses disponíveis:",
+                    color=discord.Color.blue()
                 )
+                
+                for boss in BOSS_DROPS.keys():
+                    embed.add_field(
+                        name=boss,
+                        value=f"`/drops {boss.split()[0].lower()}`",
+                        inline=True
+                    )
+                
+                await interaction.response.send_message(embed=embed)
+                return
             
-            await ctx.send(embed=embed)
-            return
-        
-        # Encontrar o nome completo do boss usando a abreviação
-        full_boss_name = get_boss_by_abbreviation(boss_name, {boss: {} for boss in BOSS_DROPS.keys()})
-        if full_boss_name is None:
-            await ctx.send(
-                f"Boss inválido. Bosses disponíveis: {', '.join(BOSS_DROPS.keys())}\n"
-                "Abreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno"
+            # Encontrar o nome completo do boss usando a abreviação
+            full_boss_name = get_boss_by_abbreviation(boss_name, {boss: {} for boss in BOSS_DROPS.keys()})
+            if full_boss_name is None:
+                await interaction.response.send_message(
+                    f"Boss inválido. Bosses disponíveis: {', '.join(BOSS_DROPS.keys())}\n"
+                    "Abreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
+                    ephemeral=True
+                )
+                return
+            
+            boss_data = BOSS_DROPS.get(full_boss_name)
+            if not boss_data:
+                await interaction.response.send_message(
+                    "Informações de drops não encontradas para este boss.",
+                    ephemeral=True
+                )
+                return
+            
+            # Criar embed com os drops
+            embed = Embed(
+                title=f"📦 Drops do {full_boss_name}",
+                color=discord.Color.gold()
             )
-            return
-        
-        boss_data = BOSS_DROPS.get(full_boss_name)
-        if not boss_data:
-            await ctx.send("Informações de drops não encontradas para este boss.")
-            return
-        
-        # Criar embed com os drops
-        embed = Embed(
-            title=f"📦 Drops do {full_boss_name}",
-            color=discord.Color.gold()
-        )
-        
-        if boss_data.get('image'):
-            image_url = get_image_url(boss_data['image'])
-            embed.set_thumbnail(url=image_url)
-        
-        drops_text = "\n".join(f"• {drop}" for drop in boss_data['drops'])
-        embed.description = drops_text
-        
-        embed.set_footer(text=f"Use !drops sem parâmetros para ver a lista de bosses")
-        
-        await ctx.send(embed=embed)
+            
+            if boss_data.get('image'):
+                image_url = get_image_url(boss_data['image'])
+                embed.set_thumbnail(url=image_url)
+            
+            drops_text = "\n".join(f"• {drop}" for drop in boss_data['drops'])
+            embed.description = drops_text
+            
+            embed.set_footer(text=f"Use /drops sem parâmetros para ver a lista de bosses")
+            
+            await interaction.response.send_message(embed=embed)
+            
+        except Exception as e:
+            print(f"Erro no comando drops: {e}")
+            traceback.print_exc()
+            await interaction.response.send_message(
+                "Ocorreu um erro ao processar seu comando.",
+                ephemeral=True
+            )

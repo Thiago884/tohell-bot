@@ -1,3 +1,4 @@
+# main.py
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands, HTTPException
@@ -7,14 +8,15 @@ from flask import Flask, send_from_directory
 from threading import Thread
 from collections import defaultdict
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
 from boss_commands import setup_boss_commands
 from utility_commands import setup_utility_commands
 from drops import setup_drops_command
 from database import init_db, load_db_data
-from shared_functions import get_next_bosses
 import logging
 
+# Configuração do logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -45,9 +47,9 @@ def run_flask():
 # Configuração do Bot Discord
 intents = discord.Intents.all()
 bot = commands.Bot(
-    command_prefix='!',
+    command_prefix='!',  # Mantido para compatibilidade, mas não será usado
     intents=intents,
-    help_command=None
+    help_command=None  # Removido o help command padrão
 )
 
 # Variáveis Globais
@@ -98,7 +100,7 @@ async def on_ready():
     else:
         print(f'⚠ ATENÇÃO: Canal de notificação (ID: {NOTIFICATION_CHANNEL_ID}) não encontrado!')
     
-    await bot.change_presence(activity=discord.Game(name="Digite !bosshelp"))
+    await bot.change_presence(activity=discord.Game(name="Use /bosshelp"))
     
     # Sincroniza comandos slash
     try:
@@ -129,20 +131,6 @@ async def on_ready():
         traceback.print_exc()
     
     print("\n✅ Bot totalmente inicializado e pronto para uso!")
-
-@bot.tree.command(name="teste", description="Verifica se o bot está respondendo")
-async def teste(interaction: discord.Interaction):
-    await interaction.response.send_message("✅ Bot funcionando corretamente!", ephemeral=True)
-
-@bot.command()
-async def ping(ctx):
-    latency = round(bot.latency * 1000)
-    embed = discord.Embed(
-        title="🏓 Pong!",
-        description=f"Latência: {latency}ms",
-        color=discord.Color.green()
-    )
-    await ctx.send(embed=embed)
 
 def keep_alive():
     """Inicia o servidor Flask em thread separada"""
