@@ -122,12 +122,12 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 
                 for idx, record in enumerate(unrecorded, 1):
                     embed.add_field(
-                        name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
+                        name=f"{idx}. {record[0]} (Sala {record[1]})",
                         value=(
-                            f"⏱ Morte registrada: {record['death_time'].strftime('%d/%m %H:%M')}\n"
-                            f"🔄 Período aberto: {record['respawn_time'].strftime('%d/%m %H:%M')} "
-                            f"até {record['closed_time'].strftime('%d/%m %H:%M')}\n"
-                            f"👤 Registrado por: {record['recorded_by'] or 'Ninguém'}"
+                            f"⏱ Morte registrada: {record[2].strftime('%d/%m %H:%M') if record[2] else 'N/A'}\n"
+                            f"🔄 Período aberto: {record[3].strftime('%d/%m %H:%M') if record[3] else 'N/A'} "
+                            f"até {record[4].strftime('%d/%m %H:%M') if record[4] else 'N/A'}\n"
+                            f"👤 Registrado por: {record[5] or 'Ninguém'}"
                         ),
                         inline=False
                     )
@@ -201,10 +201,12 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 
                 for idx, record in enumerate(history, 1):
                     embed.add_field(
-                        name=f"{idx}. {record['boss_name']} (Sala {record['sala']})",
-                        value=f"⏱ Morte: {record['death_time'].strftime('%d/%m %H:%M')}\n"
-                             f"🔄 Abriu: {record['respawn_time'].strftime('%d/%m %H:%M')}\n"
-                             f"👤 Por: {record['recorded_by']}",
+                        name=f"{idx}. {record[0]} (Sala {record[1]})",
+                        value=(
+                            f"⏱ Morte: {record[2].strftime('%d/%m %H:%M') if record[2] else 'N/A'}\n"
+                            f"🔄 Abriu: {record[3].strftime('%d/%m %H:%M') if record[3] else 'N/A'}\n"
+                            f"👤 Por: {record[4] or 'Desconhecido'}"
+                        ),
                         inline=False
                     )
                 
