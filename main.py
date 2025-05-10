@@ -102,12 +102,21 @@ async def on_ready():
     
     await bot.change_presence(activity=discord.Game(name="Use /bosshelp"))
     
-    # Sincroniza comandos slash
+    # Sincroniza comandos slash globais
     try:
         synced = await bot.tree.sync()
-        print(f"✅ {len(synced)} comandos slash sincronizados")
+        print(f"✅ {len(synced)} comandos slash sincronizados globalmente")
     except Exception as e:
-        print(f"❌ Erro ao sincronizar comandos slash: {e}")
+        print(f"❌ Erro ao sincronizar comandos slash globais: {e}")
+    
+    # Sincroniza comandos slash específicos do servidor (opcional)
+    try:
+        guild = discord.Object(id=YOUR_GUILD_ID)  # Substitua pelo ID do seu servidor
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        print(f"✅ {len(synced)} comandos slash sincronizados no servidor")
+    except Exception as e:
+        print(f"⚠ Aviso: Não foi possível sincronizar comandos no servidor: {e}")
     
     # Inicialização do banco de dados
     print("\nInicializando banco de dados...")
@@ -131,6 +140,29 @@ async def on_ready():
         traceback.print_exc()
     
     print("\n✅ Bot totalmente inicializado e pronto para uso!")
+
+@bot.command()
+@commands.is_owner()
+async def sync(ctx):
+    """Comando para forçar a sincronização dos comandos slash (apenas dono do bot)"""
+    try:
+        # Sincroniza comandos globais
+        global_synced = await bot.tree.sync()
+        msg = f"✅ {len(global_synced)} comandos slash sincronizados globalmente\n"
+        
+        # Sincroniza comandos no servidor específico (opcional)
+        try:
+            guild = discord.Object(id=ctx.guild.id)
+            bot.tree.copy_global_to(guild=guild)
+            guild_synced = await bot.tree.sync(guild=guild)
+            msg += f"✅ {len(guild_synced)} comandos sincronizados neste servidor"
+        except Exception as e:
+            msg += f"⚠ Não foi possível sincronizar comandos no servidor: {e}"
+        
+        await ctx.send(msg)
+    except Exception as e:
+        await ctx.send(f"❌ Erro ao sincronizar comandos: {e}")
+        traceback.print_exc()
 
 def keep_alive():
     """Inicia o servidor Flask em thread separada"""
