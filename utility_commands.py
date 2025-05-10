@@ -10,6 +10,7 @@ import traceback
 import re
 import json
 import os
+import asyncio
 import logging
 from database import (
     save_timer, save_user_stats, clear_timer,
@@ -148,6 +149,7 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         try:
             user = await bot.fetch_user(int(user_id))
             if user:
+                await asyncio.sleep(1)  # Delay para evitar rate limit
                 await user.send(
                     f"🔔 **Notificação de Boss** 🔔\n"
                     f"O boss **{boss_name} (Sala {sala})** que você marcou está disponível AGORA!\n"
@@ -157,6 +159,14 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
                 return True
         except discord.Forbidden:
             logger.warning(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
+        except discord.HTTPException as e:
+            if e.status == 429:
+                retry_after = e.retry_after
+                logger.warning(f"Rate limit ao enviar DM. Tentando novamente em {retry_after} segundos")
+                await asyncio.sleep(retry_after)
+                return await send_notification_dm(user_id, boss_name, sala, respawn_time, closed_time)
+            else:
+                logger.error(f"Erro ao enviar DM para {user_id}: {e}", exc_info=True)
         except Exception as e:
             logger.error(f"Erro ao enviar DM para {user_id}: {e}", exc_info=True)
         return False
@@ -205,6 +215,99 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
         finally:
             if conn:
                 await conn.ensure_closed()
+
+    async def run_daily_backup():
+        """Executa o backup diário com tratamento robusto de erros"""
+        conn = None
+        try:
+            logger.info("Iniciando backup diário...")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_file = f"backup_{timestamp}.json"
+            
+            conn = await connect_db()
+            if conn is None:
+                logger.error("Não foi possível conectar ao banco para backup")
+                return False
+                
+            async with conn.cursor() as cursor:
+                # Backup dos timers de boss
+                await cursor.execute("""
+                SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
+                FROM boss_timers
+                """)
+                boss_timers_data = []
+                for row in await cursor.fetchall():
+                    boss_timers_data.append({
+                        'boss_name': row[0],
+                        'sala': row[1],
+                        'death_time': row[2].isoformat() if row[2] else None,
+                        'respawn_time': row[3].isoformat() if row[3] else None,
+                        'closed_time': row[4].isoformat() if row[4] else None,
+                        'recorded_by': row[5],
+                        'opened_notified': bool(row[6])
+                    })
+                
+                # Backup das estatísticas de usuários
+                await cursor.execute("""
+                SELECT user_id, username, count, last_recorded 
+                FROM user_stats
+                """)
+                user_stats_data = []
+                for row in await cursor.fetchall():
+                    user_stats_data.append({
+                        'user_id': row[0],
+                        'username': row[1],
+                        'count': row[2],
+                        'last_recorded': row[3].isoformat() if row[3] else None
+                    })
+                
+                # Backup das notificações personalizadas
+                await cursor.execute("""
+                SELECT user_id, boss_name 
+                FROM user_notifications
+                """)
+                user_notifications_data = []
+                for row in await cursor.fetchall():
+                    user_notifications_data.append({
+                        'user_id': row[0],
+                        'boss_name': row[1]
+                    })
+                
+                backup_data = {
+                    'boss_timers': boss_timers_data,
+                    'user_stats': user_stats_data,
+                    'user_notifications': user_notifications_data,
+                    'timestamp': timestamp,
+                    'version': 1.0
+                }
+                
+                with open(backup_file, 'w', encoding='utf-8') as f:
+                    json.dump(backup_data, f, indent=4)
+                    
+            logger.info(f"Backup criado com sucesso: {backup_file}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Erro no backup diário: {e}", exc_info=True)
+            return False
+        finally:
+            if conn:
+                await conn.ensure_closed()
+
+    async def backup_task_loop():
+        """Loop para executar o backup diário com tratamento de erros"""
+        while True:
+            try:
+                await asyncio.sleep(24 * 3600)  # Espera 24 horas entre backups
+                success = await run_daily_backup()
+                
+                if not success:
+                    logger.warning("Backup falhou. Tentando novamente em 1 hora...")
+                    await asyncio.sleep(3600)  # Espera 1 hora se falhar
+                
+            except Exception as e:
+                logger.error(f"Erro no loop de backup: {e}", exc_info=True)
+                await asyncio.sleep(3600)  # Espera 1 hora se ocorrer erro inesperado
 
     # Comandos
     @bot.command(name='ranking')
@@ -517,104 +620,8 @@ async def setup_utility_commands(bot, boss_timers, user_stats, user_notification
             logger.error(f"Erro no comando bosshelp: {e}", exc_info=True)
             await ctx.send("Ocorreu um erro ao exibir a ajuda.", ephemeral=True)
 
-    # Task de backup diário
-    @tasks.loop(hours=24)
-    async def daily_backup():
-        """Executa backup automático diário dos dados"""
-        conn = None
-        try:
-            logger.info("Iniciando backup diário...")
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            backup_file = f"backup_{timestamp}.json"
-            
-            conn = await connect_db()
-            if conn is None:
-                logger.error("Não foi possível conectar ao banco para backup")
-                return
-                
-            async with conn.cursor() as cursor:
-                # Backup dos timers de boss - convertendo para dicionário serializável
-                await cursor.execute("SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified FROM boss_timers")
-                boss_timers_data = []
-                for row in await cursor.fetchall():
-                    boss_timers_data.append({
-                        'boss_name': row[0],
-                        'sala': row[1],
-                        'death_time': row[2].isoformat() if row[2] else None,
-                        'respawn_time': row[3].isoformat() if row[3] else None,
-                        'closed_time': row[4].isoformat() if row[4] else None,
-                        'recorded_by': row[5],
-                        'opened_notified': bool(row[6])
-                    })
-                
-                # Backup das estatísticas de usuários - convertendo para dicionário serializável
-                await cursor.execute("SELECT user_id, username, count, last_recorded FROM user_stats")
-                user_stats_data = []
-                for row in await cursor.fetchall():
-                    user_stats_data.append({
-                        'user_id': row[0],
-                        'username': row[1],
-                        'count': row[2],
-                        'last_recorded': row[3].isoformat() if row[3] else None
-                    })
-                
-                # Backup das notificações personalizadas - convertendo para dicionário serializável
-                await cursor.execute("SELECT user_id, boss_name FROM user_notifications")
-                user_notifications_data = []
-                for row in await cursor.fetchall():
-                    user_notifications_data.append({
-                        'user_id': row[0],
-                        'boss_name': row[1]
-                    })
-                
-                backup_data = {
-                    'boss_timers': boss_timers_data,
-                    'user_stats': user_stats_data,
-                    'user_notifications': user_notifications_data,
-                    'timestamp': timestamp,
-                    'version': 1.0
-                }
-                
-                with open(backup_file, 'w', encoding='utf-8') as f:
-                    json.dump(backup_data, f, indent=4)
-                    
-            logger.info(f"Backup criado com sucesso: {backup_file}")
-        except Exception as e:
-            logger.error(f"Erro no backup diário: {e}", exc_info=True)
-        finally:
-            if conn:
-                await conn.ensure_closed()
-
-    # Configuração da task de backup
-    @daily_backup.before_loop
-    async def before_daily_backup():
-        logger.info("Agendando backup diário...")
-        await bot.wait_until_ready()
-
-    @daily_backup.after_loop
-    async def after_daily_backup():
-        if daily_backup.failed():
-            logger.error("Backup diário falhou!")
-        else:
-            logger.info("Backup diário finalizado com sucesso")
-
-    @daily_backup.error
-    async def on_daily_backup_error(error):
-        logger.error(f"Erro na task de backup: {error}", exc_info=True)
-        try:
-            # Tentar reiniciar a task após 1 hora se falhar
-            await asyncio.sleep(3600)
-            daily_backup.restart()
-        except Exception as e:
-            logger.error(f"Falha ao reiniciar task de backup: {e}")
-
-    # Iniciar a task de backup com tratamento de erro
-    if not daily_backup.is_running():
-        try:
-            daily_backup.start()
-            logger.info("Task de backup diário iniciada com sucesso")
-        except Exception as e:
-            logger.error(f"Falha ao iniciar task de backup diário: {e}", exc_info=True)
+    # Iniciar a task de backup
+    bot.loop.create_task(backup_task_loop())
 
     # Adicionar a view persistente
     try:
