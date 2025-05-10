@@ -248,6 +248,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
             for sala in boss_timers[boss]:
                 timers = boss_timers[boss][sala]
                 
+                # Pular bosses que já fecharam e não foram registrados
                 if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
                     continue
                     
@@ -263,14 +264,14 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                 if timers['respawn_time']:
                     if now >= timers['respawn_time']:
                         if timers['closed_time'] and now >= timers['closed_time']:
-                            status = "❌"
+                            status = "❌"  # Boss fechado
                         else:
-                            status = "✅"
+                            status = "✅"  # Boss aberto
                     else:
                         time_left = format_time_remaining(timers['respawn_time'])
-                        status = f"🕒 ({time_left})"
+                        status = f"🕒 ({time_left})"  # Boss agendado
                 else:
-                    status = "❌"
+                    status = "❌"  # Sem registro
                 
                 boss_info.append(
                     f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
@@ -462,14 +463,22 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                                 message += " sem nenhuma anotação durante o período aberto!"
                             else:
                                 message += "!"
-                            
+
                             notifications.append(message)
                             
-                            # Manter apenas o horário da morte para histórico
-                            boss_timers[boss][sala]['respawn_time'] = None
-                            boss_timers[boss][sala]['closed_time'] = None
+                            # Apenas marca que foi fechado, sem apagar os horários
                             boss_timers[boss][sala]['opened_notified'] = False
-                            await save_timer(boss, sala, timers['death_time'], None, None, timers['recorded_by'], False)
+
+                            # Atualiza no banco com os mesmos dados (para manter integridade)
+                            await save_timer(
+                                boss,
+                                sala,
+                                timers['death_time'],
+                                timers['respawn_time'],
+                                timers['closed_time'],
+                                timers['recorded_by'],
+                                False
+                            )
 
             if notifications:
                 message = "**Notificações de Boss:**\n" + "\n".join(notifications)
