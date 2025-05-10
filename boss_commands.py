@@ -238,6 +238,9 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
             for sala in boss_timers[boss]:
                 timers = boss_timers[boss][sala]
                 
+                if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
+                    continue
+                    
                 if compact and timers['death_time'] is None:
                     continue
                     
@@ -427,9 +430,11 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
                         
                         notifications.append(message)
                         
-                        # Apenas atualiza o status, mantendo os dados na tabela
+                        # Manter apenas o horário da morte para histórico
+                        boss_timers[boss][sala]['respawn_time'] = None
+                        boss_timers[boss][sala]['closed_time'] = None
                         boss_timers[boss][sala]['opened_notified'] = False
-                        await save_timer(boss, sala, timers['death_time'], respawn_time, closed_time, timers['recorded_by'], False)
+                        await save_timer(boss, sala, timers['death_time'], None, None, timers['recorded_by'], False)
 
         if notifications:
             message = "**Notificações de Boss:**\n" + "\n".join(notifications)
@@ -487,6 +492,7 @@ async def setup_boss_commands(bot, boss_timers, user_stats, user_notifications, 
         
         if sala not in boss_timers.get(list(boss_timers.keys())[0], {}).keys():
             await ctx.send(f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers.get(list(boss_timers.keys())[0], {}).keys()))}")
+
             return
         
         full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)

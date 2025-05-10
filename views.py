@@ -25,6 +25,9 @@ def create_boss_embed(boss_timers, compact=False):
         for sala in boss_timers[boss]:
             timers = boss_timers[boss][sala]
             
+            if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
+                continue
+                
             if compact and timers['death_time'] is None:
                 continue
                 

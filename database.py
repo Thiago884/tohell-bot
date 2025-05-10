@@ -104,16 +104,14 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                 boss_name = timer[0]  # Índice 0 para boss_name
                 sala = timer[1]       # Índice 1 para sala
                 
-                if boss_name not in boss_timers:
-                    boss_timers[boss_name] = {}
-                
-                boss_timers[boss_name][sala] = {
-                    'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
-                    'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
-                    'closed_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
-                    'recorded_by': timer[5],
-                    'opened_notified': bool(timer[6])
-                }
+                if boss_name in boss_timers and sala in boss_timers[boss_name]:
+                    boss_timers[boss_name][sala] = {
+                        'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
+                        'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
+                        'closed_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
+                        'recorded_by': timer[5],
+                        'opened_notified': bool(timer[6])
+                    }
             
             # Carregar estatísticas de usuários
             await cursor.execute("""
@@ -319,7 +317,7 @@ async def create_backup() -> Optional[str]:
             return None
             
         async with conn.cursor() as cursor:
-            # Backup dos timers de boss - convertendo para dicionário serializável
+            # Backup dos timers de boss
             await cursor.execute("SELECT * FROM boss_timers")
             boss_timers_data = []
             for row in await cursor.fetchall():
@@ -333,7 +331,7 @@ async def create_backup() -> Optional[str]:
                     'opened_notified': bool(row[7])
                 })
             
-            # Backup das estatísticas de usuários - convertendo para dicionário serializável
+            # Backup das estatísticas de usuários
             await cursor.execute("SELECT * FROM user_stats")
             user_stats_data = []
             for row in await cursor.fetchall():
@@ -344,7 +342,7 @@ async def create_backup() -> Optional[str]:
                     'last_recorded': row[3]
                 })
             
-            # Backup das notificações personalizadas - convertendo para dicionário serializável
+            # Backup das notificações personalizadas
             await cursor.execute("SELECT * FROM user_notifications")
             user_notifications_data = []
             for row in await cursor.fetchall():
