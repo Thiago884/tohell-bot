@@ -11,6 +11,7 @@ import re
 import json
 import os
 import asyncio
+from typing import Optional
 from database import (
     save_timer, save_user_stats, clear_timer,
     add_user_notification, remove_user_notification, get_user_notifications,
