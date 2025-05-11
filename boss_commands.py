@@ -7,6 +7,11 @@ import asyncio
 from database import save_timer, save_user_stats, clear_timer
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, get_next_bosses
 from utility_commands import create_unrecorded_embed
+from views import BossControlView
+import random
+
+# Configuração do fuso horário do Brasil
+brazil_tz = pytz.timezone('America/Sao_Paulo')
 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
