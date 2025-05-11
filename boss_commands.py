@@ -9,9 +9,7 @@ from shared_functions import get_boss_by_abbreviation, format_time_remaining, ge
 from utility_commands import create_unrecorded_embed
 from views import BossControlView
 import random
-
-# Configuração do fuso horário do Brasil
-brazil_tz = pytz.timezone('America/Sao_Paulo')
+import traceback
 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
@@ -173,6 +171,7 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
                       NOTIFICATION_CHANNEL_ID: int):
     """Atualiza a mensagem da tabela de bosses"""
     try:
+        print("Atualizando tabela de bosses...")  # Log de depuração
         embed = await create_boss_embed(boss_timers)
         view = BossControlView(
             bot, 
@@ -192,20 +191,22 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
             try:
                 await asyncio.sleep(1)  # Delay para evitar rate limit
                 await table_message.edit(embed=embed, view=view)
+                print("Tabela editada com sucesso!")  # Log de depuração
                 return table_message
             except discord.NotFound:
+                print("Mensagem original não encontrada, criando nova...")  # Log de depuração
                 table_message = None
             except discord.HTTPException as e:
                 if e.status == 429:
                     retry_after = e.retry_after
-                    print(f"Rate limit ao editar tabela. Tentando novamente em {retry_after} segundos")
+                    print(f"Rate limit ao editar tabela. Tentando novamente em {retry_after} segundos")  # Log de depuração
                     await asyncio.sleep(retry_after)
                     return await update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
                 else:
-                    print(f"Erro HTTP ao editar mensagem da tabela: {e}")
+                    print(f"Erro HTTP ao editar mensagem da tabela: {e}")  # Log de depuração
                     table_message = None
             except Exception as e:
-                print(f"Erro ao editar mensagem da tabela: {e}")
+                print(f"Erro ao editar mensagem da tabela: {e}")  # Log de depuração
                 table_message = None
         
         if not table_message:
@@ -214,23 +215,26 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
                     try:
                         await asyncio.sleep(1)  # Delay para evitar rate limit
                         await message.edit(embed=embed, view=view)
+                        print("Tabela existente encontrada e atualizada!")  # Log de depuração
                         return message
                     except:
                         continue
         
         await asyncio.sleep(1)  # Delay para evitar rate limit
         table_message = await channel.send(embed=embed, view=view)
+        print("Nova tabela criada!")  # Log de depuração
         return table_message
     except discord.HTTPException as e:
         if e.status == 429:
             retry_after = e.retry_after
-            print(f"Rate limit ao enviar tabela. Tentando novamente em {retry_after} segundos")
+            print(f"Rate limit ao enviar tabela. Tentando novamente em {retry_after} segundos")  # Log de depuração
             await asyncio.sleep(retry_after)
             return await update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
         else:
-            print(f"Erro HTTP ao atualizar tabela: {e}")
+            print(f"Erro HTTP ao atualizar tabela: {e}")  # Log de depuração
     except Exception as e:
-        print(f"Erro ao atualizar tabela: {e}")
+        print(f"Erro ao atualizar tabela: {e}")  # Log de depuração
+        traceback.print_exc()
         try:
             await asyncio.sleep(1)
             table_message = await channel.send(embed=await create_boss_embed(boss_timers), view=BossControlView(
@@ -248,7 +252,7 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
             ))
             return table_message
         except Exception as e:
-            print(f"Erro ao enviar nova mensagem de tabela: {e}")
+            print(f"Erro ao enviar nova mensagem de tabela: {e}")  # Log de depuração
     
     return table_message
 
@@ -358,6 +362,7 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
             print(f"Erro HTTP na verificação de respawns: {e}")
     except Exception as e:
         print(f"Erro na verificação de respawns: {e}")
+        traceback.print_exc()
 
 async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict, 
                             user_notifications: Dict, table_message: discord.Message, 
@@ -378,6 +383,7 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
                 )
         except Exception as e:
             print(f"Erro na task de atualização de tabela: {e}")
+            traceback.print_exc()
 
     @tasks.loop(minutes=1)
     async def check_boss_respawns_task():
@@ -396,19 +402,26 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     async def periodic_table_update():
         """Atualiza a tabela periodicamente com novo post"""
         try:
+            print("\nIniciando atualização periódica da tabela...")  # Log de depuração
             channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
             if channel:
+                print(f"Canal encontrado: {channel.name}")  # Log de depuração
                 nonlocal table_message
                 table_message = await update_table(
                     bot, channel, boss_timers, user_stats, 
                     user_notifications, table_message, NOTIFICATION_CHANNEL_ID
                 )
+                print("Tabela atualizada com sucesso!")  # Log de depuração
+            else:
+                print(f"Canal com ID {NOTIFICATION_CHANNEL_ID} não encontrado!")  # Log de depuração
             
-            # Ajustar o intervalo para um valor aleatório entre 30 e 60 minutos
-            periodic_table_update.change_interval(minutes=random.randint(30, 60))
+            new_interval = random.randint(30, 60)
+            print(f"Próxima atualização em {new_interval} minutos")  # Log de depuração
+            periodic_table_update.change_interval(minutes=new_interval)
         
         except Exception as e:
             print(f"Erro na atualização periódica: {e}")
+            traceback.print_exc()
 
     # Iniciar as tasks
     check_boss_respawns_task.start()
