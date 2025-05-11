@@ -97,6 +97,21 @@ async def on_ready():
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
     if channel:
         print(f'📢 Canal de notificações: #{channel.name} (ID: {channel.id})')
+        
+        # Força o envio da tabela ao iniciar
+        global table_message
+        table_message = None  # Reseta para garantir novo envio
+        try:
+            from boss_commands import update_table
+            table_message = await update_table(
+                bot, channel, boss_timers, 
+                user_stats, user_notifications, 
+                table_message, NOTIFICATION_CHANNEL_ID
+            )
+            print("✅ Tabela enviada com sucesso no canal!")
+        except Exception as e:
+            print(f"❌ Erro ao enviar tabela inicial: {e}")
+            traceback.print_exc()
     else:
         print(f'⚠ ATENÇÃO: Canal de notificação (ID: {NOTIFICATION_CHANNEL_ID}) não encontrado!')
     
@@ -200,8 +215,20 @@ async def main():
     
     print("\n🔑 Iniciando bot...")
     try:
+        # Verifica se o canal existe antes de iniciar
         async with bot:
             await bot.start(token)
+            
+            # Verificação adicional após o login
+            channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
+            if channel:
+                from boss_commands import update_table
+                global table_message
+                table_message = await update_table(
+                    bot, channel, boss_timers,
+                    user_stats, user_notifications,
+                    table_message, NOTIFICATION_CHANNEL_ID
+                )
     except Exception as e:
         print(f"\n❌ Erro: {type(e).__name__}: {e}")
         traceback.print_exc()
