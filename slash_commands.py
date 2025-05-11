@@ -1,19 +1,20 @@
-# slash_commands.py
 import discord
 from discord import app_commands
 from discord.ext import commands
 from datetime import datetime, timedelta
 import pytz
 from typing import Optional, List
+import os
+import traceback
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time
-from database import save_timer, save_user_stats, clear_timer, add_user_notification, remove_user_notification
-from views import create_boss_embed, BossControlView
+from database import save_timer, save_user_stats, clear_timer, add_user_notification, remove_user_notification, create_backup, restore_backup, load_db_data
+from views import BossControlView
 
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
 async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID,
-                             update_table_func, create_next_bosses_embed_func, create_ranking_embed_func,
-                             create_history_embed_func, create_unrecorded_embed_func):
+                             create_boss_embed_func, update_table_func, create_next_bosses_embed_func,
+                             create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
     
     # Autocomplete para nomes de bosses
     async def boss_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
@@ -45,7 +46,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         boss_name: str,
         sala: int,
         hora_morte: str,
-        foi_ontem: Optional[bool] = False
+        foi_ontem: bool = False
     ):
         """Registra a morte de um boss via comando slash"""
         try:
@@ -125,7 +126,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             )
             
             # Atualiza a tabela
-            embed = create_boss_embed(boss_timers)
+            embed = await create_boss_embed_func()
             view = BossControlView(
                 bot,
                 boss_timers,
@@ -216,7 +217,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 )
             
             # Atualiza a tabela
-            embed = create_boss_embed(boss_timers)
+            embed = await create_boss_embed_func()
             view = BossControlView(
                 bot,
                 boss_timers,
@@ -253,7 +254,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 return
             
             await interaction.response.defer()
-            embed = await create_next_bosses_embed_func(boss_timers)
+            embed = await create_next_bosses_embed_func()
             await interaction.followup.send(embed=embed)
             
         except Exception as e:

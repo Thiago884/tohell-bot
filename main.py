@@ -15,6 +15,7 @@ from utility_commands import setup_utility_commands
 from drops import setup_drops_command
 from database import init_db, load_db_data
 import logging
+from slash_commands import setup_slash_commands
 
 # Configuração do logging
 logging.basicConfig(
@@ -134,6 +135,12 @@ async def on_ready():
         boss_funcs = await setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
         await setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, *boss_funcs)
         await setup_drops_command(bot)
+        
+        # Configura comandos slash
+        await setup_slash_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID,
+                                 boss_funcs[0], boss_funcs[1], boss_funcs[2],
+                                 boss_funcs[3], boss_funcs[4], boss_funcs[5])
+        
         print("✅ Comandos configurados com sucesso!")
     except Exception as e:
         print(f"❌ Erro ao configurar comandos: {e}")
