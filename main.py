@@ -11,7 +11,6 @@ import traceback
 from datetime import datetime, timedelta
 import pytz
 from boss_commands import setup_boss_commands
-from utility_commands import setup_utility_commands
 from drops import setup_drops_command
 from database import init_db, load_db_data
 import logging
@@ -132,14 +131,29 @@ async def on_ready():
     # Configura comandos
     print("\nConfigurando comandos...")
     try:
-        boss_funcs = await setup_boss_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
-        await setup_utility_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, *boss_funcs)
-        await setup_drops_command(bot)
+        # Configura comandos de boss e obtém as funções de callback
+        boss_funcs = await setup_boss_commands(
+            bot, 
+            boss_timers, 
+            user_stats, 
+            user_notifications, 
+            table_message, 
+            NOTIFICATION_CHANNEL_ID
+        )
         
-        # Configura comandos slash
-        await setup_slash_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID,
-                                 boss_funcs[0], boss_funcs[1], boss_funcs[2],
-                                 boss_funcs[3], boss_funcs[4], boss_funcs[5])
+        # Configura comandos slash (agora contém todos os comandos)
+        await setup_slash_commands(
+            bot, 
+            boss_timers, 
+            user_stats, 
+            user_notifications, 
+            table_message, 
+            NOTIFICATION_CHANNEL_ID,
+            *boss_funcs  # Desempacota todas as funções de callback
+        )
+        
+        # Configura comandos de drops (separado pois é independente)
+        await setup_drops_command(bot)
         
         print("✅ Comandos configurados com sucesso!")
     except Exception as e:

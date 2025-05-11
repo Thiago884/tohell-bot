@@ -1,3 +1,4 @@
+# slash_commands.py
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -7,8 +8,9 @@ from typing import Optional, List
 import os
 import traceback
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time
-from database import save_timer, save_user_stats, clear_timer, add_user_notification, remove_user_notification, create_backup, restore_backup, load_db_data
+from database import save_timer, save_user_stats, clear_timer, add_user_notification, remove_user_notification, load_db_data
 from views import BossControlView
+from discord.app_commands import CommandAlreadyRegistered
 
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
@@ -221,8 +223,8 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             view = BossControlView(
                 bot,
                 boss_timers,
-                user_stats,
-                user_notifications,
+                {},  # user_stats não é usado na view
+                {},  # user_notifications não é usado na view
                 table_message,
                 NOTIFICATION_CHANNEL_ID,
                 update_table_func,
@@ -625,7 +627,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             )
             embed.add_field(
                 name="/naoanotados",
-                value="Mostra os últimos bosses que fecharam sem anotações",
+                value="Mostra os últimos bosses que fecharam sem registro",
                 inline=False
             )
             embed.add_field(
