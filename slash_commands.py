@@ -34,6 +34,45 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             for sala in salas if current in str(sala)
         ][:25]
     
+    # Comando para mostrar tabela completa de bosses
+    @bot.tree.command(name="bosses", description="Mostra a tabela completa de bosses com controles")
+    async def bosses_slash(interaction: discord.Interaction):
+        """Mostra a tabela completa de bosses via comando slash"""
+        try:
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
+                )
+                return
+            
+            await interaction.response.defer()
+            
+            embed = await create_boss_embed_func()
+            view = BossControlView(
+                bot,
+                boss_timers,
+                user_stats,
+                user_notifications,
+                table_message,
+                NOTIFICATION_CHANNEL_ID,
+                update_table_func,
+                create_next_bosses_embed_func,
+                create_ranking_embed_func,
+                create_history_embed_func,
+                create_unrecorded_embed_func
+            )
+            
+            await interaction.followup.send(embed=embed, view=view)
+            
+        except Exception as e:
+            print(f"Erro no comando slash bosses: {e}")
+            traceback.print_exc()
+            await interaction.response.send_message(
+                "Ocorreu um erro ao exibir a tabela de bosses.",
+                ephemeral=True
+            )
+    
     # Comando para registrar boss
     @bot.tree.command(name="boss", description="Registra a morte de um boss")
     @app_commands.autocomplete(boss_name=boss_autocomplete, sala=sala_autocomplete)
@@ -586,55 +625,65 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             )
             
             embed.add_field(
+                name="/bosses",
+                value="Mostra a tabela completa de bosses com todos os controles",
+                inline=False
+            )
+            
+            embed.add_field(
                 name="/boss <nome> <sala> <hora_morte> [foi_ontem]",
                 value="Registra a morte de um boss no horário especificado\nExemplo: `/boss Hydra 8 14:30`\nBosses disponíveis: " + ", ".join(boss_timers.keys()),
                 inline=False
             )
-            embed.add_field(
-                name="Botões de Controle",
-                value="Use os botões abaixo da tabela para:\n- 📝 Anotar boss derrotado\n- ❌ Limpar timer de boss\n- 🏆 Ver ranking de anotações\n- ⏳ Ver próximos bosses\n- 🔔 Gerenciar notificações por DM\n- 💾 Backup/Restore (apenas admins)\n- 📜 Ver histórico de anotações\n- ❌ Ver bosses não anotados",
-                inline=False
-            )
+            
             embed.add_field(
                 name="/clearboss <nome> [sala]",
                 value="Reseta o timer de um boss (opcional: especifique a sala, senão limpa todas)",
                 inline=False
             )
+            
             embed.add_field(
                 name="/nextboss",
                 value="Mostra os próximos bosses que vão abrir e os que já estão abertos",
                 inline=False
             )
+            
             embed.add_field(
                 name="/ranking",
                 value="Mostra o ranking de quem mais anotou bosses (com medalhas para o Top 3)",
                 inline=False
             )
+            
             embed.add_field(
                 name="/notify <boss> <add/rem>",
                 value="Ativa/desativa notificação por DM quando o boss abrir\nEx: `/notify Hydra add`",
                 inline=False
             )
+            
             embed.add_field(
                 name="/mynotifications",
                 value="Mostra seus bosses marcados para notificação",
                 inline=False
             )
+            
             embed.add_field(
                 name="/historico",
                 value="Mostra as últimas 10 anotações de bosses",
                 inline=False
             )
+            
             embed.add_field(
                 name="/naoanotados",
                 value="Mostra os últimos bosses que fecharam sem registro",
                 inline=False
             )
+            
             embed.add_field(
                 name="/backup <create|restore>",
                 value="Cria ou restaura um backup dos dados (apenas admins)",
                 inline=False
             )
+            
             embed.add_field(
                 name="Salas disponíveis",
                 value=", ".join(map(str, boss_timers.get(list(boss_timers.keys())[0], {}).keys())),
