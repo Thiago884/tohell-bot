@@ -1,3 +1,4 @@
+# boss_commands.py
 from datetime import datetime, timedelta
 import pytz
 import discord
@@ -181,7 +182,7 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
             table_message, 
             NOTIFICATION_CHANNEL_ID,
             lambda: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
-            lambda: create_next_bosses_embed(boss_timers),
+            lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
             lambda: create_ranking_embed(bot, user_stats),
             lambda: create_history_embed(bot, boss_timers),
             lambda: create_unrecorded_embed(bot, boss_timers)
@@ -404,9 +405,9 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
 
     # Retornar as funções necessárias para outros módulos
     return (
-        lambda: create_boss_embed(boss_timers),
+        lambda boss_timers=boss_timers: create_boss_embed(boss_timers),
         lambda channel: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
-        lambda: create_next_bosses_embed(boss_timers),
+        lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
         lambda: create_ranking_embed(bot, user_stats),
         lambda: create_history_embed(bot, boss_timers),
         lambda: create_unrecorded_embed(bot, boss_timers)
