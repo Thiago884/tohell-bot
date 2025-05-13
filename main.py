@@ -23,6 +23,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Configurações - Substitua com seus valores
+NOTIFICATION_CHANNEL_ID = 1364594212280078457  # ID do canal de notificações
+GUILD_ID = 1152651838651371520  # ID do servidor para sync rápido (opcional, None para global)
+
 # Configuração do Flask (keep-alive)
 app = Flask(__name__)
 
@@ -48,26 +52,19 @@ def run_flask():
 # Configuração do Bot Discord
 intents = discord.Intents.all()
 bot = commands.Bot(
-    command_prefix='!',  # Mantido para compatibilidade, mas não será usado
+    command_prefix='!',
     intents=intents,
-    help_command=None  # Removido o help command padrão
+    help_command=None
 )
 
-# Variáveis Globais
+# Estruturas de dados
 BOSSES = [
-    "Super Red Dragon",
-    "Hell Maine",
-    "Illusion of Kundun",
-    "Death Beam Knight",
-    "Genocider",
-    "Phoenix of Darkness",
-    "Hydra",
-    "Rei Kundun"
+    "Super Red Dragon", "Hell Maine", "Illusion of Kundun",
+    "Death Beam Knight", "Genocider", "Phoenix of Darkness",
+    "Hydra", "Rei Kundun"
 ]
-
 SALAS = [1, 2, 3, 4, 5, 6, 7, 8]
 
-# Estruturas de dados
 boss_timers = {boss: {sala: {
     'death_time': None,
     'respawn_time': None,
@@ -84,7 +81,6 @@ user_stats = defaultdict(lambda: {
 
 user_notifications = defaultdict(list)
 table_message = None
-NOTIFICATION_CHANNEL_ID = 1364594212280078457  # Substitua pelo seu canal
 
 @bot.event
 async def on_ready():
@@ -99,9 +95,8 @@ async def on_ready():
     if channel:
         logger.info(f'📢 Canal de notificações: #{channel.name} (ID: {channel.id})')
         
-        # Força o envio da tabela ao iniciar
         global table_message
-        table_message = None  # Reseta para garantir novo envio
+        table_message = None
         try:
             from boss_commands import update_table
             table_message = await update_table(
@@ -117,23 +112,22 @@ async def on_ready():
         logger.error(f'⚠ ATENÇÃO: Canal de notificação (ID: {NOTIFICATION_CHANNEL_ID}) não encontrado!')
     
     await bot.change_presence(activity=discord.Game(name="Use /bosshelp"))
-    
-    # Sincroniza comandos slash globais
+
+    # Sincronização de comandos
     try:
+        # Sincronização global
         synced = await bot.tree.sync()
         logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente")
+
+        # Sincronização no servidor específico (opcional)
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            bot.tree.copy_global_to(guild=guild)
+            synced_guild = await bot.tree.sync(guild=guild)
+            logger.info(f"✅ {len(synced_guild)} comandos sincronizados no servidor")
     except Exception as e:
-        logger.error(f"❌ Erro ao sincronizar comandos slash globais: {e}")
-    
-    # Sincroniza comandos slash específicos do servidor (opcional)
-    try:
-        guild = discord.Object(id=YOUR_GUILD_ID)  # Substitua pelo ID do seu servidor
-        bot.tree.copy_global_to(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        logger.info(f"✅ {len(synced)} comandos slash sincronizados no servidor")
-    except Exception as e:
-        logger.error(f"⚠ Aviso: Não foi possível sincronizar comandos no servidor: {e}")
-    
+        logger.error(f"❌ Erro ao sincronizar comandos: {e}")
+
     # Inicialização do banco de dados
     logger.info("\nInicializando banco de dados...")
     try:
@@ -147,30 +141,17 @@ async def on_ready():
     # Configura comandos
     logger.info("\nConfigurando comandos...")
     try:
-        # Configura comandos de boss e obtém as funções de callback
         boss_funcs = await setup_boss_commands(
-            bot, 
-            boss_timers, 
-            user_stats, 
-            user_notifications, 
-            table_message, 
-            NOTIFICATION_CHANNEL_ID
+            bot, boss_timers, user_stats, 
+            user_notifications, table_message, NOTIFICATION_CHANNEL_ID
         )
         
-        # Configura comandos slash (agora contém todos os comandos)
         await setup_slash_commands(
-            bot, 
-            boss_timers, 
-            user_stats, 
-            user_notifications, 
-            table_message, 
-            NOTIFICATION_CHANNEL_ID,
-            *boss_funcs  # Desempacota todas as funções de callback
+            bot, boss_timers, user_stats, user_notifications,
+            table_message, NOTIFICATION_CHANNEL_ID, *boss_funcs
         )
         
-        # Configura comandos de drops (separado pois é independente)
         await setup_drops_command(bot)
-        
         logger.info("✅ Comandos configurados com sucesso!")
     except Exception as e:
         logger.error(f"❌ Erro ao configurar comandos: {e}")
@@ -181,20 +162,15 @@ async def on_ready():
 @bot.command()
 @commands.is_owner()
 async def sync(ctx):
-    """Comando para forçar a sincronização dos comandos slash (apenas dono do bot)"""
+    """Sincroniza comandos slash"""
     try:
-        # Sincroniza comandos globais
-        global_synced = await bot.tree.sync()
-        msg = f"✅ {len(global_synced)} comandos slash sincronizados globalmente\n"
+        synced = await bot.tree.sync()
+        msg = f"✅ {len(synced)} comandos sincronizados globalmente"
         
-        # Sincroniza comandos no servidor específico (opcional)
-        try:
-            guild = discord.Object(id=ctx.guild.id)
-            bot.tree.copy_global_to(guild=guild)
-            guild_synced = await bot.tree.sync(guild=guild)
-            msg += f"✅ {len(guild_synced)} comandos sincronizados neste servidor"
-        except Exception as e:
-            msg += f"⚠ Não foi possível sincronizar comandos no servidor: {e}"
+        if ctx.guild:
+            bot.tree.copy_global_to(guild=ctx.guild)
+            synced_guild = await bot.tree.sync(guild=ctx.guild)
+            msg += f"\n✅ {len(synced_guild)} comandos sincronizados neste servidor"
         
         await ctx.send(msg)
     except Exception as e:
@@ -202,27 +178,23 @@ async def sync(ctx):
         traceback.print_exc()
 
 def keep_alive():
-    """Inicia o servidor Flask em thread separada"""
+    """Inicia o servidor Flask"""
     t = Thread(target=run_flask, daemon=True)
     t.start()
 
 async def shutdown_sequence():
-    """Executa a sequência de desligamento limpo"""
+    """Executa o desligamento limpo"""
     logger.info("\n🛑 Iniciando sequência de desligamento...")
     
-    # Cancela todas as tasks do bot
+    # Cancela tasks específicas do bot
     if hasattr(bot, 'boss_commands_shutdown'):
-        logger.info("Cancelando tasks de boss commands...")
         await bot.boss_commands_shutdown()
     
-    # Cancela outras tasks pendentes
+    # Cancela outras tasks
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
-    if tasks:
-        logger.info(f"Cancelando {len(tasks)} tasks pendentes...")
-        for task in tasks:
-            task.cancel()
-        
-        await asyncio.gather(*tasks, return_exceptions=True)
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)
     
     logger.info("✅ Sequência de desligamento concluída")
 
@@ -239,7 +211,7 @@ async def main():
         async with bot:
             await bot.start(token)
             
-            # Verificação adicional após o login
+            # Verificação pós-login
             channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
             if channel:
                 from boss_commands import update_table
