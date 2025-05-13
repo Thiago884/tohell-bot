@@ -12,6 +12,10 @@ from utility_commands import create_history_embed, create_unrecorded_embed
 from views import BossControlView
 import random
 import traceback
+import logging
+
+# Configuração do logger
+logger = logging.getLogger(__name__)
 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
@@ -30,17 +34,17 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
             )
             return True
     except discord.Forbidden:
-        print(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
+        logger.warning(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
     except discord.HTTPException as e:
         if e.status == 429:
             retry_after = e.retry_after
-            print(f"Rate limit atingido. Tentando novamente em {retry_after} segundos")
+            logger.warning(f"Rate limit ao enviar DM. Tentando novamente em {retry_after} segundos")
             await asyncio.sleep(retry_after)
             return await send_notification_dm(bot, user_id, boss_name, sala, respawn_time, closed_time)
         else:
-            print(f"Erro ao enviar DM para {user_id}: {e}")
+            logger.error(f"Erro ao enviar DM para {user_id}: {e}", exc_info=True)
     except Exception as e:
-        print(f"Erro ao enviar DM para {user_id}: {e}")
+        logger.error(f"Erro ao enviar DM para {user_id}: {e}", exc_info=True)
     
     return False
 
@@ -173,7 +177,7 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
                       NOTIFICATION_CHANNEL_ID: int):
     """Atualiza a mensagem da tabela de bosses"""
     try:
-        print("Iniciando atualização da tabela de bosses...")
+        logger.info("Iniciando atualização da tabela de bosses...")
         embed = await create_boss_embed(boss_timers)
         view = BossControlView(
             bot, 
@@ -191,31 +195,30 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
         
         # Se não temos mensagem de tabela, envia uma nova
         if table_message is None:
-            print("Nenhuma tabela existente encontrada, enviando nova...")
+            logger.info("Nenhuma tabela existente encontrada, enviando nova...")
             try:
                 table_message = await channel.send(embed=embed, view=view)
-                print("✅ Nova tabela enviada com sucesso!")
+                logger.info("✅ Nova tabela enviada com sucesso!")
                 return table_message
             except Exception as e:
-                print(f"❌ Erro ao enviar nova tabela: {e}")
+                logger.error(f"❌ Erro ao enviar nova tabela: {e}")
                 return None
         
         # Tenta editar a mensagem existente
         try:
             await table_message.edit(embed=embed, view=view)
-            print("✅ Tabela existente atualizada com sucesso!")
+            logger.info("✅ Tabela existente atualizada com sucesso!")
             return table_message
         except discord.NotFound:
-            print("⚠ Tabela anterior não encontrada, enviando nova...")
+            logger.warning("⚠ Tabela anterior não encontrada, enviando nova...")
             table_message = await channel.send(embed=embed, view=view)
             return table_message
         except Exception as e:
-            print(f"❌ Erro ao editar tabela existente: {e}")
+            logger.error(f"❌ Erro ao editar tabela existente: {e}")
             return table_message
             
     except Exception as e:
-        print(f"❌ Erro crítico na atualização da tabela: {e}")
-        traceback.print_exc()
+        logger.error(f"❌ Erro crítico na atualização da tabela: {e}", exc_info=True)
         return table_message
 
 async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict, 
@@ -224,7 +227,7 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
     try:
         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
         if channel is None:
-            print(f"Erro: Canal com ID {NOTIFICATION_CHANNEL_ID} não encontrado!")
+            logger.error(f"Canal com ID {NOTIFICATION_CHANNEL_ID} não encontrado!")
             return
 
         now = datetime.now(brazil_tz)
@@ -294,11 +297,11 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
             except discord.HTTPException as e:
                 if e.status == 429:
                     retry_after = e.retry_after
-                    print(f"Rate limit nas notificações. Tentando novamente em {retry_after} segundos")
+                    logger.warning(f"Rate limit nas notificações. Tentando novamente em {retry_after} segundos")
                     await asyncio.sleep(retry_after)
                     await channel.send(message[:2000])  # Envia mensagem truncada se necessário
                 else:
-                    print(f"Erro HTTP ao enviar notificações: {e}")
+                    logger.error(f"Erro HTTP ao enviar notificações: {e}")
         
         if dm_notifications:
             for notification in dm_notifications:
@@ -318,13 +321,12 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
     except discord.HTTPException as e:
         if e.status == 429:
             retry_after = e.retry_after
-            print(f"Rate limit na verificação de respawns. Tentando novamente em {retry_after} segundos")
+            logger.warning(f"Rate limit na verificação de respawns. Tentando novamente em {retry_after} segundos")
             await asyncio.sleep(retry_after)
         else:
-            print(f"Erro HTTP na verificação de respawns: {e}")
+            logger.error(f"Erro HTTP na verificação de respawns: {e}")
     except Exception as e:
-        print(f"Erro na verificação de respawns: {e}")
-        traceback.print_exc()
+        logger.error(f"Erro na verificação de respawns: {e}", exc_info=True)
 
 async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict, 
                             user_notifications: Dict, table_message: discord.Message, 
@@ -354,8 +356,7 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
                     user_notifications, table_message, NOTIFICATION_CHANNEL_ID
                 )
         except Exception as e:
-            print(f"Erro na task de atualização de tabela: {e}")
-            traceback.print_exc()
+            logger.error(f"Erro na task de atualização de tabela: {e}", exc_info=True)
 
     @tasks.loop(minutes=1)
     async def check_boss_respawns_task():
@@ -374,28 +375,27 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     async def periodic_table_update():
         """Atualiza a tabela periodicamente com novo post"""
         try:
-            print("\nIniciando atualização periódica da tabela...")
+            logger.info("\nIniciando atualização periódica da tabela...")
             channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
             if channel:
-                print(f"Canal encontrado: {channel.name}")
+                logger.info(f"Canal encontrado: {channel.name}")
                 nonlocal table_message
                 table_message = None  # Força o envio de uma nova mensagem
                 table_message = await update_table(
                     bot, channel, boss_timers, user_stats, 
                     user_notifications, table_message, NOTIFICATION_CHANNEL_ID
                 )
-                print("✅ Tabela atualizada com sucesso!")
+                logger.info("✅ Tabela atualizada com sucesso!")
             else:
-                print(f"Canal com ID {NOTIFICATION_CHANNEL_ID} não encontrado!")
+                logger.info(f"Canal com ID {NOTIFICATION_CHANNEL_ID} não encontrado!")
             
             # Define um novo intervalo aleatório entre 30 e 60 minutos
             new_interval = random.randint(30, 60)
-            print(f"Próxima atualização em {new_interval} minutos")
+            logger.info(f"Próxima atualização em {new_interval} minutos")
             periodic_table_update.change_interval(minutes=new_interval)
         
         except Exception as e:
-            print(f"Erro na atualização periódica: {e}")
-            traceback.print_exc()
+            logger.error(f"Erro na atualização periódica: {e}", exc_info=True)
             # Tenta novamente em 5 minutos se falhar
             periodic_table_update.change_interval(minutes=5)
 
@@ -403,6 +403,28 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     check_boss_respawns_task.start()
     live_table_updater.start()
     periodic_table_update.start()
+
+    # Função para cancelar tasks
+    async def shutdown_tasks():
+        """Cancela todas as tasks do módulo"""
+        try:
+            check_boss_respawns_task.cancel()
+            live_table_updater.cancel()
+            periodic_table_update.cancel()
+            
+            # Aguarda as tasks serem realmente canceladas
+            await asyncio.gather(
+                check_boss_respawns_task,
+                live_table_updater,
+                periodic_table_update,
+                return_exceptions=True
+            )
+            logger.info("Todas as tasks foram canceladas com sucesso")
+        except Exception as e:
+            logger.error(f"Erro ao cancelar tasks: {e}", exc_info=True)
+
+    # Adiciona a função de shutdown ao bot para ser chamada no desligamento
+    bot.boss_commands_shutdown = shutdown_tasks
 
     # Retornar as funções necessárias para outros módulos
     return (

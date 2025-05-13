@@ -42,10 +42,10 @@ async def init_db():
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 boss_name VARCHAR(50) NOT NULL,
                 sala INT NOT NULL,
-                death_time DATETIME NOT NULL,
-                respawn_time DATETIME NOT NULL,
-                closed_time DATETIME NOT NULL,
-                recorded_by VARCHAR(50) NOT NULL,
+                death_time DATETIME,
+                respawn_time DATETIME,
+                closed_time DATETIME,
+                recorded_by VARCHAR(50),
                 opened_notified BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE KEY boss_sala (boss_name, sala)
@@ -101,8 +101,8 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             timers = await cursor.fetchall()
             
             for timer in timers:
-                boss_name = timer[0]  # Índice 0 para boss_name
-                sala = timer[1]       # Índice 1 para sala
+                boss_name = timer[0]
+                sala = timer[1]
                 
                 if boss_name in boss_timers and sala in boss_timers[boss_name]:
                     boss_timers[boss_name][sala] = {
@@ -324,9 +324,9 @@ async def create_backup() -> Optional[str]:
                 boss_timers_data.append({
                     'boss_name': row[1],
                     'sala': row[2],
-                    'death_time': row[3],
-                    'respawn_time': row[4],
-                    'closed_time': row[5],
+                    'death_time': row[3].isoformat() if row[3] else None,
+                    'respawn_time': row[4].isoformat() if row[4] else None,
+                    'closed_time': row[5].isoformat() if row[5] else None,
                     'recorded_by': row[6],
                     'opened_notified': bool(row[7])
                 })
@@ -339,7 +339,7 @@ async def create_backup() -> Optional[str]:
                     'user_id': row[0],
                     'username': row[1],
                     'count': row[2],
-                    'last_recorded': row[3]
+                    'last_recorded': row[3].isoformat() if row[3] else None
                 })
             
             # Backup das notificações personalizadas
@@ -360,7 +360,7 @@ async def create_backup() -> Optional[str]:
             }
             
             with open(backup_file, 'w', encoding='utf-8') as f:
-                json.dump(backup_data, f, indent=4, default=str)
+                json.dump(backup_data, f, indent=4)
                 
         logger.info(f"Backup criado com sucesso: {backup_file}")
         return backup_file
