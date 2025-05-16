@@ -228,10 +228,9 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             now = datetime.now(brazil_tz)
             death_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
             
-            # Ajusta para ontem se marcado como "foi ontem"
+            # Ajusta para ontem apenas se foi_ontem for True
             if foi_ontem:
                 death_time -= timedelta(days=1)
-            # Se o horário for no futuro (agendamento), não ajusta automaticamente para ontem
             
             # Se o horário de morte for no futuro (agendamento)
             if death_time > now:

@@ -66,7 +66,7 @@ async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord
             if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
                 continue
                 
-            if compact and timers['death_time'] is None:
+            if compact and timers['death_time'] is None and not timers.get('is_scheduled', False):
                 continue
                 
             death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
@@ -79,7 +79,8 @@ async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord
                 scheduled_time = timers.get('scheduled_death_time')
                 if scheduled_time:
                     time_left = format_time_remaining(scheduled_time)
-                    status = f"⏳ AGENDADO (abre em {time_left})"
+                    status = f"⏳ AGENDADO (morte em {time_left})"
+                    death_time = scheduled_time.strftime("%d/%m %H:%M")
             elif timers['respawn_time']:
                 if now >= timers['respawn_time']:
                     if timers['closed_time'] and now >= timers['closed_time']:
