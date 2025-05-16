@@ -41,18 +41,18 @@ def create_boss_embed(boss_timers, compact=False):
                 scheduled_time = timers.get('scheduled_death_time')
                 if scheduled_time:
                     time_left = format_time_remaining(scheduled_time)
-                    status = f"⏳ (Agendado - {time_left})"
+                    status = f"⏳ AGENDADO ({time_left})"
             elif timers['respawn_time']:
                 if now >= timers['respawn_time']:
                     if timers['closed_time'] and now >= timers['closed_time']:
-                        status = "❌"
+                        status = "❌ FECHADO"
                     else:
-                        status = "✅"
+                        status = "✅ ABERTO"
                 else:
                     time_left = format_time_remaining(timers['respawn_time'])
-                    status = f"🕒 ({time_left})"
+                    status = f"🕒 ABRE EM {time_left}"
             else:
-                status = "❌"
+                status = "❌ SEM REGISTRO"
             
             boss_info.append(
                 f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
@@ -137,15 +137,37 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 )
                 return
             
-            # Verifica se já existe um registro para este boss e sala
+            # Verifica o status atual do boss
             current_timer = self.boss_timers[boss_name][sala]
-            if current_timer['death_time'] is not None or current_timer.get('is_scheduled', False):
-                await interaction.response.send_message(
-                    f"⚠ Já existe um registro para {boss_name} (Sala {sala}).\n"
-                    f"Use o botão 'Limpar Boss' ou o comando /clearboss antes de registrar um novo.",
-                    ephemeral=True
-                )
-                return
+            now = datetime.now(brazil_tz)
+            
+            # Se já existe um registro e o boss ainda não fechou
+            if current_timer['respawn_time'] and current_timer['closed_time']:
+                if now < current_timer['closed_time']:
+                    status = "✅ ABERTO" if now >= current_timer['respawn_time'] else f"🕒 ABRE EM {format_time_remaining(current_timer['respawn_time'])}"
+                    
+                    await interaction.response.send_message(
+                        f"⚠ Já existe um registro para {boss_name} (Sala {sala}) - Status: {status}\n"
+                        f"- Morte: {current_timer['death_time'].strftime('%d/%m %H:%M') if current_timer['death_time'] else 'N/A'}\n"
+                        f"- Abre: {current_timer['respawn_time'].strftime('%d/%m %H:%M') if current_timer['respawn_time'] else 'N/A'}\n"
+                        f"- Fecha: {current_timer['closed_time'].strftime('%d/%m %H:%M') if current_timer['closed_time'] else 'N/A'}\n\n"
+                        f"Use o botão 'Limpar Boss' ou o comando `/clearboss {boss_name.split()[0].lower()} {sala}` antes de registrar um novo.",
+                        ephemeral=True
+                    )
+                    return
+            
+            # Se já existe um agendamento
+            if current_timer.get('is_scheduled', False):
+                scheduled_time = current_timer.get('scheduled_death_time')
+                if scheduled_time:
+                    time_left = format_time_remaining(scheduled_time)
+                    await interaction.response.send_message(
+                        f"⚠ Já existe um agendamento para {boss_name} (Sala {sala}) - Status: ⏳ AGENDADO (abre em {time_left})\n"
+                        f"- Morte programada para: {scheduled_time.strftime('%d/%m %H:%M')} BRT\n\n"
+                        f"Use o botão 'Limpar Boss' ou o comando `/clearboss {boss_name.split()[0].lower()} {sala}` antes de registrar um novo.",
+                        ephemeral=True
+                    )
+                    return
             
             try:
                 time_parts = parse_time_input(self.horario.value)
