@@ -27,6 +27,40 @@ async def connect_db():
         logger.error(f"Erro ao conectar ao banco de dados: {err}")
         return None
 
+async def update_db_structure():
+    """Atualiza a estrutura do banco de dados para versões mais recentes"""
+    conn = None
+    try:
+        conn = await connect_db()
+        if conn is None:
+            return False
+        
+        async with conn.cursor() as cursor:
+            # Verifica se as colunas já existem
+            await cursor.execute("""
+            SELECT COLUMN_NAME 
+            FROM INFORMATION_SCHEMA.COLUMNS 
+            WHERE TABLE_NAME = 'boss_timers' 
+            AND COLUMN_NAME IN ('is_scheduled', 'scheduled_death_time')
+            """)
+            existing_columns = {row[0] for row in await cursor.fetchall()}
+            
+            # Adiciona colunas que não existem
+            if 'is_scheduled' not in existing_columns:
+                await cursor.execute("ALTER TABLE boss_timers ADD COLUMN is_scheduled BOOLEAN DEFAULT FALSE")
+            
+            if 'scheduled_death_time' not in existing_columns:
+                await cursor.execute("ALTER TABLE boss_timers ADD COLUMN scheduled_death_time DATETIME")
+            
+            await conn.commit()
+        return True
+    except Exception as err:
+        logger.error(f"Erro ao atualizar estrutura do banco: {err}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            await conn.ensure_closed()
+
 async def init_db():
     """Inicializa a estrutura do banco de dados, criando tabelas se não existirem"""
     conn = None
@@ -76,7 +110,11 @@ async def init_db():
             """)
             
             await conn.commit()
-        logger.info("Estrutura do banco de dados verificada com sucesso")
+        
+        # Atualiza a estrutura para versões mais recentes
+        await update_db_structure()
+        
+        logger.info("Estrutura do banco de dados verificada e atualizada com sucesso")
         return True
     except Exception as err:
         logger.error(f"Erro ao inicializar banco de dados: {err}", exc_info=True)
