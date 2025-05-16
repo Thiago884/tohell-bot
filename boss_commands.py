@@ -79,18 +79,18 @@ async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord
                 scheduled_time = timers.get('scheduled_death_time')
                 if scheduled_time:
                     time_left = format_time_remaining(scheduled_time)
-                    status = f"⏳ (Agendado - {time_left})"
+                    status = f"⏳ AGENDADO (abre em {time_left})"
             elif timers['respawn_time']:
                 if now >= timers['respawn_time']:
                     if timers['closed_time'] and now >= timers['closed_time']:
-                        status = "❌"  # Boss fechado
+                        status = "❌ FECHADO"
                     else:
-                        status = "✅"  # Boss aberto
+                        status = "✅ ABERTO"
                 else:
                     time_left = format_time_remaining(timers['respawn_time'])
-                    status = f"🕒 ({time_left})"  # Boss agendado
+                    status = f"🕒 ABRE EM {time_left}"
             else:
-                status = "❌"  # Sem registro
+                status = "❌ SEM REGISTRO"
             
             boss_info.append(
                 f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
