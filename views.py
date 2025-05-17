@@ -117,6 +117,21 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 )
                 return
             
+            # Verificar se já existe um timer ativo para este boss/sala
+            sala = int(self.sala.value)
+            timers = self.boss_timers[boss_name][sala]
+            now = datetime.now(brazil_tz)
+            
+            if timers['respawn_time'] and timers['closed_time']:
+                if now < timers['closed_time']:  # Boss ainda não fechou
+                    await interaction.response.send_message(
+                        f"⚠ O boss **{boss_name} (Sala {sala})** já está anotado e ainda não fechou!\n"
+                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else f'🕒 Abre em {format_time_remaining(timers["respawn_time"])}'}\n"
+                        f"Para registrar um novo horário, primeiro use o botão 'Limpar Boss'",
+                        ephemeral=True
+                    )
+                    return
+            
             try:
                 sala = int(self.sala.value)
                 if sala not in self.boss_timers[boss_name].keys():
@@ -214,6 +229,191 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
             traceback.print_exc()
             await interaction.response.send_message(
                 "Ocorreu um erro ao processar sua anotação.",
+                ephemeral=True
+            )
+
+class AgendarBossModal(Modal, title="Agendar Boss Futuro"):
+    boss = discord.ui.TextInput(
+        label="Nome do Boss",
+        placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
+        required=True
+    )
+    
+    sala = discord.ui.TextInput(
+        label="Sala (1-8)",
+        placeholder="Digite um número de 1 a 8",
+        required=True,
+        max_length=1
+    )
+    
+    horario = discord.ui.TextInput(
+        label="Horário da morte (futuro)",
+        placeholder="Ex: 14:30 ou 14h30",
+        required=True,
+        max_length=5
+    )
+    
+    dias = discord.ui.TextInput(
+        label="Dias no futuro (0=hoje, 1=amanhã)",
+        placeholder="Digite o número de dias no futuro",
+        required=True,
+        max_length=2
+    )
+
+    def __init__(self, bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
+        super().__init__()
+        self.bot = bot
+        self.boss_timers = boss_timers
+        self.user_stats = user_stats
+        self.user_notifications = user_notifications
+        self.table_message = table_message
+        self.NOTIFICATION_CHANNEL_ID = NOTIFICATION_CHANNEL_ID
+        self.update_table_func = update_table_func
+        self.create_next_bosses_embed_func = create_next_bosses_embed_func
+        self.create_ranking_embed_func = create_ranking_embed_func
+        self.create_history_embed_func = create_history_embed_func
+        self.create_unrecorded_embed_func = create_unrecorded_embed_func
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            boss_name = get_boss_by_abbreviation(self.boss.value, self.boss_timers)
+            if boss_name is None:
+                await interaction.response.send_message(
+                    f"Boss inválido. Bosses disponíveis: {', '.join(self.boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
+                    ephemeral=True
+                )
+                return
+            
+            # Verificar se já existe um timer ativo para este boss/sala
+            sala = int(self.sala.value)
+            timers = self.boss_timers[boss_name][sala]
+            now = datetime.now(brazil_tz)
+            
+            if timers['respawn_time'] and timers['closed_time']:
+                if now < timers['closed_time']:  # Boss ainda não fechou
+                    await interaction.response.send_message(
+                        f"⚠ O boss **{boss_name} (Sala {sala})** já está anotado e ainda não fechou!\n"
+                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else f'🕒 Abre em {format_time_remaining(timers["respawn_time"])}'}\n"
+                        f"Para registrar um novo horário, primeiro use o botão 'Limpar Boss'",
+                        ephemeral=True
+                    )
+                    return
+            
+            try:
+                sala = int(self.sala.value)
+                if sala not in self.boss_timers[boss_name]:
+                    await interaction.response.send_message(
+                        f"Sala inválida. Salas disponíveis: {', '.join(map(str, self.boss_timers[boss_name].keys()))}",
+                        ephemeral=True
+                    )
+                    return
+            except ValueError:
+                await interaction.response.send_message(
+                    "Sala inválida. Digite um número entre 1 e 8.",
+                    ephemeral=True
+                )
+                return
+            
+            try:
+                time_parts = parse_time_input(self.horario.value)
+                if not time_parts:
+                    await interaction.response.send_message(
+                        "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
+                        ephemeral=True
+                    )
+                    return
+                
+                hour, minute = time_parts
+                
+                if not validate_time(hour, minute):
+                    await interaction.response.send_message(
+                        "Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.",
+                        ephemeral=True
+                    )
+                    return
+                
+                try:
+                    dias = int(self.dias.value)
+                    if dias < 0:
+                        await interaction.response.send_message(
+                            "Dias inválidos. Digite um número positivo (0 para hoje, 1 para amanhã).",
+                            ephemeral=True
+                        )
+                        return
+                except ValueError:
+                    await interaction.response.send_message(
+                        "Dias inválidos. Digite um número (0 para hoje, 1 para amanhã).",
+                        ephemeral=True
+                    )
+                    return
+                
+                now = datetime.now(brazil_tz)
+                death_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=dias)
+                
+                # Verificar se o horário já passou hoje
+                if dias == 0 and death_time < now:
+                    await interaction.response.send_message(
+                        "Horário já passou para hoje. Use dias=1 para agendar para amanhã ou um horário futuro.",
+                        ephemeral=True
+                    )
+                    return
+                
+                respawn_time = death_time + timedelta(hours=8)
+                recorded_by = f"{interaction.user.name} (Agendado)"
+                
+                self.boss_timers[boss_name][sala] = {
+                    'death_time': death_time,
+                    'respawn_time': respawn_time,
+                    'closed_time': respawn_time + timedelta(hours=4),
+                    'recorded_by': recorded_by,
+                    'opened_notified': False
+                }
+                
+                user_id = str(interaction.user.id)
+                if user_id not in self.user_stats:
+                    self.user_stats[user_id] = {'count': 0, 'last_recorded': None}
+                self.user_stats[user_id]['count'] += 1
+                self.user_stats[user_id]['last_recorded'] = now
+                
+                await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
+                await save_user_stats(user_id, interaction.user.name, self.user_stats[user_id]['count'], now)
+                
+                await interaction.response.send_message(
+                    f"⏳ **{boss_name} (Sala {sala})** agendado por {interaction.user.name}:\n"
+                    f"- Morte programada: {death_time.strftime('%d/%m %H:%M')} BRT\n"
+                    f"- Abrirá: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
+                    f"- Fechará: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
+                    ephemeral=False
+                )
+                
+                # Enviar a tabela atualizada
+                embed = create_boss_embed(self.boss_timers)
+                view = BossControlView(
+                    self.bot,
+                    self.boss_timers,
+                    self.user_stats,
+                    self.user_notifications,
+                    self.table_message,
+                    self.NOTIFICATION_CHANNEL_ID,
+                    self.update_table_func,
+                    self.create_next_bosses_embed_func,
+                    self.create_ranking_embed_func,
+                    self.create_history_embed_func,
+                    self.create_unrecorded_embed_func
+                )
+                await interaction.followup.send(embed=embed, view=view)
+                
+            except ValueError:
+                await interaction.response.send_message(
+                    "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            print(f"Erro no modal de agendamento: {str(e)}")
+            traceback.print_exc()
+            await interaction.response.send_message(
+                "Ocorreu um erro ao processar seu agendamento.",
                 ephemeral=True
             )
 
@@ -372,7 +572,7 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
                         )
                 else:
                     await interaction.response.send_message(
-                        f"ℹ Você já está sendo notificado para **{boss_name}**.",
+                        f"ℹ Você já está sendo notificado para **{boss_name}.",
                         ephemeral=True
                     )
             
@@ -381,7 +581,7 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
                     if await remove_user_notification(user_id, boss_name):
                         self.user_notifications[user_id].remove(boss_name)
                         await interaction.response.send_message(
-                            f"✅ Você NÃO será mais notificado para **{boss_name}**.",
+                            f"✅ Você NÃO será mais notificado para **{boss_name}.",
                             ephemeral=True
                         )
                     else:
@@ -391,7 +591,7 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
                         )
                 else:
                     await interaction.response.send_message(
-                        f"ℹ Você não tinha notificação ativa para **{boss_name}**.",
+                        f"ℹ Você não tinha notificação ativa para **{boss_name}.",
                         ephemeral=True
                     )
             else:
@@ -459,6 +659,47 @@ class BossControlView(View):
                 else:
                     await interaction.followup.send(
                         "Ocorreu um erro ao abrir o formulário.",
+                        ephemeral=True
+                    )
+            except Exception as e:
+                print(f"Erro ao enviar mensagem de erro: {e}")
+    
+    @discord.ui.button(label="Agendar Boss", style=discord.ButtonStyle.green, custom_id="boss_control:agendar", emoji="⏰")
+    async def schedule_boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            if interaction.channel.id != self.NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message("⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+                return
+
+            if not interaction.response.is_done():
+                modal = AgendarBossModal(
+                    self.bot,
+                    self.boss_timers,
+                    self.user_stats,
+                    self.user_notifications,
+                    self.table_message,
+                    self.NOTIFICATION_CHANNEL_ID,
+                    self.update_table_func,
+                    self.create_next_bosses_embed_func,
+                    self.create_ranking_embed_func,
+                    self.create_history_embed_func,
+                    self.create_unrecorded_embed_func
+                )
+                await interaction.response.send_modal(modal)
+            else:
+                await interaction.followup.send("Por favor, tente novamente.", ephemeral=True)
+        except Exception as e:
+            print(f"ERRO DETALHADO no botão de agendar: {str(e)}")
+            traceback.print_exc()
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao abrir o formulário de agendamento.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao abrir o formulário de agendamento.",
                         ephemeral=True
                     )
             except Exception as e:
