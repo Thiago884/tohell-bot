@@ -123,7 +123,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 if now < timers['closed_time']:  # Boss ainda não fechou
                     await interaction.response.send_message(
                         f"⚠ O boss **{boss_name} (Sala {sala})** já está anotado e ainda não fechou!\n"
-                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else f'🕒 Abre em {format_time_remaining(timers["respawn_time"])}'}\n"
+                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else '🕒 Abre em ' + format_time_remaining(timers['respawn_time'])}\n"
                         f"Para registrar um novo horário, primeiro use `/clearboss {boss_name} {sala}`",
                         ephemeral=True
                     )
@@ -255,7 +255,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 if now < timers['closed_time']:  # Boss ainda não fechou
                     await interaction.response.send_message(
                         f"⚠ O boss **{boss_name} (Sala {sala})** já está anotado e ainda não fechou!\n"
-                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else f'🕒 Abre em {format_time_remaining(timers["respawn_time"])}'}\n"
+                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else '🕒 Abre em ' + format_time_remaining(timers['respawn_time'])}\n"
                         f"Para registrar um novo horário, primeiro use `/clearboss {boss_name} {sala}`",
                         ephemeral=True
                     )
@@ -737,7 +737,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         await update_table_func(interaction.channel)
                     else:
                         await interaction.followup.send(
-                            f"❌ Falha ao restaurar backup **{backup_file}**!",
+                            f"❌ Falha ao restaurar backup **{backup_file}!",
                             ephemeral=True
                         )
                 

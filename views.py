@@ -1,122 +1,125 @@
-# slash_commands.py
+# views.py
 import discord
-from discord import app_commands
-from discord.ext import commands
+from discord.ui import Button, View, Modal, Select
+from discord import TextStyle
 from datetime import datetime, timedelta
 import pytz
-from typing import Optional, List
-import os
 import traceback
+import os
+import random
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time
-from database import save_timer, save_user_stats, clear_timer, add_user_notification, remove_user_notification, load_db_data
-from views import BossControlView
-from discord.app_commands import CommandAlreadyRegistered
+from database import save_timer, save_user_stats, clear_timer, add_user_notification, remove_user_notification, create_backup, restore_backup, load_db_data
 
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
-async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID,
-                             create_boss_embed_func, update_table_func, create_next_bosses_embed_func,
-                             create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
+def create_boss_embed(boss_timers, compact=False):
+    now = datetime.now(brazil_tz)
     
-    # Autocomplete para nomes de bosses
-    async def boss_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
-        bosses = list(boss_timers.keys())
-        return [
-            app_commands.Choice(name=boss, value=boss)
-            for boss in bosses if current.lower() in boss.lower()
-        ][:25]
-    
-    # Autocomplete para salas
-    async def sala_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[int]]:
-        salas = list(boss_timers[list(boss_timers.keys())[0]].keys())
-        return [
-            app_commands.Choice(name=f"Sala {sala}", value=sala)
-            for sala in salas if current in str(sala)
-        ][:25]
-    
-    # Comando para mostrar tabela completa de bosses
-    @bot.tree.command(name="bosses", description="Mostra a tabela completa de bosses com controles")
-    async def bosses_slash(interaction: discord.Interaction):
-        """Mostra a tabela completa de bosses via comando slash"""
-        try:
-            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                await interaction.response.send_message(
-                    "⚠ Comandos só são aceitos no canal designado!",
-                    ephemeral=True
-                )
-                return
-            
-            await interaction.response.defer()
-            
-            embed = await create_boss_embed_func()
-            view = BossControlView(
-                bot,
-                boss_timers,
-                user_stats,
-                user_notifications,
-                table_message,
-                NOTIFICATION_CHANNEL_ID,
-                update_table_func,
-                create_next_bosses_embed_func,
-                create_ranking_embed_func,
-                create_history_embed_func,
-                create_unrecorded_embed_func
-            )
-            
-            await interaction.followup.send(embed=embed, view=view)
-            
-        except Exception as e:
-            print(f"Erro no comando slash bosses: {e}")
-            traceback.print_exc()
-            await interaction.response.send_message(
-                "Ocorreu um erro ao exibir a tabela de bosses.",
-                ephemeral=True
-            )
-    
-    # Comando para registrar boss
-    @bot.tree.command(name="boss", description="Registra a morte de um boss")
-    @app_commands.autocomplete(boss_name=boss_autocomplete, sala=sala_autocomplete)
-    @app_commands.describe(
-        boss_name="Nome do boss",
-        sala="Número da sala (1-8)",
-        hora_morte="Horário da morte (formato HH:MM ou HHhMM)",
-        foi_ontem="Se a morte foi ontem (padrão: não)"
+    embed = discord.Embed(
+        title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
+        color=discord.Color.gold()
     )
-    async def boss_slash(
-        interaction: discord.Interaction,
-        boss_name: str,
-        sala: int,
-        hora_morte: str,
-        foi_ontem: bool = False
-    ):
-        """Registra a morte de um boss via comando slash"""
+    
+    for boss in boss_timers:
+        boss_info = []
+        for sala in boss_timers[boss]:
+            timers = boss_timers[boss][sala]
+            
+            if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
+                continue
+                
+            if compact and timers['death_time'] is None:
+                continue
+                
+            death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
+            respawn_time = timers['respawn_time'].strftime("%H:%M") if timers['respawn_time'] else "--:--"
+            closed_time = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
+            recorded_by = f" ({timers['recorded_by']})" if timers['recorded_by'] else ""
+            
+            status = ""
+            if timers['respawn_time']:
+                if now >= timers['respawn_time']:
+                    if timers['closed_time'] and now >= timers['closed_time']:
+                        status = "❌"
+                    else:
+                        status = "✅"
+                else:
+                    time_left = format_time_remaining(timers['respawn_time'])
+                    status = f"🕒 ({time_left})"
+            else:
+                status = "❌"
+            
+            boss_info.append(
+                f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
+            )
+        
+        if not boss_info and compact:
+            continue
+            
+        if boss_info:
+            embed.add_field(
+                name=f"**{boss}**",
+                value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
+                inline=False
+            )
+    
+    return embed
+
+class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
+    boss = discord.ui.TextInput(
+        label="Nome do Boss",
+        placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
+        required=True
+    )
+    
+    sala = discord.ui.TextInput(
+        label="Sala (1-8)",
+        placeholder="Digite um número de 1 a 8",
+        required=True,
+        max_length=1
+    )
+    
+    horario = discord.ui.TextInput(
+        label="Horário da morte",
+        placeholder="Ex: 14:30 ou 14h30",
+        required=True,
+        max_length=5
+    )
+    
+    foi_ontem = discord.ui.TextInput(
+        label="Foi ontem? (S/N)",
+        placeholder="Digite S para sim ou N para não",
+        required=False,
+        max_length=1
+    )
+
+    def __init__(self, bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
+        super().__init__()
+        self.bot = bot
+        self.boss_timers = boss_timers
+        self.user_stats = user_stats
+        self.user_notifications = user_notifications
+        self.table_message = table_message
+        self.NOTIFICATION_CHANNEL_ID = NOTIFICATION_CHANNEL_ID
+        self.update_table_func = update_table_func
+        self.create_next_bosses_embed_func = create_next_bosses_embed_func
+        self.create_ranking_embed_func = create_ranking_embed_func
+        self.create_history_embed_func = create_history_embed_func
+        self.create_unrecorded_embed_func = create_unrecorded_embed_func
+
+    async def on_submit(self, interaction: discord.Interaction):
         try:
-            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+            boss_name = get_boss_by_abbreviation(self.boss.value, self.boss_timers)
+            if boss_name is None:
                 await interaction.response.send_message(
-                    "⚠ Comandos só são aceitos no canal designado!",
-                    ephemeral=True
-                )
-                return
-            
-            full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
-            if full_boss_name is None:
-                await interaction.response.send_message(
-                    f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
-                    ephemeral=True
-                )
-                return
-            
-            boss_name = full_boss_name
-            
-            if sala not in boss_timers[boss_name]:
-                await interaction.response.send_message(
-                    f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
+                    f"Boss inválido. Bosses disponíveis: {', '.join(self.boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
                     ephemeral=True
                 )
                 return
             
             # Verificar se já existe um timer ativo para este boss/sala
-            timers = boss_timers[boss_name][sala]
+            sala = int(self.sala.value)
+            timers = self.boss_timers[boss_name][sala]
             now = datetime.now(brazil_tz)
             
             if timers['respawn_time'] and timers['closed_time']:
@@ -124,131 +127,166 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     await interaction.response.send_message(
                         f"⚠ O boss **{boss_name} (Sala {sala})** já está anotado e ainda não fechou!\n"
                         f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else '🕒 Abre em ' + format_time_remaining(timers['respawn_time'])}\n"
-                        f"Para registrar um novo horário, primeiro use `/clearboss {boss_name} {sala}`",
+                        f"Para registrar um novo horário, primeiro use o botão 'Limpar Boss'",
                         ephemeral=True
                     )
                     return
             
-            time_parts = parse_time_input(hora_morte)
-            if not time_parts:
+            try:
+                sala = int(self.sala.value)
+                if sala not in self.boss_timers[boss_name].keys():
+                    await interaction.response.send_message(
+                        f"Sala inválida. Salas disponíveis: {', '.join(map(str, self.boss_timers[boss_name].keys()))}",
+                        ephemeral=True
+                    )
+                    return
+            except ValueError:
+                await interaction.response.send_message(
+                    "Sala inválida. Digite um número entre 1 e 8.",
+                    ephemeral=True
+                )
+                return
+            
+            try:
+                time_parts = parse_time_input(self.horario.value)
+                if not time_parts:
+                    await interaction.response.send_message(
+                        "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
+                        ephemeral=True
+                    )
+                    return
+                
+                hour, minute = time_parts
+                
+                if not validate_time(hour, minute):
+                    await interaction.response.send_message(
+                        "Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.",
+                        ephemeral=True
+                    )
+                    return
+                
+                now = datetime.now(brazil_tz)
+                death_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                
+                if self.foi_ontem.value.lower() == 's':
+                    death_time -= timedelta(days=1)
+                elif death_time > now:
+                    death_time -= timedelta(days=1)
+                
+                respawn_time = death_time + timedelta(hours=8)
+                recorded_by = interaction.user.name
+                
+                self.boss_timers[boss_name][sala] = {
+                    'death_time': death_time,
+                    'respawn_time': respawn_time,
+                    'closed_time': respawn_time + timedelta(hours=4),
+                    'recorded_by': recorded_by,
+                    'opened_notified': False
+                }
+                
+                user_id = str(interaction.user.id)
+                if user_id not in self.user_stats:
+                    self.user_stats[user_id] = {'count': 0, 'last_recorded': None}
+                self.user_stats[user_id]['count'] += 1
+                self.user_stats[user_id]['last_recorded'] = now
+                
+                await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
+                await save_user_stats(user_id, interaction.user.name, self.user_stats[user_id]['count'], now)
+                
+                await interaction.response.send_message(
+                    f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
+                    f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
+                    f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
+                    f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
+                    ephemeral=False
+                )
+                
+                # Enviar a tabela atualizada
+                embed = create_boss_embed(self.boss_timers)
+                view = BossControlView(
+                    self.bot,
+                    self.boss_timers,
+                    self.user_stats,
+                    self.user_notifications,
+                    self.table_message,
+                    self.NOTIFICATION_CHANNEL_ID,
+                    self.update_table_func,
+                    self.create_next_bosses_embed_func,
+                    self.create_ranking_embed_func,
+                    self.create_history_embed_func,
+                    self.create_unrecorded_embed_func
+                )
+                await interaction.followup.send(embed=embed, view=view)
+                
+            except ValueError:
                 await interaction.response.send_message(
                     "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
                     ephemeral=True
                 )
-                return
-            
-            hour, minute = time_parts
-            
-            if not validate_time(hour, minute):
-                await interaction.response.send_message(
-                    "Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.",
-                    ephemeral=True
-                )
-                return
-            
-            now = datetime.now(brazil_tz)
-            death_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            
-            if foi_ontem or death_time > now:
-                death_time -= timedelta(days=1)
-            
-            respawn_time = death_time + timedelta(hours=8)
-            recorded_by = interaction.user.name
-            
-            boss_timers[boss_name][sala] = {
-                'death_time': death_time,
-                'respawn_time': respawn_time,
-                'closed_time': respawn_time + timedelta(hours=4),
-                'recorded_by': recorded_by,
-                'opened_notified': False
-            }
-            
-            user_id = str(interaction.user.id)
-            if user_id not in user_stats:
-                user_stats[user_id] = {'count': 0, 'last_recorded': None}
-            user_stats[user_id]['count'] += 1
-            user_stats[user_id]['last_recorded'] = now
-            
-            await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
-            await save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
-            
-            await interaction.response.send_message(
-                f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
-                f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
-                f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
-                f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
-                ephemeral=False
-            )
-            
-            # Atualiza a tabela
-            embed = await create_boss_embed_func()
-            view = BossControlView(
-                bot,
-                boss_timers,
-                user_stats,
-                user_notifications,
-                table_message,
-                NOTIFICATION_CHANNEL_ID,
-                update_table_func,
-                create_next_bosses_embed_func,
-                create_ranking_embed_func,
-                create_history_embed_func,
-                create_unrecorded_embed_func
-            )
-            await interaction.followup.send(embed=embed, view=view)
-            
+                
         except Exception as e:
-            print(f"Erro no comando slash boss: {e}")
+            print(f"Erro no modal de anotação: {str(e)}")
             traceback.print_exc()
             await interaction.response.send_message(
-                "Ocorreu um erro ao processar seu comando.",
+                "Ocorreu um erro ao processar sua anotação.",
                 ephemeral=True
             )
-    
-    # Comando para agendar boss futuro
-    @bot.tree.command(name="agendarboss", description="Agenda um boss para ser registrado automaticamente no futuro")
-    @app_commands.autocomplete(boss_name=boss_autocomplete, sala=sala_autocomplete)
-    @app_commands.describe(
-        boss_name="Nome do boss",
-        sala="Número da sala (1-8)",
-        hora_morte="Horário futuro da morte (formato HH:MM ou HHhMM)",
-        dia="Dias no futuro (0 para hoje, 1 para amanhã, etc.)"
+
+class AgendarBossModal(Modal, title="Agendar Boss Futuro"):
+    boss = discord.ui.TextInput(
+        label="Nome do Boss",
+        placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
+        required=True
     )
-    async def schedule_boss_slash(
-        interaction: discord.Interaction,
-        boss_name: str,
-        sala: int,
-        hora_morte: str,
-        dia: int = 0
-    ):
-        """Agenda um boss para registro futuro via comando slash"""
+    
+    sala = discord.ui.TextInput(
+        label="Sala (1-8)",
+        placeholder="Digite um número de 1 a 8",
+        required=True,
+        max_length=1
+    )
+    
+    horario = discord.ui.TextInput(
+        label="Horário da morte (futuro)",
+        placeholder="Ex: 14:30 ou 14h30",
+        required=True,
+        max_length=5
+    )
+    
+    dias = discord.ui.TextInput(
+        label="Dias no futuro (0=hoje, 1=amanhã)",
+        placeholder="Digite o número de dias no futuro",
+        required=True,
+        max_length=2
+    )
+
+    def __init__(self, bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
+        super().__init__()
+        self.bot = bot
+        self.boss_timers = boss_timers
+        self.user_stats = user_stats
+        self.user_notifications = user_notifications
+        self.table_message = table_message
+        self.NOTIFICATION_CHANNEL_ID = NOTIFICATION_CHANNEL_ID
+        self.update_table_func = update_table_func
+        self.create_next_bosses_embed_func = create_next_bosses_embed_func
+        self.create_ranking_embed_func = create_ranking_embed_func
+        self.create_history_embed_func = create_history_embed_func
+        self.create_unrecorded_embed_func = create_unrecorded_embed_func
+
+    async def on_submit(self, interaction: discord.Interaction):
         try:
-            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+            boss_name = get_boss_by_abbreviation(self.boss.value, self.boss_timers)
+            if boss_name is None:
                 await interaction.response.send_message(
-                    "⚠ Comandos só são aceitos no canal designado!",
-                    ephemeral=True
-                )
-                return
-            
-            full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
-            if full_boss_name is None:
-                await interaction.response.send_message(
-                    f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
-                    ephemeral=True
-                )
-                return
-            
-            boss_name = full_boss_name
-            
-            if sala not in boss_timers[boss_name]:
-                await interaction.response.send_message(
-                    f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
+                    f"Boss inválido. Bosses disponíveis: {', '.join(self.boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
                     ephemeral=True
                 )
                 return
             
             # Verificar se já existe um timer ativo para este boss/sala
-            timers = boss_timers[boss_name][sala]
+            sala = int(self.sala.value)
+            timers = self.boss_timers[boss_name][sala]
             now = datetime.now(brazil_tz)
             
             if timers['respawn_time'] and timers['closed_time']:
@@ -256,133 +294,170 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     await interaction.response.send_message(
                         f"⚠ O boss **{boss_name} (Sala {sala})** já está anotado e ainda não fechou!\n"
                         f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else '🕒 Abre em ' + format_time_remaining(timers['respawn_time'])}\n"
-                        f"Para registrar um novo horário, primeiro use `/clearboss {boss_name} {sala}`",
+                        f"Para registrar um novo horário, primeiro use o botão 'Limpar Boss'",
                         ephemeral=True
                     )
                     return
             
-            time_parts = parse_time_input(hora_morte)
-            if not time_parts:
+            try:
+                sala = int(self.sala.value)
+                if sala not in self.boss_timers[boss_name]:
+                    await interaction.response.send_message(
+                        f"Sala inválida. Salas disponíveis: {', '.join(map(str, self.boss_timers[boss_name].keys()))}",
+                        ephemeral=True
+                    )
+                    return
+            except ValueError:
+                await interaction.response.send_message(
+                    "Sala inválida. Digite um número entre 1 e 8.",
+                    ephemeral=True
+                )
+                return
+            
+            try:
+                time_parts = parse_time_input(self.horario.value)
+                if not time_parts:
+                    await interaction.response.send_message(
+                        "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
+                        ephemeral=True
+                    )
+                    return
+                
+                hour, minute = time_parts
+                
+                if not validate_time(hour, minute):
+                    await interaction.response.send_message(
+                        "Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.",
+                        ephemeral=True
+                    )
+                    return
+                
+                try:
+                    dias = int(self.dias.value)
+                    if dias < 0:
+                        await interaction.response.send_message(
+                            "Dias inválidos. Digite um número positivo (0 para hoje, 1 para amanhã).",
+                            ephemeral=True
+                        )
+                        return
+                except ValueError:
+                    await interaction.response.send_message(
+                        "Dias inválidos. Digite um número (0 para hoje, 1 para amanhã).",
+                        ephemeral=True
+                    )
+                    return
+                
+                now = datetime.now(brazil_tz)
+                death_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=dias)
+                
+                # Verificar se o horário já passou hoje
+                if dias == 0 and death_time < now:
+                    await interaction.response.send_message(
+                        "Horário já passou para hoje. Use dias=1 para agendar para amanhã ou um horário futuro.",
+                        ephemeral=True
+                    )
+                    return
+                
+                respawn_time = death_time + timedelta(hours=8)
+                recorded_by = f"{interaction.user.name} (Agendado)"
+                
+                self.boss_timers[boss_name][sala] = {
+                    'death_time': death_time,
+                    'respawn_time': respawn_time,
+                    'closed_time': respawn_time + timedelta(hours=4),
+                    'recorded_by': recorded_by,
+                    'opened_notified': False
+                }
+                
+                user_id = str(interaction.user.id)
+                if user_id not in self.user_stats:
+                    self.user_stats[user_id] = {'count': 0, 'last_recorded': None}
+                self.user_stats[user_id]['count'] += 1
+                self.user_stats[user_id]['last_recorded'] = now
+                
+                await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
+                await save_user_stats(user_id, interaction.user.name, self.user_stats[user_id]['count'], now)
+                
+                await interaction.response.send_message(
+                    f"⏳ **{boss_name} (Sala {sala})** agendado por {interaction.user.name}:\n"
+                    f"- Morte programada: {death_time.strftime('%d/%m %H:%M')} BRT\n"
+                    f"- Abrirá: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
+                    f"- Fechará: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
+                    ephemeral=False
+                )
+                
+                # Enviar a tabela atualizada
+                embed = create_boss_embed(self.boss_timers)
+                view = BossControlView(
+                    self.bot,
+                    self.boss_timers,
+                    self.user_stats,
+                    self.user_notifications,
+                    self.table_message,
+                    self.NOTIFICATION_CHANNEL_ID,
+                    self.update_table_func,
+                    self.create_next_bosses_embed_func,
+                    self.create_ranking_embed_func,
+                    self.create_history_embed_func,
+                    self.create_unrecorded_embed_func
+                )
+                await interaction.followup.send(embed=embed, view=view)
+                
+            except ValueError:
                 await interaction.response.send_message(
                     "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
                     ephemeral=True
                 )
-                return
-            
-            hour, minute = time_parts
-            
-            if not validate_time(hour, minute):
-                await interaction.response.send_message(
-                    "Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.",
-                    ephemeral=True
-                )
-                return
-            
-            if dia < 0:
-                await interaction.response.send_message(
-                    "Dia inválido. Use 0 para hoje ou um número positivo para dias no futuro.",
-                    ephemeral=True
-                )
-                return
-            
-            now = datetime.now(brazil_tz)
-            death_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0) + timedelta(days=dia)
-            
-            # Verificar se o horário já passou hoje
-            if dia == 0 and death_time < now:
-                await interaction.response.send_message(
-                    "Horário já passou para hoje. Use dia=1 para agendar para amanhã ou um horário futuro.",
-                    ephemeral=True
-                )
-                return
-            
-            respawn_time = death_time + timedelta(hours=8)
-            recorded_by = f"{interaction.user.name} (Agendado)"
-            
-            boss_timers[boss_name][sala] = {
-                'death_time': death_time,
-                'respawn_time': respawn_time,
-                'closed_time': respawn_time + timedelta(hours=4),
-                'recorded_by': recorded_by,
-                'opened_notified': False
-            }
-            
-            user_id = str(interaction.user.id)
-            if user_id not in user_stats:
-                user_stats[user_id] = {'count': 0, 'last_recorded': None}
-            user_stats[user_id]['count'] += 1
-            user_stats[user_id]['last_recorded'] = now
-            
-            await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
-            await save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
-            
-            await interaction.response.send_message(
-                f"⏳ **{boss_name} (Sala {sala})** agendado por {interaction.user.name}:\n"
-                f"- Morte programada: {death_time.strftime('%d/%m %H:%M')} BRT\n"
-                f"- Abrirá: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
-                f"- Fechará: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
-                ephemeral=False
-            )
-            
-            # Atualiza a tabela
-            embed = await create_boss_embed_func()
-            view = BossControlView(
-                bot,
-                boss_timers,
-                user_stats,
-                user_notifications,
-                table_message,
-                NOTIFICATION_CHANNEL_ID,
-                update_table_func,
-                create_next_bosses_embed_func,
-                create_ranking_embed_func,
-                create_history_embed_func,
-                create_unrecorded_embed_func
-            )
-            await interaction.followup.send(embed=embed, view=view)
-            
+                
         except Exception as e:
-            print(f"Erro no comando slash agendarboss: {e}")
+            print(f"Erro no modal de agendamento: {str(e)}")
             traceback.print_exc()
             await interaction.response.send_message(
-                "Ocorreu um erro ao processar seu comando.",
+                "Ocorreu um erro ao processar seu agendamento.",
                 ephemeral=True
             )
-    
-    # Comando para limpar boss
-    @bot.tree.command(name="clearboss", description="Limpa o timer de um boss")
-    @app_commands.autocomplete(boss_name=boss_autocomplete)
-    @app_commands.describe(
-        boss_name="Nome do boss",
-        sala="Número da sala (opcional, deixe em branco para limpar todas)"
+
+class LimparBossModal(Modal, title="Limpar Boss"):
+    boss = discord.ui.TextInput(
+        label="Nome do Boss",
+        placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
+        required=True
     )
-    async def clearboss_slash(
-        interaction: discord.Interaction,
-        boss_name: str,
-        sala: Optional[int] = None
-    ):
-        """Limpa o timer de um boss via comando slash"""
+    
+    sala = discord.ui.TextInput(
+        label="Sala (1-8) - Opcional",
+        placeholder="Deixe em branco para limpar todas",
+        required=False,
+        max_length=1
+    )
+
+    def __init__(self, bot, boss_timers, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
+        super().__init__()
+        self.bot = bot
+        self.boss_timers = boss_timers
+        self.table_message = table_message
+        self.NOTIFICATION_CHANNEL_ID = NOTIFICATION_CHANNEL_ID
+        self.update_table_func = update_table_func
+        self.create_next_bosses_embed_func = create_next_bosses_embed_func
+        self.create_ranking_embed_func = create_ranking_embed_func
+        self.create_history_embed_func = create_history_embed_func
+        self.create_unrecorded_embed_func = create_unrecorded_embed_func
+
+    async def on_submit(self, interaction: discord.Interaction):
         try:
-            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+            boss_name = get_boss_by_abbreviation(self.boss.value, self.boss_timers)
+            if boss_name is None:
                 await interaction.response.send_message(
-                    "⚠ Comandos só são aceitos no canal designado!",
+                    f"Boss inválido. Bosses disponíveis: {', '.join(self.boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
                     ephemeral=True
                 )
                 return
             
-            full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
-            if full_boss_name is None:
-                await interaction.response.send_message(
-                    f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
-                    ephemeral=True
-                )
-                return
+            sala = self.sala.value.strip()
             
-            boss_name = full_boss_name
-            
-            if sala is None:
-                for s in boss_timers[boss_name]:
-                    boss_timers[boss_name][s] = {
+            if not sala:
+                for s in self.boss_timers[boss_name]:
+                    self.boss_timers[boss_name][s] = {
                         'death_time': None,
                         'respawn_time': None,
                         'closed_time': None,
@@ -395,138 +470,97 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     ephemeral=True
                 )
             else:
-                if sala not in boss_timers[boss_name]:
+                try:
+                    sala = int(sala)
+                    if sala not in self.boss_timers[boss_name]:
+                        await interaction.response.send_message(
+                            f"Sala inválida. Salas disponíveis: {', '.join(map(str, self.boss_timers[boss_name].keys()))}",
+                            ephemeral=True
+                        )
+                        return
+                    
+                    self.boss_timers[boss_name][sala] = {
+                        'death_time': None,
+                        'respawn_time': None,
+                        'closed_time': None,
+                        'recorded_by': None,
+                        'opened_notified': False
+                    }
+                    await clear_timer(boss_name, sala)
                     await interaction.response.send_message(
-                        f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
+                        f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
+                        ephemeral=True
+                    )
+                except ValueError:
+                    await interaction.response.send_message(
+                        "Sala inválida. Digite um número entre 1 e 8 ou deixe em branco para limpar todas.",
                         ephemeral=True
                     )
                     return
-                
-                boss_timers[boss_name][sala] = {
-                    'death_time': None,
-                    'respawn_time': None,
-                    'closed_time': None,
-                    'recorded_by': None,
-                    'opened_notified': False
-                }
-                await clear_timer(boss_name, sala)
-                await interaction.response.send_message(
-                    f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
-                    ephemeral=True
-                )
             
-            # Atualiza a tabela
-            embed = await create_boss_embed_func()
+            # Enviar a tabela atualizada
+            embed = create_boss_embed(self.boss_timers)
             view = BossControlView(
-                bot,
-                boss_timers,
+                self.bot,
+                self.boss_timers,
                 {},  # user_stats não é usado na view
                 {},  # user_notifications não é usado na view
-                table_message,
-                NOTIFICATION_CHANNEL_ID,
-                update_table_func,
-                create_next_bosses_embed_func,
-                create_ranking_embed_func,
-                create_history_embed_func,
-                create_unrecorded_embed_func
+                self.table_message,
+                self.NOTIFICATION_CHANNEL_ID,
+                self.update_table_func,
+                self.create_next_bosses_embed_func,
+                self.create_ranking_embed_func,
+                self.create_history_embed_func,
+                self.create_unrecorded_embed_func
             )
             await interaction.followup.send(embed=embed, view=view)
             
         except Exception as e:
-            print(f"Erro no comando slash clearboss: {e}")
+            print(f"Erro no modal de limpar boss: {str(e)}")
             traceback.print_exc()
             await interaction.response.send_message(
-                "Ocorreu um erro ao processar seu comando.",
+                "Ocorreu um erro ao processar sua solicitação.",
                 ephemeral=True
             )
-    
-    # Comando para mostrar próximos bosses
-    @bot.tree.command(name="nextboss", description="Mostra os próximos bosses a abrir")
-    async def nextboss_slash(interaction: discord.Interaction):
-        """Mostra os próximos bosses via comando slash"""
-        try:
-            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                await interaction.response.send_message(
-                    "⚠ Comandos só são aceitos no canal designado!",
-                    ephemeral=True
-                )
-                return
-            
-            await interaction.response.defer()
-            embed = await create_next_bosses_embed_func()
-            await interaction.followup.send(embed=embed)
-            
-        except Exception as e:
-            print(f"Erro no comando slash nextboss: {e}")
-            traceback.print_exc()
-            await interaction.response.send_message(
-                "Ocorreu um erro ao buscar os próximos bosses.",
-                ephemeral=True
-            )
-    
-    # Comando para mostrar ranking
-    @bot.tree.command(name="ranking", description="Mostra ranking de anotações")
-    async def ranking_slash(interaction: discord.Interaction):
-        """Mostra ranking via comando slash"""
-        try:
-            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                await interaction.response.send_message(
-                    "⚠ Comandos só são aceitos no canal designado!",
-                    ephemeral=True
-                )
-                return
-            
-            await interaction.response.defer()
-            embed = await create_ranking_embed_func()
-            await interaction.followup.send(embed=embed)
-            
-        except Exception as e:
-            print(f"Erro no comando slash ranking: {e}")
-            traceback.print_exc()
-            await interaction.response.send_message(
-                "Ocorreu um erro ao gerar o ranking.",
-                ephemeral=True
-            )
-    
-    # Comando para gerenciar notificações
-    @bot.tree.command(name="notify", description="Gerencia notificações por DM")
-    @app_commands.autocomplete(boss_name=boss_autocomplete)
-    @app_commands.describe(
-        boss_name="Nome do boss",
-        action="Adicionar ou remover notificação (add/rem)"
+
+class NotificationModal(Modal, title="Gerenciar Notificações"):
+    boss = discord.ui.TextInput(
+        label="Nome do Boss",
+        placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
+        required=True
     )
-    async def notify_slash(
-        interaction: discord.Interaction,
-        boss_name: str,
-        action: str
-    ):
-        """Gerencia notificações via comando slash"""
+    
+    action = discord.ui.TextInput(
+        label="Ação (adicionar/remover)",
+        placeholder="Digite 'add' para adicionar ou 'rem' para remover",
+        required=True,
+        max_length=3
+    )
+
+    def __init__(self, boss_timers, user_notifications):
+        super().__init__()
+        self.boss_timers = boss_timers
+        self.user_notifications = user_notifications
+
+    async def on_submit(self, interaction: discord.Interaction):
         try:
-            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+            boss_name = get_boss_by_abbreviation(self.boss.value, self.boss_timers)
+            if boss_name is None:
                 await interaction.response.send_message(
-                    "⚠ Comandos só são aceitos no canal designado!",
+                    f"Boss inválido. Bosses disponíveis: {', '.join(self.boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
                     ephemeral=True
                 )
                 return
             
-            full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
-            if full_boss_name is None:
-                await interaction.response.send_message(
-                    f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
-                    ephemeral=True
-                )
-                return
-            
-            boss_name = full_boss_name
             user_id = str(interaction.user.id)
+            action = self.action.value.lower()
             
-            if action.lower() in ['add', 'adicionar', 'a']:
-                if user_id not in user_notifications:
-                    user_notifications[user_id] = []
-                
-                if boss_name not in user_notifications[user_id]:
+            if action in ['add', 'adicionar', 'a']:
+                if user_id not in self.user_notifications:
+                    self.user_notifications[user_id] = []
+                if boss_name not in self.user_notifications[user_id]:
                     if await add_user_notification(user_id, boss_name):
-                        user_notifications[user_id].append(boss_name)
+                        self.user_notifications[user_id].append(boss_name)
                         await interaction.response.send_message(
                             f"✅ Você será notificado quando **{boss_name}** estiver disponível!",
                             ephemeral=True
@@ -542,10 +576,10 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
             
-            elif action.lower() in ['rem', 'remover', 'r']:
-                if user_id in user_notifications and boss_name in user_notifications[user_id]:
+            elif action in ['rem', 'remover', 'r']:
+                if user_id in self.user_notifications and boss_name in self.user_notifications[user_id]:
                     if await remove_user_notification(user_id, boss_name):
-                        user_notifications[user_id].remove(boss_name)
+                        self.user_notifications[user_id].remove(boss_name)
                         await interaction.response.send_message(
                             f"✅ Você NÃO será mais notificado para **{boss_name}.",
                             ephemeral=True
@@ -565,127 +599,272 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     "Ação inválida. Use 'add' para adicionar ou 'rem' para remover.",
                     ephemeral=True
                 )
-                
+        
         except Exception as e:
-            print(f"Erro no comando slash notify: {e}")
+            print(f"Erro no modal de notificações: {str(e)}")
             traceback.print_exc()
             await interaction.response.send_message(
                 "Ocorreu um erro ao processar sua solicitação.",
                 ephemeral=True
             )
+
+class BossControlView(View):
+    def __init__(self, bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.boss_timers = boss_timers
+        self.user_stats = user_stats
+        self.user_notifications = user_notifications
+        self.table_message = table_message
+        self.NOTIFICATION_CHANNEL_ID = NOTIFICATION_CHANNEL_ID
+        self.update_table_func = update_table_func
+        self.create_next_bosses_embed_func = create_next_bosses_embed_func
+        self.create_ranking_embed_func = create_ranking_embed_func
+        self.create_history_embed_func = create_history_embed_func
+        self.create_unrecorded_embed_func = create_unrecorded_embed_func
     
-    # Comando para mostrar notificações do usuário
-    @bot.tree.command(name="mynotifications", description="Mostra suas notificações ativas")
-    async def mynotifications_slash(interaction: discord.Interaction):
-        """Mostra notificações do usuário via comando slash"""
+    @discord.ui.button(label="Anotar Horário", style=discord.ButtonStyle.green, custom_id="boss_control:anotar", emoji="📝")
+    async def boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                await interaction.response.send_message(
-                    "⚠ Comandos só são aceitos no canal designado!",
-                    ephemeral=True
-                )
+            if interaction.channel.id != self.NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message("⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
                 return
-            
-            user_id = str(interaction.user.id)
-            notifications = user_notifications.get(user_id, [])
-            
-            if not notifications:
-                await interaction.response.send_message(
-                    "Você não tem notificações ativas para nenhum boss.",
-                    ephemeral=True
+
+            if not interaction.response.is_done():
+                modal = AnotarBossModal(
+                    self.bot,
+                    self.boss_timers,
+                    self.user_stats,
+                    self.user_notifications,
+                    self.table_message,
+                    self.NOTIFICATION_CHANNEL_ID,
+                    self.update_table_func,
+                    self.create_next_bosses_embed_func,
+                    self.create_ranking_embed_func,
+                    self.create_history_embed_func,
+                    self.create_unrecorded_embed_func
                 )
+                await interaction.response.send_modal(modal)
             else:
-                await interaction.response.send_message(
-                    f"🔔 **Suas notificações ativas:**\n"
-                    + "\n".join(f"- {boss}" for boss in notifications)
-                    + "\n\nUse `/notify <boss> rem` para remover notificações.",
-                    ephemeral=True
-                )
-                
+                await interaction.followup.send("Por favor, tente novamente.", ephemeral=True)
         except Exception as e:
-            print(f"Erro no comando slash mynotifications: {e}")
+            print(f"ERRO DETALHADO no botão de anotar: {str(e)}")
             traceback.print_exc()
-            await interaction.response.send_message(
-                "Ocorreu um erro ao buscar suas notificações.",
-                ephemeral=True
-            )
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao abrir o formulário.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao abrir o formulário.",
+                        ephemeral=True
+                    )
+            except Exception as e:
+                print(f"Erro ao enviar mensagem de erro: {e}")
     
-    # Comando para mostrar histórico
-    @bot.tree.command(name="historico", description="Mostra histórico de anotações")
-    async def historico_slash(interaction: discord.Interaction):
-        """Mostra histórico via comando slash"""
+    @discord.ui.button(label="Agendar Boss", style=discord.ButtonStyle.green, custom_id="boss_control:agendar", emoji="⏰")
+    async def schedule_boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                await interaction.response.send_message(
-                    "⚠ Comandos só são aceitos no canal designado!",
+            if interaction.channel.id != self.NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message("⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+                return
+
+            if not interaction.response.is_done():
+                modal = AgendarBossModal(
+                    self.bot,
+                    self.boss_timers,
+                    self.user_stats,
+                    self.user_notifications,
+                    self.table_message,
+                    self.NOTIFICATION_CHANNEL_ID,
+                    self.update_table_func,
+                    self.create_next_bosses_embed_func,
+                    self.create_ranking_embed_func,
+                    self.create_history_embed_func,
+                    self.create_unrecorded_embed_func
+                )
+                await interaction.response.send_modal(modal)
+            else:
+                await interaction.followup.send("Por favor, tente novamente.", ephemeral=True)
+        except Exception as e:
+            print(f"ERRO DETALHADO no botão de agendar: {str(e)}")
+            traceback.print_exc()
+            try:
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao abrir o formulário de agendamento.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao abrir o formulário de agendamento.",
+                        ephemeral=True
+                    )
+            except Exception as e:
+                print(f"Erro ao enviar mensagem de erro: {e}")
+    
+    @discord.ui.button(label="Limpar Boss", style=discord.ButtonStyle.red, custom_id="boss_control:limpar", emoji="❌")
+    async def clear_boss_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            if interaction.channel.id != self.NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message("⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+                return
+
+            if not interaction.response.is_done():
+                modal = LimparBossModal(
+                    self.bot,
+                    self.boss_timers,
+                    self.table_message,
+                    self.NOTIFICATION_CHANNEL_ID,
+                    self.update_table_func,
+                    self.create_next_bosses_embed_func,
+                    self.create_ranking_embed_func,
+                    self.create_history_embed_func,
+                    self.create_unrecorded_embed_func
+                )
+                await interaction.response.send_modal(modal)
+            else:
+                await interaction.followup.send("Por favor, tente novamente.", ephemeral=True)
+        except Exception as e:
+            print(f"ERRO DETALHADO no botão de limpar: {str(e)}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send(
+                    "Ocorreu um erro ao processar sua solicitação.",
                     ephemeral=True
                 )
+            except:
+                pass
+    
+    @discord.ui.button(label="Próximos", style=discord.ButtonStyle.blurple, custom_id="boss_control:proximos", emoji="⏳")
+    async def next_bosses_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            if interaction.channel.id != self.NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message("⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
                 return
+
+            if not interaction.response.is_done():
+                await interaction.response.defer()
             
-            await interaction.response.defer()
-            embed = await create_history_embed_func()
+            embed = await self.create_next_bosses_embed_func(self.boss_timers)
             await interaction.followup.send(embed=embed)
-            
         except Exception as e:
-            print(f"Erro no comando slash historico: {e}")
+            print(f"ERRO DETALHADO no botão de próximos bosses: {str(e)}")
             traceback.print_exc()
-            await interaction.response.send_message(
-                "Ocorreu um erro ao buscar o histórico.",
-                ephemeral=True
-            )
+            try:
+                await interaction.followup.send("Ocorreu um erro ao buscar os próximos bosses.", ephemeral=True)
+            except:
+                pass
     
-    # Comando para mostrar bosses não anotados
-    @bot.tree.command(name="naoanotados", description="Mostra bosses que fecharam sem registro")
-    async def naoanotados_slash(interaction: discord.Interaction):
-        """Mostra bosses não anotados via comando slash"""
+    @discord.ui.button(label="Ranking", style=discord.ButtonStyle.blurple, custom_id="boss_control:ranking", emoji="🏆")
+    async def ranking_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                await interaction.response.send_message(
-                    "⚠ Comandos só são aceitos no canal designado!",
-                    ephemeral=True
-                )
+            if interaction.channel.id != self.NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message("⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
                 return
+
+            if not interaction.response.is_done():
+                await interaction.response.defer()
             
-            await interaction.response.defer()
-            embed = await create_unrecorded_embed_func()
+            embed = await self.create_ranking_embed_func()
             await interaction.followup.send(embed=embed)
-            
         except Exception as e:
-            print(f"Erro no comando slash naoanotados: {e}")
+            print(f"ERRO DETALHADO no botão de ranking: {str(e)}")
             traceback.print_exc()
-            await interaction.response.send_message(
-                "Ocorreu um erro ao buscar os bosses não anotados.",
-                ephemeral=True
-            )
+            try:
+                await interaction.followup.send("Ocorreu um erro ao gerar o ranking.", ephemeral=True)
+            except:
+                pass
     
-    # Comando para backup (apenas admins)
-    @bot.tree.command(name="backup", description="Gerencia backups do banco de dados (apenas admins)")
-    @app_commands.describe(
-        action="Ação (create/restore)"
-    )
-    @app_commands.choices(action=[
-        app_commands.Choice(name="create", value="create"),
-        app_commands.Choice(name="restore", value="restore")
-    ])
-    async def backup_slash(interaction: discord.Interaction, action: str):
-        """Gerencia backups via comando slash"""
+    @discord.ui.button(label="Notificações", style=discord.ButtonStyle.gray, custom_id="boss_control:notificacoes", emoji="🔔")
+    async def notifications_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
-            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                await interaction.response.send_message(
-                    "⚠ Comandos só são aceitos no canal designado!",
+            if interaction.channel.id != self.NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message("⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+                return
+
+            if not interaction.response.is_done():
+                modal = NotificationModal(self.boss_timers, self.user_notifications)
+                await interaction.response.send_modal(modal)
+            else:
+                await interaction.followup.send("Por favor, tente novamente.", ephemeral=True)
+        except Exception as e:
+            print(f"ERRO DETALHADO no botão de notificações: {str(e)}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send(
+                    "Ocorreu um erro ao processar sua solicitação.",
                     ephemeral=True
                 )
+            except:
+                pass
+    
+    @discord.ui.button(label="Histórico", style=discord.ButtonStyle.gray, custom_id="boss_control:historico", emoji="📜")
+    async def history_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            if interaction.channel.id != self.NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message("⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
                 return
+
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            
+            embed = await self.create_history_embed_func()
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            print(f"ERRO DETALHADO no botão de histórico: {str(e)}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send("Ocorreu um erro ao buscar o histórico.", ephemeral=True)
+            except:
+                pass
+    
+    @discord.ui.button(label="Não Anotados", style=discord.ButtonStyle.red, custom_id="boss_control:nao_anotados", emoji="❌")
+    async def unrecorded_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            if interaction.channel.id != self.NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message("⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+                return
+
+            if not interaction.response.is_done():
+                await interaction.response.defer()
+            
+            embed = await self.create_unrecorded_embed_func()
+            await interaction.followup.send(embed=embed)
+        except Exception as e:
+            print(f"ERRO DETALHADO no botão de não anotados: {str(e)}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send("Ocorreu um erro ao buscar os bosses não anotados.", ephemeral=True)
+            except:
+                pass
+    
+    @discord.ui.button(label="Backup", style=discord.ButtonStyle.gray, custom_id="boss_control:backup", emoji="💾")
+    async def backup_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            if interaction.channel.id != self.NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message("⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
+                return
+
+            if not interaction.response.is_done():
+                await interaction.response.defer(ephemeral=True)
+            else:
+                await interaction.followup.send("Processando backup...", ephemeral=True)
             
             if not interaction.user.guild_permissions.administrator:
-                await interaction.response.send_message(
-                    "❌ Apenas administradores podem usar este comando.",
-                    ephemeral=True
-                )
+                await interaction.followup.send("❌ Apenas administradores podem usar esta função.", ephemeral=True)
                 return
             
-            if action == "create":
-                await interaction.response.defer(ephemeral=True)
+            view = discord.ui.View(timeout=60)
+            
+            backup_button = discord.ui.Button(label="Criar Backup", style=discord.ButtonStyle.green)
+            restore_button = discord.ui.Button(label="Restaurar Backup", style=discord.ButtonStyle.red)
+            
+            async def backup_callback(interaction: discord.Interaction):
+                if not interaction.response.is_done():
+                    await interaction.response.defer(ephemeral=True)
                 backup_file = await create_backup()
                 if backup_file:
                     try:
@@ -706,160 +885,67 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
             
-            elif action == "restore":
-                await interaction.response.defer(ephemeral=True)
+            async def restore_callback(interaction: discord.Interaction):
+                if not interaction.response.is_done():
+                    await interaction.response.defer(ephemeral=True)
+                
                 backup_files = [f for f in os.listdir() if f.startswith('backup_') and f.endswith('.json')]
                 if not backup_files:
-                    await interaction.followup.send(
-                        "Nenhum arquivo de backup encontrado.",
-                        ephemeral=True
-                    )
+                    await interaction.followup.send("Nenhum arquivo de backup encontrado.", ephemeral=True)
                     return
                 
-                view = discord.ui.View(timeout=120)
+                select_view = discord.ui.View(timeout=120)
                 select = discord.ui.Select(
                     placeholder="Selecione um backup para restaurar",
                     options=[discord.SelectOption(label=f) for f in backup_files]
                 )
                 
                 async def restore_selected(interaction: discord.Interaction):
-                    await interaction.response.defer(ephemeral=True)
+                    if not interaction.response.is_done():
+                        await interaction.response.defer(ephemeral=True)
                     backup_file = select.values[0]
                     
                     if await restore_backup(backup_file):
-                        await load_db_data(boss_timers, user_stats, user_notifications)
+                        await load_db_data(self.boss_timers, self.user_stats, self.user_notifications)
                         
                         await interaction.followup.send(
                             f"✅ Backup **{backup_file}** restaurado com sucesso!",
                             ephemeral=True
                         )
                         
-                        await update_table_func(interaction.channel)
+                        await self.update_table_func(interaction.channel)
                     else:
                         await interaction.followup.send(
-                            f"❌ Falha ao restaurar backup **{backup_file}!",
+                            f"❌ Falha ao restaurar backup **{backup_file}**!",
                             ephemeral=True
                         )
                 
                 select.callback = restore_selected
-                view.add_item(select)
+                select_view.add_item(select)
                 
                 await interaction.followup.send(
                     "Selecione o backup para restaurar:",
-                    view=view,
+                    view=select_view,
                     ephemeral=True
                 )
             
-            else:
-                await interaction.response.send_message(
-                    "Ação inválida. Use 'create' ou 'restore'",
-                    ephemeral=True
-                )
-                
-        except Exception as e:
-            print(f"Erro no comando slash backup: {e}")
-            traceback.print_exc()
-            await interaction.response.send_message(
-                "Ocorreu um erro ao processar o backup.",
+            backup_button.callback = backup_callback
+            restore_button.callback = restore_callback
+            view.add_item(backup_button)
+            view.add_item(restore_button)
+            
+            await interaction.followup.send(
+                "Selecione uma opção de backup:",
+                view=view,
                 ephemeral=True
             )
-    
-    # Comando de ajuda
-    @bot.tree.command(name="bosshelp", description="Mostra ajuda com todos os comandos disponíveis")
-    async def bosshelp_slash(interaction: discord.Interaction):
-        """Mostra ajuda via comando slash"""
-        try:
-            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                await interaction.response.send_message(
-                    "⚠ Comandos só são aceitos no canal designado!",
+        except Exception as e:
+            print(f"ERRO DETALHADO no botão de backup: {str(e)}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send(
+                    "Ocorreu um erro ao processar sua solicitação.",
                     ephemeral=True
                 )
-                return
-
-            embed = discord.Embed(
-                title="📚 Ajuda do Boss Timer",
-                description=f"Todos os comandos devem ser usados neste canal (ID: {NOTIFICATION_CHANNEL_ID})",
-                color=discord.Color.green()
-            )
-            
-            embed.add_field(
-                name="/bosses",
-                value="Mostra a tabela completa de bosses com todos os controles",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="/boss <nome> <sala> <hora_morte> [foi_ontem]",
-                value="Registra a morte de um boss no horário especificado\nExemplo: `/boss Hydra 8 14:30`\nBosses disponíveis: " + ", ".join(boss_timers.keys()),
-                inline=False
-            )
-            
-            embed.add_field(
-                name="/agendarboss <nome> <sala> <hora_morte> [dia]",
-                value="Agenda um boss para ser registrado automaticamente no futuro\nExemplo: `/agendarboss Hydra 8 14:30 1` (para amanhã)",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="/clearboss <nome> [sala]",
-                value="Reseta o timer de um boss (opcional: especifique a sala, senão limpa todas)",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="/nextboss",
-                value="Mostra os próximos bosses que vão abrir e os que já estão abertos",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="/ranking",
-                value="Mostra o ranking de quem mais anotou bosses (com medalhas para o Top 3)",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="/notify <boss> <add/rem>",
-                value="Ativa/desativa notificação por DM quando o boss abrir\nEx: `/notify Hydra add`",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="/mynotifications",
-                value="Mostra seus bosses marcados para notificação",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="/historico",
-                value="Mostra as últimas 10 anotações de bosses",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="/naoanotados",
-                value="Mostra os últimos bosses que fecharam sem registro",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="/backup <create|restore>",
-                value="Cria ou restaura um backup dos dados (apenas admins)",
-                inline=False
-            )
-            
-            embed.add_field(
-                name="Salas disponíveis",
-                value=", ".join(map(str, boss_timers.get(list(boss_timers.keys())[0], {}).keys())),
-                inline=False
-            )
-            
-            await interaction.response.send_message(embed=embed)
-            
-        except Exception as e:
-            print(f"Erro no comando slash bosshelp: {e}")
-            traceback.print_exc()
-            await interaction.response.send_message(
-                "Ocorreu um erro ao exibir a ajuda.",
-                ephemeral=True
-            )
+            except:
+                pass
