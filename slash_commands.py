@@ -73,7 +73,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 ephemeral=True
             )
     
-    # Comando para registrar boss
+    # Comando para registrar boss (COM CORREÇÃO)
     @bot.tree.command(name="boss", description="Registra a morte de um boss")
     @app_commands.autocomplete(boss_name=boss_autocomplete, sala=sala_autocomplete)
     @app_commands.describe(
@@ -115,19 +115,18 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 )
                 return
             
-            # Verificar se já existe um timer ativo para este boss/sala
+            # Verificação corrigida - só impede se o boss estiver agendado (ainda não abriu)
             timers = boss_timers[boss_name][sala]
             now = datetime.now(brazil_tz)
             
-            if timers['respawn_time'] and timers['closed_time']:
-                if now < timers['closed_time']:  # Boss ainda não fechou
-                    await interaction.response.send_message(
-                        f"⚠ O boss **{boss_name} (Sala {sala})** já está anotado e ainda não fechou!\n"
-                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else '🕒 Abre em ' + format_time_remaining(timers['respawn_time'])}\n"
-                        f"Para registrar um novo horário, primeiro use `/clearboss {boss_name} {sala}`",
-                        ephemeral=True
-                    )
-                    return
+            if timers['respawn_time'] and now < timers['respawn_time']:  # Boss agendado e ainda não abriu
+                await interaction.response.send_message(
+                    f"⚠ O boss **{boss_name} (Sala {sala})** já está agendado e ainda não abriu!\n"
+                    f"Status atual: 🕒 Abre em {format_time_remaining(timers['respawn_time'])}\n"
+                    f"Para registrar um novo horário, primeiro use `/clearboss {boss_name} {sala}`",
+                    ephemeral=True
+                )
+                return
             
             time_parts = parse_time_input(hora_morte)
             if not time_parts:
@@ -205,7 +204,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 ephemeral=True
             )
     
-    # Comando para agendar boss futuro
+    # Comando para agendar boss futuro (COM CORREÇÃO)
     @bot.tree.command(name="agendarboss", description="Agenda um boss para ser registrado automaticamente no futuro")
     @app_commands.autocomplete(boss_name=boss_autocomplete, sala=sala_autocomplete)
     @app_commands.describe(
@@ -247,19 +246,18 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 )
                 return
             
-            # Verificar se já existe um timer ativo para este boss/sala
+            # Verificação corrigida - só impede se o boss estiver agendado (ainda não abriu)
             timers = boss_timers[boss_name][sala]
             now = datetime.now(brazil_tz)
             
-            if timers['respawn_time'] and timers['closed_time']:
-                if now < timers['closed_time']:  # Boss ainda não fechou
-                    await interaction.response.send_message(
-                        f"⚠ O boss **{boss_name} (Sala {sala})** já está anotado e ainda não fechou!\n"
-                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else '🕒 Abre em ' + format_time_remaining(timers['respawn_time'])}\n"
-                        f"Para registrar um novo horário, primeiro use `/clearboss {boss_name} {sala}`",
-                        ephemeral=True
-                    )
-                    return
+            if timers['respawn_time'] and now < timers['respawn_time']:  # Boss agendado e ainda não abriu
+                await interaction.response.send_message(
+                    f"⚠ O boss **{boss_name} (Sala {sala})** já está agendado e ainda não abriu!\n"
+                    f"Status atual: 🕒 Abre em {format_time_remaining(timers['respawn_time'])}\n"
+                    f"Para registrar um novo horário, primeiro use `/clearboss {boss_name} {sala}`",
+                    ephemeral=True
+                )
+                return
             
             time_parts = parse_time_input(hora_morte)
             if not time_parts:
@@ -349,7 +347,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 ephemeral=True
             )
     
-    # Comando para limpar boss
+    # Comando para limpar boss (mantido original)
     @bot.tree.command(name="clearboss", description="Limpa o timer de um boss")
     @app_commands.autocomplete(boss_name=boss_autocomplete)
     @app_commands.describe(
@@ -440,7 +438,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 ephemeral=True
             )
     
-    # Comando para mostrar próximos bosses
+    # Comando para mostrar próximos bosses (mantido original)
     @bot.tree.command(name="nextboss", description="Mostra os próximos bosses a abrir")
     async def nextboss_slash(interaction: discord.Interaction):
         """Mostra os próximos bosses via comando slash"""
@@ -464,7 +462,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 ephemeral=True
             )
     
-    # Comando para mostrar ranking
+    # Comando para mostrar ranking (mantido original)
     @bot.tree.command(name="ranking", description="Mostra ranking de anotações")
     async def ranking_slash(interaction: discord.Interaction):
         """Mostra ranking via comando slash"""
@@ -488,7 +486,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 ephemeral=True
             )
     
-    # Comando para gerenciar notificações
+    # Comando para gerenciar notificações (mantido original)
     @bot.tree.command(name="notify", description="Gerencia notificações por DM")
     @app_commands.autocomplete(boss_name=boss_autocomplete)
     @app_commands.describe(
@@ -574,7 +572,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 ephemeral=True
             )
     
-    # Comando para mostrar notificações do usuário
+    # Comando para mostrar notificações do usuário (mantido original)
     @bot.tree.command(name="mynotifications", description="Mostra suas notificações ativas")
     async def mynotifications_slash(interaction: discord.Interaction):
         """Mostra notificações do usuário via comando slash"""
@@ -610,7 +608,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 ephemeral=True
             )
     
-    # Comando para mostrar histórico
+    # Comando para mostrar histórico (mantido original)
     @bot.tree.command(name="historico", description="Mostra histórico de anotações")
     async def historico_slash(interaction: discord.Interaction):
         """Mostra histórico via comando slash"""
@@ -634,7 +632,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 ephemeral=True
             )
     
-    # Comando para mostrar bosses não anotados
+    # Comando para mostrar bosses não anotados (mantido original)
     @bot.tree.command(name="naoanotados", description="Mostra bosses que fecharam sem registro")
     async def naoanotados_slash(interaction: discord.Interaction):
         """Mostra bosses não anotados via comando slash"""
@@ -658,7 +656,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 ephemeral=True
             )
     
-    # Comando para backup (apenas admins)
+    # Comando para backup (apenas admins) (mantido original)
     @bot.tree.command(name="backup", description="Gerencia backups do banco de dados (apenas admins)")
     @app_commands.describe(
         action="Ação (create/restore)"
@@ -764,7 +762,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 ephemeral=True
             )
     
-    # Comando de ajuda
+    # Comando de ajuda (mantido original)
     @bot.tree.command(name="bosshelp", description="Mostra ajuda com todos os comandos disponíveis")
     async def bosshelp_slash(interaction: discord.Interaction):
         """Mostra ajuda via comando slash"""

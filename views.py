@@ -117,20 +117,19 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 )
                 return
             
-            # Verificar se já existe um timer ativo para este boss/sala
+            # Verificação corrigida - só impede se o boss estiver agendado (ainda não abriu)
             sala = int(self.sala.value)
             timers = self.boss_timers[boss_name][sala]
             now = datetime.now(brazil_tz)
             
-            if timers['respawn_time'] and timers['closed_time']:
-                if now < timers['closed_time']:  # Boss ainda não fechou
-                    await interaction.response.send_message(
-                        f"⚠ O boss **{boss_name} (Sala {sala})** já está anotado e ainda não fechou!\n"
-                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else '🕒 Abre em ' + format_time_remaining(timers['respawn_time'])}\n"
-                        f"Para registrar um novo horário, primeiro use o botão 'Limpar Boss'",
-                        ephemeral=True
-                    )
-                    return
+            if timers['respawn_time'] and now < timers['respawn_time']:  # Boss agendado e ainda não abriu
+                await interaction.response.send_message(
+                    f"⚠ O boss **{boss_name} (Sala {sala})** já está agendado e ainda não abriu!\n"
+                    f"Status atual: 🕒 Abre em {format_time_remaining(timers['respawn_time'])}\n"
+                    f"Para registrar um novo horário, primeiro use o botão 'Limpar Boss'",
+                    ephemeral=True
+                )
+                return
             
             try:
                 sala = int(self.sala.value)
@@ -284,20 +283,19 @@ class AgendarBossModal(Modal, title="Agendar Boss Futuro"):
                 )
                 return
             
-            # Verificar se já existe um timer ativo para este boss/sala
+            # Verificação corrigida - só impede se o boss estiver agendado (ainda não abriu)
             sala = int(self.sala.value)
             timers = self.boss_timers[boss_name][sala]
             now = datetime.now(brazil_tz)
             
-            if timers['respawn_time'] and timers['closed_time']:
-                if now < timers['closed_time']:  # Boss ainda não fechou
-                    await interaction.response.send_message(
-                        f"⚠ O boss **{boss_name} (Sala {sala})** já está anotado e ainda não fechou!\n"
-                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else '🕒 Abre em ' + format_time_remaining(timers['respawn_time'])}\n"
-                        f"Para registrar um novo horário, primeiro use o botão 'Limpar Boss'",
-                        ephemeral=True
-                    )
-                    return
+            if timers['respawn_time'] and now < timers['respawn_time']:  # Boss agendado e ainda não abriu
+                await interaction.response.send_message(
+                    f"⚠ O boss **{boss_name} (Sala {sala})** já está agendado e ainda não abriu!\n"
+                    f"Status atual: 🕒 Abre em {format_time_remaining(timers['respawn_time'])}\n"
+                    f"Para registrar um novo horário, primeiro use o botão 'Limpar Boss'",
+                    ephemeral=True
+                )
+                return
             
             try:
                 sala = int(self.sala.value)
