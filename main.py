@@ -70,9 +70,7 @@ boss_timers = {boss: {sala: {
     'respawn_time': None,
     'closed_time': None,
     'recorded_by': None,
-    'opened_notified': False,
-    'is_scheduled': False,
-    'scheduled_death_time': None
+    'opened_notified': False
 } for sala in SALAS} for boss in BOSSES}
 
 user_stats = defaultdict(lambda: {

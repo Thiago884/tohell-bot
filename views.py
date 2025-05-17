@@ -37,22 +37,17 @@ def create_boss_embed(boss_timers, compact=False):
             recorded_by = f" ({timers['recorded_by']})" if timers['recorded_by'] else ""
             
             status = ""
-            if timers.get('is_scheduled', False):
-                scheduled_time = timers.get('scheduled_death_time')
-                if scheduled_time:
-                    time_left = format_time_remaining(scheduled_time)
-                    status = f"⏳ AGENDADO ({time_left})"
-            elif timers['respawn_time']:
+            if timers['respawn_time']:
                 if now >= timers['respawn_time']:
                     if timers['closed_time'] and now >= timers['closed_time']:
-                        status = "❌ FECHADO"
+                        status = "❌"
                     else:
-                        status = "✅ ABERTO"
+                        status = "✅"
                 else:
                     time_left = format_time_remaining(timers['respawn_time'])
-                    status = f"🕒 ABRE EM {time_left}"
+                    status = f"🕒 ({time_left})"
             else:
-                status = "❌ SEM REGISTRO"
+                status = "❌"
             
             boss_info.append(
                 f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
@@ -137,38 +132,6 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 )
                 return
             
-            # Verifica o status atual do boss
-            current_timer = self.boss_timers[boss_name][sala]
-            now = datetime.now(brazil_tz)
-            
-            # Se já existe um registro e o boss ainda não fechou
-            if current_timer['respawn_time'] and current_timer['closed_time']:
-                if now < current_timer['closed_time']:
-                    status = "✅ ABERTO" if now >= current_timer['respawn_time'] else f"🕒 ABRE EM {format_time_remaining(current_timer['respawn_time'])}"
-                    
-                    await interaction.response.send_message(
-                        f"⚠ Já existe um registro para {boss_name} (Sala {sala}) - Status: {status}\n"
-                        f"- Morte: {current_timer['death_time'].strftime('%d/%m %H:%M') if current_timer['death_time'] else 'N/A'}\n"
-                        f"- Abre: {current_timer['respawn_time'].strftime('%d/%m %H:%M') if current_timer['respawn_time'] else 'N/A'}\n"
-                        f"- Fecha: {current_timer['closed_time'].strftime('%d/%m %H:%M') if current_timer['closed_time'] else 'N/A'}\n\n"
-                        f"Use o botão 'Limpar Boss' ou o comando `/clearboss {boss_name.split()[0].lower()} {sala}` antes de registrar um novo.",
-                        ephemeral=True
-                    )
-                    return
-            
-            # Se já existe um agendamento
-            if current_timer.get('is_scheduled', False):
-                scheduled_time = current_timer.get('scheduled_death_time')
-                if scheduled_time:
-                    time_left = format_time_remaining(scheduled_time)
-                    await interaction.response.send_message(
-                        f"⚠ Já existe um agendamento para {boss_name} (Sala {sala}) - Status: ⏳ AGENDADO (abre em {time_left})\n"
-                        f"- Morte programada para: {scheduled_time.strftime('%d/%m %H:%M')} BRT\n\n"
-                        f"Use o botão 'Limpar Boss' ou o comando `/clearboss {boss_name.split()[0].lower()} {sala}` antes de registrar um novo.",
-                        ephemeral=True
-                    )
-                    return
-            
             try:
                 time_parts = parse_time_input(self.horario.value)
                 if not time_parts:
@@ -195,41 +158,15 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 elif death_time > now:
                     death_time -= timedelta(days=1)
                 
-                # Se o horário de morte for no futuro (agendamento)
-                if death_time > now:
-                    respawn_time = None
-                    closed_time = None
-                    is_scheduled = True
-                    scheduled_death_time = death_time
-                    death_time = None  # Ainda não morreu
-                    
-                    message = (
-                        f"⏳ **{boss_name} (Sala {sala})** agendado por {interaction.user.name}:\n"
-                        f"- Morte programada para: {scheduled_death_time.strftime('%d/%m %H:%M')} BRT\n"
-                        f"- O respawn será calculado quando o boss morrer no horário agendado."
-                    )
-                else:
-                    # Registro normal (boss já morreu)
-                    respawn_time = death_time + timedelta(hours=8)
-                    closed_time = respawn_time + timedelta(hours=4)
-                    is_scheduled = False
-                    scheduled_death_time = None
-                    
-                    message = (
-                        f"✅ **{boss_name} (Sala {sala})** registrado por {interaction.user.name}:\n"
-                        f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
-                        f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
-                        f"- Fecha: {closed_time.strftime('%d/%m %H:%M')} BRT"
-                    )
+                respawn_time = death_time + timedelta(hours=8)
+                recorded_by = interaction.user.name
                 
                 self.boss_timers[boss_name][sala] = {
                     'death_time': death_time,
                     'respawn_time': respawn_time,
-                    'closed_time': closed_time,
-                    'recorded_by': interaction.user.name,
-                    'opened_notified': False,
-                    'is_scheduled': is_scheduled,
-                    'scheduled_death_time': scheduled_death_time
+                    'closed_time': respawn_time + timedelta(hours=4),
+                    'recorded_by': recorded_by,
+                    'opened_notified': False
                 }
                 
                 user_id = str(interaction.user.id)
@@ -238,15 +175,14 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 self.user_stats[user_id]['count'] += 1
                 self.user_stats[user_id]['last_recorded'] = now
                 
-                await save_timer(
-                    boss_name, sala, 
-                    death_time, respawn_time, closed_time, 
-                    interaction.user.name, False, is_scheduled, scheduled_death_time
-                )
+                await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
                 await save_user_stats(user_id, interaction.user.name, self.user_stats[user_id]['count'], now)
                 
                 await interaction.response.send_message(
-                    message,
+                    f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
+                    f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
+                    f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
+                    f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
                     ephemeral=False
                 )
                 
@@ -326,9 +262,7 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                         'respawn_time': None,
                         'closed_time': None,
                         'recorded_by': None,
-                        'opened_notified': False,
-                        'is_scheduled': False,
-                        'scheduled_death_time': None
+                        'opened_notified': False
                     }
                 await clear_timer(boss_name)
                 await interaction.response.send_message(
@@ -350,9 +284,7 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                         'respawn_time': None,
                         'closed_time': None,
                         'recorded_by': None,
-                        'opened_notified': False,
-                        'is_scheduled': False,
-                        'scheduled_death_time': None
+                        'opened_notified': False
                     }
                     await clear_timer(boss_name, sala)
                     await interaction.response.send_message(
@@ -440,7 +372,7 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
                         )
                 else:
                     await interaction.response.send_message(
-                        f"ℹ Você já está sendo notificado para **{boss_name}.",
+                        f"ℹ Você já está sendo notificado para **{boss_name}**.",
                         ephemeral=True
                     )
             
@@ -449,7 +381,7 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
                     if await remove_user_notification(user_id, boss_name):
                         self.user_notifications[user_id].remove(boss_name)
                         await interaction.response.send_message(
-                            f"✅ Você NÃO será mais notificado para **{boss_name}.",
+                            f"✅ Você NÃO será mais notificado para **{boss_name}**.",
                             ephemeral=True
                         )
                     else:
@@ -459,7 +391,7 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
                         )
                 else:
                     await interaction.response.send_message(
-                        f"ℹ Você não tinha notificação ativa para **{boss_name}.",
+                        f"ℹ Você não tinha notificação ativa para **{boss_name}**.",
                         ephemeral=True
                     )
             else:

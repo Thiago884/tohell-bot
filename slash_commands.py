@@ -7,7 +7,6 @@ import pytz
 from typing import Optional, List
 import os
 import traceback
-import asyncio
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time
 from database import save_timer, save_user_stats, clear_timer, add_user_notification, remove_user_notification, load_db_data
 from views import BossControlView
@@ -35,66 +34,6 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             for sala in salas if current in str(sala)
         ][:25]
     
-    async def check_scheduled_boss(boss_name: str, sala: int, scheduled_time: datetime, recorded_by: str):
-        """Verifica um boss agendado e registra quando chegar a hora"""
-        try:
-            now = datetime.now(brazil_tz)
-            wait_time = (scheduled_time - now).total_seconds()
-            
-            if wait_time > 0:
-                await asyncio.sleep(wait_time)
-            
-            # Verifica se o agendamento ainda existe
-            if boss_name not in boss_timers or sala not in boss_timers[boss_name]:
-                return
-                
-            timer = boss_timers[boss_name][sala]
-            if not timer.get('is_scheduled', False) or timer.get('scheduled_death_time') != scheduled_time:
-                return
-            
-            # Registra a morte agora que chegou o horário
-            death_time = scheduled_time
-            respawn_time = death_time + timedelta(hours=8)
-            
-            boss_timers[boss_name][sala] = {
-                'death_time': death_time,
-                'respawn_time': respawn_time,
-                'closed_time': respawn_time + timedelta(hours=4),
-                'recorded_by': recorded_by,
-                'opened_notified': False,
-                'is_scheduled': False
-            }
-            
-            # Atualiza estatísticas
-            user_id = next((uid for uid, stats in user_stats.items() if stats.get('username') == recorded_by), None)
-            if user_id:
-                user_stats[user_id]['count'] += 1
-                user_stats[user_id]['last_recorded'] = datetime.now(brazil_tz)
-                await save_user_stats(user_id, recorded_by, user_stats[user_id]['count'], user_stats[user_id]['last_recorded'])
-            
-            await save_timer(
-                boss_name, sala, 
-                death_time, respawn_time, 
-                respawn_time + timedelta(hours=4), 
-                recorded_by
-            )
-            
-            # Notifica no canal
-            channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
-            if channel:
-                await channel.send(
-                    f"⏰ **{boss_name} (Sala {sala})** morreu no horário agendado por {recorded_by}!\n"
-                    f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
-                    f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT"
-                )
-            
-            # Atualiza a tabela
-            await update_table_func(channel)
-            
-        except Exception as e:
-            print(f"Erro ao verificar boss agendado: {e}")
-            traceback.print_exc()
-
     # Comando para mostrar tabela completa de bosses
     @bot.tree.command(name="bosses", description="Mostra a tabela completa de bosses com controles")
     async def bosses_slash(interaction: discord.Interaction):
@@ -176,38 +115,6 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 )
                 return
             
-            # Verifica o status atual do boss
-            current_timer = boss_timers[boss_name][sala]
-            now = datetime.now(brazil_tz)
-            
-            # Se já existe um registro e o boss ainda não fechou
-            if current_timer['respawn_time'] and current_timer['closed_time']:
-                if now < current_timer['closed_time']:
-                    status = "✅ ABERTO" if now >= current_timer['respawn_time'] else f"🕒 ABRE EM {format_time_remaining(current_timer['respawn_time'])}"
-                    
-                    await interaction.response.send_message(
-                        f"⚠ Já existe um registro ativo para {boss_name} (Sala {sala}) - Status: {status}\n"
-                        f"- Morte: {current_timer['death_time'].strftime('%d/%m %H:%M') if current_timer['death_time'] else 'N/A'}\n"
-                        f"- Abre: {current_timer['respawn_time'].strftime('%d/%m %H:%M') if current_timer['respawn_time'] else 'N/A'}\n"
-                        f"- Fecha: {current_timer['closed_time'].strftime('%d/%m %H:%M') if current_timer['closed_time'] else 'N/A'}\n\n"
-                        f"Use `/clearboss {boss_name.split()[0].lower()} {sala}` antes de registrar um novo.",
-                        ephemeral=True
-                    )
-                    return
-            
-            # Se já existe um agendamento
-            if current_timer.get('is_scheduled', False):
-                scheduled_time = current_timer.get('scheduled_death_time')
-                if scheduled_time:
-                    time_left = format_time_remaining(scheduled_time)
-                    await interaction.response.send_message(
-                        f"⚠ Já existe um agendamento para {boss_name} (Sala {sala}) - Status: ⏳ AGENDADO (abre em {time_left})\n"
-                        f"- Morte programada para: {scheduled_time.strftime('%d/%m %H:%M')} BRT\n\n"
-                        f"Use `/clearboss {boss_name.split()[0].lower()} {sala}` antes de registrar um novo.",
-                        ephemeral=True
-                    )
-                    return
-            
             time_parts = parse_time_input(hora_morte)
             if not time_parts:
                 await interaction.response.send_message(
@@ -228,79 +135,36 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             now = datetime.now(brazil_tz)
             death_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
             
-            # Ajusta para ontem apenas se foi_ontem for True
-            if foi_ontem:
+            if foi_ontem or death_time > now:
                 death_time -= timedelta(days=1)
             
-            # Se o horário de morte for no futuro (agendamento)
-            if death_time > now:
-                # Marca como agendado
-                boss_timers[boss_name][sala] = {
-                    'death_time': None,
-                    'respawn_time': None,
-                    'scheduled_death_time': death_time,
-                    'closed_time': None,
-                    'recorded_by': interaction.user.name,
-                    'opened_notified': False,
-                    'is_scheduled': True
-                }
-                
-                await save_timer(
-                    boss_name, sala, 
-                    None, None, None, 
-                    interaction.user.name, 
-                    False,
-                    True,
-                    death_time
-                )
-                
-                await interaction.response.send_message(
-                    f"⏳ **{boss_name} (Sala {sala})** agendado por {interaction.user.name}:\n"
-                    f"- Morte programada para: {death_time.strftime('%d/%m %H:%M')} BRT\n"
-                    f"- O respawn será calculado quando o boss morrer no horário agendado.",
-                    ephemeral=False
-                )
-                
-                # Cria task para verificar o agendamento
-                asyncio.create_task(check_scheduled_boss(
-                    boss_name, sala, death_time, interaction.user.name
-                ))
-                
-            else:
-                # Registro normal (boss já morreu)
-                respawn_time = death_time + timedelta(hours=8)
-                recorded_by = interaction.user.name
-                
-                boss_timers[boss_name][sala] = {
-                    'death_time': death_time,
-                    'respawn_time': respawn_time,
-                    'closed_time': respawn_time + timedelta(hours=4),
-                    'recorded_by': recorded_by,
-                    'opened_notified': False,
-                    'is_scheduled': False
-                }
-                
-                user_id = str(interaction.user.id)
-                if user_id not in user_stats:
-                    user_stats[user_id] = {'count': 0, 'last_recorded': None}
-                user_stats[user_id]['count'] += 1
-                user_stats[user_id]['last_recorded'] = now
-                
-                await save_timer(
-                    boss_name, sala, 
-                    death_time, respawn_time, 
-                    respawn_time + timedelta(hours=4), 
-                    recorded_by
-                )
-                await save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
-                
-                await interaction.response.send_message(
-                    f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
-                    f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
-                    f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
-                    f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
-                    ephemeral=False
-                )
+            respawn_time = death_time + timedelta(hours=8)
+            recorded_by = interaction.user.name
+            
+            boss_timers[boss_name][sala] = {
+                'death_time': death_time,
+                'respawn_time': respawn_time,
+                'closed_time': respawn_time + timedelta(hours=4),
+                'recorded_by': recorded_by,
+                'opened_notified': False
+            }
+            
+            user_id = str(interaction.user.id)
+            if user_id not in user_stats:
+                user_stats[user_id] = {'count': 0, 'last_recorded': None}
+            user_stats[user_id]['count'] += 1
+            user_stats[user_id]['last_recorded'] = now
+            
+            await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
+            await save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
+            
+            await interaction.response.send_message(
+                f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
+                f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
+                f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
+                f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
+                ephemeral=False
+            )
             
             # Atualiza a tabela
             embed = await create_boss_embed_func()
@@ -365,9 +229,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         'respawn_time': None,
                         'closed_time': None,
                         'recorded_by': None,
-                        'opened_notified': False,
-                        'is_scheduled': False,
-                        'scheduled_death_time': None
+                        'opened_notified': False
                     }
                 await clear_timer(boss_name)
                 await interaction.response.send_message(
@@ -387,9 +249,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     'respawn_time': None,
                     'closed_time': None,
                     'recorded_by': None,
-                    'opened_notified': False,
-                    'is_scheduled': False,
-                    'scheduled_death_time': None
+                    'opened_notified': False
                 }
                 await clear_timer(boss_name, sala)
                 await interaction.response.send_message(
@@ -719,7 +579,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         await update_table_func(interaction.channel)
                     else:
                         await interaction.followup.send(
-                            f"❌ Falha ao restaurar backup **{backup_file}!",
+                            f"❌ Falha ao restaurar backup **{backup_file}**!",
                             ephemeral=True
                         )
                 

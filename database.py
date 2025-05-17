@@ -1,4 +1,3 @@
-# database.py
 import asyncmy
 import pytz
 from datetime import datetime, timedelta
@@ -27,40 +26,6 @@ async def connect_db():
         logger.error(f"Erro ao conectar ao banco de dados: {err}")
         return None
 
-async def update_db_structure():
-    """Atualiza a estrutura do banco de dados para versões mais recentes"""
-    conn = None
-    try:
-        conn = await connect_db()
-        if conn is None:
-            return False
-        
-        async with conn.cursor() as cursor:
-            # Verifica se as colunas já existem
-            await cursor.execute("""
-            SELECT COLUMN_NAME 
-            FROM INFORMATION_SCHEMA.COLUMNS 
-            WHERE TABLE_NAME = 'boss_timers' 
-            AND COLUMN_NAME IN ('is_scheduled', 'scheduled_death_time')
-            """)
-            existing_columns = {row[0] for row in await cursor.fetchall()}
-            
-            # Adiciona colunas que não existem
-            if 'is_scheduled' not in existing_columns:
-                await cursor.execute("ALTER TABLE boss_timers ADD COLUMN is_scheduled BOOLEAN DEFAULT FALSE")
-            
-            if 'scheduled_death_time' not in existing_columns:
-                await cursor.execute("ALTER TABLE boss_timers ADD COLUMN scheduled_death_time DATETIME")
-            
-            await conn.commit()
-        return True
-    except Exception as err:
-        logger.error(f"Erro ao atualizar estrutura do banco: {err}", exc_info=True)
-        return False
-    finally:
-        if conn:
-            await conn.ensure_closed()
-
 async def init_db():
     """Inicializa a estrutura do banco de dados, criando tabelas se não existirem"""
     conn = None
@@ -71,7 +36,7 @@ async def init_db():
             return False
         
         async with conn.cursor() as cursor:
-            # Tabela de timers de boss (atualizada com novos campos)
+            # Tabela de timers de boss
             await cursor.execute("""
             CREATE TABLE IF NOT EXISTS boss_timers (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -82,8 +47,6 @@ async def init_db():
                 closed_time DATETIME,
                 recorded_by VARCHAR(50),
                 opened_notified BOOLEAN DEFAULT FALSE,
-                is_scheduled BOOLEAN DEFAULT FALSE,
-                scheduled_death_time DATETIME,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE KEY boss_sala (boss_name, sala)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -110,11 +73,7 @@ async def init_db():
             """)
             
             await conn.commit()
-        
-        # Atualiza a estrutura para versões mais recentes
-        await update_db_structure()
-        
-        logger.info("Estrutura do banco de dados verificada e atualizada com sucesso")
+        logger.info("Estrutura do banco de dados verificada com sucesso")
         return True
     except Exception as err:
         logger.error(f"Erro ao inicializar banco de dados: {err}", exc_info=True)
@@ -133,10 +92,9 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             return False
         
         async with conn.cursor() as cursor:
-            # Carregar timers de boss (incluindo novos campos)
+            # Carregar timers de boss
             await cursor.execute("""
-                SELECT boss_name, sala, death_time, respawn_time, closed_time, 
-                       recorded_by, opened_notified, is_scheduled, scheduled_death_time 
+                SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
                 FROM boss_timers
                 ORDER BY boss_name, sala
             """)
@@ -152,9 +110,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                         'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
                         'closed_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
                         'recorded_by': timer[5],
-                        'opened_notified': bool(timer[6]),
-                        'is_scheduled': bool(timer[7]),
-                        'scheduled_death_time': timer[8].replace(tzinfo=brazil_tz) if timer[8] else None
+                        'opened_notified': bool(timer[6])
                     }
             
             # Carregar estatísticas de usuários
@@ -197,18 +153,10 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
         if conn:
             await conn.ensure_closed()
 
-async def save_timer(
-    boss_name: str, 
-    sala: int, 
-    death_time: Optional[datetime], 
-    respawn_time: Optional[datetime], 
-    closed_time: Optional[datetime], 
-    recorded_by: str, 
-    opened_notified: bool = False,
-    is_scheduled: bool = False,
-    scheduled_death_time: Optional[datetime] = None
-) -> bool:
-    """Salva ou atualiza um timer de boss no banco de dados (atualizada com novos campos)"""
+async def save_timer(boss_name: str, sala: int, death_time: Optional[datetime], 
+                    respawn_time: Optional[datetime], closed_time: Optional[datetime], 
+                    recorded_by: str, opened_notified: bool = False) -> bool:
+    """Salva ou atualiza um timer de boss no banco de dados"""
     conn = None
     try:
         conn = await connect_db()
@@ -217,23 +165,15 @@ async def save_timer(
         
         async with conn.cursor() as cursor:
             await cursor.execute("""
-            INSERT INTO boss_timers (
-                boss_name, sala, death_time, respawn_time, closed_time, 
-                recorded_by, opened_notified, is_scheduled, scheduled_death_time
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO boss_timers (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 death_time = VALUES(death_time),
                 respawn_time = VALUES(respawn_time),
                 closed_time = VALUES(closed_time),
                 recorded_by = VALUES(recorded_by),
-                opened_notified = VALUES(opened_notified),
-                is_scheduled = VALUES(is_scheduled),
-                scheduled_death_time = VALUES(scheduled_death_time)
-            """, (
-                boss_name, sala, death_time, respawn_time, closed_time, 
-                recorded_by, opened_notified, is_scheduled, scheduled_death_time
-            ))
+                opened_notified = VALUES(opened_notified)
+            """, (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified))
             
             await conn.commit()
         return True
@@ -281,15 +221,9 @@ async def clear_timer(boss_name: str, sala: Optional[int] = None) -> bool:
         
         async with conn.cursor() as cursor:
             if sala is None:
-                await cursor.execute("""
-                DELETE FROM boss_timers 
-                WHERE boss_name = %s
-                """, (boss_name,))
+                await cursor.execute("DELETE FROM boss_timers WHERE boss_name = %s", (boss_name,))
             else:
-                await cursor.execute("""
-                DELETE FROM boss_timers 
-                WHERE boss_name = %s AND sala = %s
-                """, (boss_name, sala))
+                await cursor.execute("DELETE FROM boss_timers WHERE boss_name = %s AND sala = %s", (boss_name, sala))
             
             await conn.commit()
         return True
@@ -383,31 +317,22 @@ async def create_backup() -> Optional[str]:
             return None
             
         async with conn.cursor() as cursor:
-            # Backup dos timers de boss (incluindo novos campos)
-            await cursor.execute("""
-            SELECT boss_name, sala, death_time, respawn_time, closed_time, 
-                   recorded_by, opened_notified, is_scheduled, scheduled_death_time 
-            FROM boss_timers
-            """)
+            # Backup dos timers de boss
+            await cursor.execute("SELECT * FROM boss_timers")
             boss_timers_data = []
             for row in await cursor.fetchall():
                 boss_timers_data.append({
-                    'boss_name': row[0],
-                    'sala': row[1],
-                    'death_time': row[2].isoformat() if row[2] else None,
-                    'respawn_time': row[3].isoformat() if row[3] else None,
-                    'closed_time': row[4].isoformat() if row[4] else None,
-                    'recorded_by': row[5],
-                    'opened_notified': bool(row[6]),
-                    'is_scheduled': bool(row[7]),
-                    'scheduled_death_time': row[8].isoformat() if row[8] else None
+                    'boss_name': row[1],
+                    'sala': row[2],
+                    'death_time': row[3].isoformat() if row[3] else None,
+                    'respawn_time': row[4].isoformat() if row[4] else None,
+                    'closed_time': row[5].isoformat() if row[5] else None,
+                    'recorded_by': row[6],
+                    'opened_notified': bool(row[7])
                 })
             
             # Backup das estatísticas de usuários
-            await cursor.execute("""
-            SELECT user_id, username, count, last_recorded 
-            FROM user_stats
-            """)
+            await cursor.execute("SELECT * FROM user_stats")
             user_stats_data = []
             for row in await cursor.fetchall():
                 user_stats_data.append({
@@ -418,10 +343,7 @@ async def create_backup() -> Optional[str]:
                 })
             
             # Backup das notificações personalizadas
-            await cursor.execute("""
-            SELECT user_id, boss_name 
-            FROM user_notifications
-            """)
+            await cursor.execute("SELECT * FROM user_notifications")
             user_notifications_data = []
             for row in await cursor.fetchall():
                 user_notifications_data.append({
@@ -434,7 +356,7 @@ async def create_backup() -> Optional[str]:
                 'user_stats': user_stats_data,
                 'user_notifications': user_notifications_data,
                 'timestamp': timestamp,
-                'version': 1.1  # Atualizado para refletir a nova estrutura
+                'version': 1.0
             }
             
             with open(backup_file, 'w', encoding='utf-8') as f:
@@ -467,14 +389,11 @@ async def restore_backup(backup_file: str) -> bool:
             await cursor.execute("DELETE FROM user_stats")
             await cursor.execute("DELETE FROM user_notifications")
             
-            # Restaurar timers de boss (compatível com versão antiga e nova)
+            # Restaurar timers de boss
             for timer in backup_data['boss_timers']:
                 await cursor.execute("""
-                INSERT INTO boss_timers (
-                    boss_name, sala, death_time, respawn_time, closed_time, 
-                    recorded_by, opened_notified, is_scheduled, scheduled_death_time
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO boss_timers (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """, (
                     timer['boss_name'],
                     timer['sala'],
@@ -482,9 +401,7 @@ async def restore_backup(backup_file: str) -> bool:
                     timer['respawn_time'],
                     timer['closed_time'],
                     timer['recorded_by'],
-                    timer.get('opened_notified', False),
-                    timer.get('is_scheduled', False),
-                    timer.get('scheduled_death_time')
+                    timer['opened_notified']
                 ))
             
             # Restaurar estatísticas de usuários

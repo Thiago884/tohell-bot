@@ -66,7 +66,7 @@ async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord
             if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
                 continue
                 
-            if compact and timers['death_time'] is None and not timers.get('is_scheduled', False):
+            if compact and timers['death_time'] is None:
                 continue
                 
             death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
@@ -75,23 +75,17 @@ async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord
             recorded_by = f" ({timers['recorded_by']})" if timers['recorded_by'] else ""
             
             status = ""
-            if timers.get('is_scheduled', False):
-                scheduled_time = timers.get('scheduled_death_time')
-                if scheduled_time:
-                    time_left = format_time_remaining(scheduled_time)
-                    status = f"⏳ AGENDADO (morte em {time_left})"
-                    death_time = scheduled_time.strftime("%d/%m %H:%M")
-            elif timers['respawn_time']:
+            if timers['respawn_time']:
                 if now >= timers['respawn_time']:
                     if timers['closed_time'] and now >= timers['closed_time']:
-                        status = "❌ FECHADO"
+                        status = "❌"  # Boss fechado
                     else:
-                        status = "✅ ABERTO"
+                        status = "✅"  # Boss aberto
                 else:
                     time_left = format_time_remaining(timers['respawn_time'])
-                    status = f"🕒 ABRE EM {time_left}"
+                    status = f"🕒 ({time_left})"  # Boss agendado
             else:
-                status = "❌ SEM REGISTRO"
+                status = "❌"  # Sem registro
             
             boss_info.append(
                 f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
@@ -227,45 +221,10 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
         logger.error(f"❌ Erro crítico na atualização da tabela: {e}", exc_info=True)
         return table_message
 
-async def check_scheduled_bosses(bot, boss_timers: Dict):
-    """Verifica bosses agendados e registra quando chegar a hora"""
-    now = datetime.now(brazil_tz)
-    
-    for boss in list(boss_timers.keys()):
-        for sala in list(boss_timers[boss].keys()):
-            timer = boss_timers[boss][sala]
-            
-            if timer.get('is_scheduled', False) and timer.get('scheduled_death_time'):
-                if now >= timer['scheduled_death_time']:
-                    # Registra a morte agora que chegou o horário
-                    death_time = timer['scheduled_death_time']
-                    respawn_time = death_time + timedelta(hours=8)
-                    recorded_by = timer['recorded_by']
-                    
-                    boss_timers[boss][sala] = {
-                        'death_time': death_time,
-                        'respawn_time': respawn_time,
-                        'closed_time': respawn_time + timedelta(hours=4),
-                        'recorded_by': recorded_by,
-                        'opened_notified': False,
-                        'is_scheduled': False,
-                        'scheduled_death_time': None
-                    }
-                    
-                    await save_timer(
-                        boss, sala, 
-                        death_time, respawn_time, 
-                        respawn_time + timedelta(hours=4), 
-                        recorded_by
-                    )
-
 async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict, 
                              NOTIFICATION_CHANNEL_ID: int, update_table_func):
     """Verifica os respawns de boss e envia notificações"""
     try:
-        # Primeiro verifica bosses agendados
-        await check_scheduled_bosses(bot, boss_timers)
-        
         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
         if channel is None:
             logger.error(f"Canal com ID {NOTIFICATION_CHANNEL_ID} não encontrado!")
