@@ -126,7 +126,7 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 if now < timers['closed_time']:  # Boss ainda não fechou
                     await interaction.response.send_message(
                         f"⚠ O boss **{boss_name} (Sala {sala})** já está anotado e ainda não fechou!\n"
-                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else f'🕒 Abre em {format_time_remaining(timers['respawn_time'])}'}\n"
+                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else '🕒 Abre em ' + format_time_remaining(timers['respawn_time'])}\n"
                         f"Para registrar um novo horário, primeiro use o botão 'Limpar Boss'",
                         ephemeral=True
                     )
@@ -293,7 +293,7 @@ class AgendarBossModal(Modal, title="Agendar Boss Futuro"):
                 if now < timers['closed_time']:  # Boss ainda não fechou
                     await interaction.response.send_message(
                         f"⚠ O boss **{boss_name} (Sala {sala})** já está anotado e ainda não fechou!\n"
-                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else f'🕒 Abre em {format_time_remaining(timers['respawn_time'])}'}\n"
+                        f"Status atual: {'✅ Aberto' if now >= timers['respawn_time'] else '🕒 Abre em ' + format_time_remaining(timers['respawn_time'])}\n"
                         f"Para registrar um novo horário, primeiro use o botão 'Limpar Boss'",
                         ephemeral=True
                     )
