@@ -90,6 +90,21 @@ async def on_ready():
     logger.info(f'🕒 Hora do servidor: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}')
     logger.info("="*50 + "\n")
     
+    # Sincronização de comandos slash
+    try:
+        # Sincronização global
+        synced = await bot.tree.sync()
+        logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente")
+
+        # Sincronização no servidor específico (opcional)
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            bot.tree.copy_global_to(guild=guild)
+            synced_guild = await bot.tree.sync(guild=guild)
+            logger.info(f"✅ {len(synced_guild)} comandos sincronizados no servidor")
+    except Exception as e:
+        logger.error(f"❌ Erro ao sincronizar comandos: {e}")
+
     # Verifica o canal de notificação
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
     if channel:
@@ -112,21 +127,6 @@ async def on_ready():
         logger.error(f'⚠ ATENÇÃO: Canal de notificação (ID: {NOTIFICATION_CHANNEL_ID}) não encontrado!')
     
     await bot.change_presence(activity=discord.Game(name="Use /bosshelp"))
-
-    # Sincronização de comandos
-    try:
-        # Sincronização global
-        synced = await bot.tree.sync()
-        logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente")
-
-        # Sincronização no servidor específico (opcional)
-        if GUILD_ID:
-            guild = discord.Object(id=GUILD_ID)
-            bot.tree.copy_global_to(guild=guild)
-            synced_guild = await bot.tree.sync(guild=guild)
-            logger.info(f"✅ {len(synced_guild)} comandos sincronizados no servidor")
-    except Exception as e:
-        logger.error(f"❌ Erro ao sincronizar comandos: {e}")
 
     # Inicialização do banco de dados
     logger.info("\nInicializando banco de dados...")

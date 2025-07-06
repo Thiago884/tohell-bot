@@ -8,7 +8,7 @@ from typing import Optional, List
 import os
 import traceback
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time
-from database import save_timer, save_user_stats, clear_timer, add_user_notification, remove_user_notification, load_db_data
+from database import save_timer, save_user_stats, clear_timer, add_user_notification, remove_user_notification, load_db_data, add_sala_to_all_bosses, remove_sala_from_all_bosses
 from views import BossControlView
 from discord.app_commands import CommandAlreadyRegistered
 
@@ -438,6 +438,136 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 ephemeral=True
             )
     
+    # Comando para gerenciar salas
+    @bot.tree.command(name="managesalas", description="Adiciona ou remove salas de todos os bosses (apenas admins)")
+    @app_commands.describe(
+        action="'add' para adicionar ou 'rem' para remover",
+        sala="Número da sala (1-99)"
+    )
+    async def manage_salas_slash(
+        interaction: discord.Interaction,
+        action: str,
+        sala: int
+    ):
+        """Gerencia salas via comando slash"""
+        try:
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
+                )
+                return
+            
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message(
+                    "❌ Apenas administradores podem usar este comando.",
+                    ephemeral=True
+                )
+                return
+            
+            if sala < 1 or sala > 99:
+                await interaction.response.send_message(
+                    "❌ Número de sala inválido. Deve ser entre 1 e 99.",
+                    ephemeral=True
+                )
+                return
+            
+            modified = False
+            
+            if action == 'add':
+                # Verificar se sala já existe
+                if any(sala in boss for boss in boss_timers.values()):
+                    await interaction.response.send_message(
+                        f"ℹ A sala {sala} já existe em alguns bosses.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Adicionar no banco de dados primeiro
+                success = await add_sala_to_all_bosses(sala)
+                if not success:
+                    await interaction.response.send_message(
+                        "❌ Erro ao adicionar sala no banco de dados.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Adicionar na memória
+                for boss in boss_timers:
+                    boss_timers[boss][sala] = {
+                        'death_time': None,
+                        'respawn_time': None,
+                        'closed_time': None,
+                        'recorded_by': None,
+                        'opened_notified': False
+                    }
+                
+                modified = True
+                message = f"✅ Sala {sala} adicionada a todos os bosses!"
+            
+            elif action == 'rem':
+                # Verificar se sala existe
+                if not any(sala in boss for boss in boss_timers.values()):
+                    await interaction.response.send_message(
+                        f"ℹ A sala {sala} não existe em nenhum boss.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Remover do banco de dados primeiro
+                success = await remove_sala_from_all_bosses(sala)
+                if not success:
+                    await interaction.response.send_message(
+                        "❌ Erro ao remover sala do banco de dados.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Remover da memória
+                for boss in boss_timers:
+                    if sala in boss_timers[boss]:
+                        del boss_timers[boss][sala]
+                
+                modified = True
+                message = f"✅ Sala {sala} removida de todos os bosses!"
+            else:
+                await interaction.response.send_message(
+                    "Ação inválida. Use 'add' para adicionar ou 'rem' para remover.",
+                    ephemeral=True
+                )
+                return
+            
+            if modified:
+                await interaction.response.send_message(
+                    message,
+                    ephemeral=True
+                )
+                
+                # Atualiza a tabela
+                embed = await create_boss_embed_func()
+                view = BossControlView(
+                    bot,
+                    boss_timers,
+                    {},  # user_stats não é usado na view
+                    {},  # user_notifications não é usado na view
+                    table_message,
+                    NOTIFICATION_CHANNEL_ID,
+                    update_table_func,
+                    create_next_bosses_embed_func,
+                    create_ranking_embed_func,
+                    create_history_embed_func,
+                    create_unrecorded_embed_func
+                )
+                await interaction.followup.send(embed=embed, view=view)
+            
+        except Exception as e:
+            print(f"Erro no comando slash managesalas: {e}")
+            traceback.print_exc()
+            await interaction.response.send_message(
+                "Ocorreu um erro ao processar seu comando.",
+                ephemeral=True
+            )
+    
     # Comando para mostrar próximos bosses (mantido original)
     @bot.tree.command(name="nextboss", description="Mostra os próximos bosses a abrir")
     async def nextboss_slash(interaction: discord.Interaction):
@@ -801,6 +931,12 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             embed.add_field(
                 name="/clearboss <nome> [sala]",
                 value="Reseta o timer de um boss (opcional: especifique a sala, senão limpa todas)",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="/managesalas <add/rem> <sala>",
+                value="Adiciona ou remove salas de todos os bosses (apenas admins)",
                 inline=False
             )
             

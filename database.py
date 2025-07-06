@@ -92,6 +92,10 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             return False
         
         async with conn.cursor() as cursor:
+            # Primeiro limpe as salas existentes na memória
+            for boss in boss_timers:
+                boss_timers[boss].clear()
+            
             # Carregar timers de boss
             await cursor.execute("""
                 SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
@@ -104,14 +108,18 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                 boss_name = timer[0]
                 sala = timer[1]
                 
-                if boss_name in boss_timers and sala in boss_timers[boss_name]:
-                    boss_timers[boss_name][sala] = {
-                        'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
-                        'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
-                        'closed_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
-                        'recorded_by': timer[5],
-                        'opened_notified': bool(timer[6])
-                    }
+                # Garante que o boss existe
+                if boss_name not in boss_timers:
+                    boss_timers[boss_name] = {}
+                
+                # Adiciona a sala (mesmo que não existisse antes)
+                boss_timers[boss_name][sala] = {
+                    'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
+                    'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
+                    'closed_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
+                    'recorded_by': timer[5],
+                    'opened_notified': bool(timer[6])
+                }
             
             # Carregar estatísticas de usuários
             await cursor.execute("""
@@ -432,6 +440,56 @@ async def restore_backup(backup_file: str) -> bool:
         
     except Exception as e:
         logger.error(f"Erro ao restaurar backup: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            await conn.ensure_closed()
+
+async def add_sala_to_all_bosses(sala: int) -> bool:
+    """Adiciona uma nova sala para todos os bosses no banco de dados"""
+    conn = None
+    try:
+        conn = await connect_db()
+        if conn is None:
+            return False
+        
+        async with conn.cursor() as cursor:
+            # Para cada boss, insira a nova sala com valores nulos
+            await cursor.execute("SELECT DISTINCT boss_name FROM boss_timers")
+            bosses = [row[0] for row in await cursor.fetchall()]
+            
+            for boss in bosses:
+                await cursor.execute("""
+                INSERT INTO boss_timers (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified)
+                VALUES (%s, %s, NULL, NULL, NULL, NULL, FALSE)
+                ON DUPLICATE KEY UPDATE
+                    boss_name = VALUES(boss_name),
+                    sala = VALUES(sala)
+                """, (boss, sala))
+            
+            await conn.commit()
+        return True
+    except Exception as err:
+        logger.error(f"Erro ao adicionar sala {sala}: {err}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            await conn.ensure_closed()
+
+async def remove_sala_from_all_bosses(sala: int) -> bool:
+    """Remove uma sala de todos os bosses no banco de dados"""
+    conn = None
+    try:
+        conn = await connect_db()
+        if conn is None:
+            return False
+        
+        async with conn.cursor() as cursor:
+            await cursor.execute("DELETE FROM boss_timers WHERE sala = %s", (sala,))
+            await conn.commit()
+        return True
+    except Exception as err:
+        logger.error(f"Erro ao remover sala {sala}: {err}", exc_info=True)
         return False
     finally:
         if conn:
