@@ -454,6 +454,12 @@ async def add_sala_to_all_bosses(sala: int) -> bool:
             return False
         
         async with conn.cursor() as cursor:
+            # Primeiro, alteramos a tabela para permitir valores nulos em death_time
+            await cursor.execute("""
+            ALTER TABLE boss_timers 
+            MODIFY COLUMN death_time DATETIME NULL
+            """)
+            
             # Para cada boss, insira a nova sala com valores nulos
             await cursor.execute("SELECT DISTINCT boss_name FROM boss_timers")
             bosses = [row[0] for row in await cursor.fetchall()]
