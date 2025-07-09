@@ -18,7 +18,7 @@ async def connect_db():
         conn = await asyncmy.connect(
             host="192.185.214.113",
             user="thia5326_tohell",
-            password="Thi@goba1102@@",
+            password="Thi#goba1102@@",
             database="thia5326_tohell_bot"
         )
         return conn
