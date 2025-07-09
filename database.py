@@ -454,10 +454,13 @@ async def add_sala_to_all_bosses(sala: int) -> bool:
             return False
         
         async with conn.cursor() as cursor:
-            # Primeiro, alteramos a tabela para permitir valores nulos em death_time
+            # Primeiro, alteramos a tabela para permitir valores nulos nas colunas necessárias
             await cursor.execute("""
             ALTER TABLE boss_timers 
-            MODIFY COLUMN death_time DATETIME NULL
+            MODIFY COLUMN death_time DATETIME NULL,
+            MODIFY COLUMN respawn_time DATETIME NULL,
+            MODIFY COLUMN closed_time DATETIME NULL,
+            MODIFY COLUMN recorded_by VARCHAR(50) NULL
             """)
             
             # Para cada boss, insira a nova sala com valores nulos
