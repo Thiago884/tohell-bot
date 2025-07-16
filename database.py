@@ -468,6 +468,10 @@ async def add_sala_to_all_bosses(sala: int) -> bool:
             bosses = [row[0] for row in await cursor.fetchall()]
             
             for boss in bosses:
+                # Apenas adicionar sala 20 para bosses específicos
+                if sala == 20 and boss not in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:
+                    continue
+                    
                 await cursor.execute("""
                 INSERT INTO boss_timers (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified)
                 VALUES (%s, %s, NULL, NULL, NULL, NULL, FALSE)

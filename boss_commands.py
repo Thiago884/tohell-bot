@@ -58,8 +58,20 @@ async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord
     )
     
     for boss in boss_timers:
+        # Se for Erohim e não tiver sala 20, pular
+        if boss == "Erohim" and 20 not in boss_timers[boss]:
+            continue
+            
         boss_info = []
         for sala in boss_timers[boss]:
+            # Para Erohim, mostrar apenas sala 20
+            if boss == "Erohim" and sala != 20:
+                continue
+                
+            # Para outros bosses, não mostrar sala 20 se não for um dos bosses especiais
+            if sala == 20 and boss not in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:
+                continue
+                
             timers = boss_timers[boss][sala]
             
             # Pular bosses que já fecharam e não foram registrados

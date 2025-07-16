@@ -61,17 +61,29 @@ bot = commands.Bot(
 BOSSES = [
     "Super Red Dragon", "Hell Maine", "Illusion of Kundun",
     "Death Beam Knight", "Genocider", "Phoenix of Darkness",
-    "Hydra", "Rei Kundun"
+    "Hydra", "Rei Kundun", "Erohim"
 ]
-SALAS = [1, 2, 3, 4, 5, 6, 7, 8]
 
-boss_timers = {boss: {sala: {
-    'death_time': None,
-    'respawn_time': None,
-    'closed_time': None,
-    'recorded_by': None,
-    'opened_notified': False
-} for sala in SALAS} for boss in BOSSES}
+# Modificar a estrutura inicial dos bosses
+boss_timers = {}
+for boss in BOSSES:
+    # Bosses especiais que podem ter sala 20
+    if boss in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:
+        boss_timers[boss] = {sala: {
+            'death_time': None,
+            'respawn_time': None,
+            'closed_time': None,
+            'recorded_by': None,
+            'opened_notified': False
+        } for sala in [1, 2, 3, 4, 5, 6, 7, 8, 20]}  # Salas padrão + sala 20 para bosses especiais
+    else:
+        boss_timers[boss] = {sala: {
+            'death_time': None,
+            'respawn_time': None,
+            'closed_time': None,
+            'recorded_by': None,
+            'opened_notified': False
+        } for sala in [1, 2, 3, 4, 5, 6, 7, 8]}  # Salas padrão
 
 user_stats = defaultdict(lambda: {
     'count': 0,
