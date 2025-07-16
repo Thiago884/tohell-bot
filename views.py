@@ -117,8 +117,23 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 )
                 return
             
+            try:
+                sala = int(self.sala.value)
+                # Verifica se a sala existe para este boss
+                if sala not in self.boss_timers[boss_name]:
+                    await interaction.response.send_message(
+                        f"Sala inválida. Salas disponíveis para {boss_name}: {', '.join(map(str, self.boss_timers[boss_name].keys()))}",
+                        ephemeral=True
+                    )
+                    return
+            except ValueError:
+                await interaction.response.send_message(
+                    "Sala inválida. Digite um número válido.",
+                    ephemeral=True
+                )
+                return
+
             # Verificação corrigida - só impede se o boss estiver agendado (ainda não abriu)
-            sala = int(self.sala.value)
             timers = self.boss_timers[boss_name][sala]
             now = datetime.now(brazil_tz)
             
@@ -127,21 +142,6 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                     f"⚠ O boss **{boss_name} (Sala {sala})** já está agendado e ainda não abriu!\n"
                     f"Status atual: 🕒 Abre em {format_time_remaining(timers['respawn_time'])}\n"
                     f"Para registrar um novo horário, primeiro use o botão 'Limpar Boss'",
-                    ephemeral=True
-                )
-                return
-            
-            try:
-                sala = int(self.sala.value)
-                if sala not in self.boss_timers[boss_name].keys():
-                    await interaction.response.send_message(
-                        f"Sala inválida. Salas disponíveis: {', '.join(map(str, self.boss_timers[boss_name].keys()))}",
-                        ephemeral=True
-                    )
-                    return
-            except ValueError:
-                await interaction.response.send_message(
-                    "Sala inválida. Digite um número entre 1 e 20.",
                     ephemeral=True
                 )
                 return
