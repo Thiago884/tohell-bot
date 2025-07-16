@@ -95,6 +95,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             # Primeiro limpe as salas existentes na memória
             for boss in boss_timers:
                 boss_timers[boss].clear()
+                logger.info(f"Limpando salas para {boss}")
             
             # Carregar timers de boss
             await cursor.execute("""
@@ -111,6 +112,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                 # Garante que o boss existe
                 if boss_name not in boss_timers:
                     boss_timers[boss_name] = {}
+                    logger.info(f"Adicionando novo boss não inicializado: {boss_name}")
                 
                 # Adiciona a sala (mesmo que não existisse antes)
                 boss_timers[boss_name][sala] = {
@@ -120,6 +122,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                     'recorded_by': timer[5],
                     'opened_notified': bool(timer[6])
                 }
+                logger.info(f"Carregado timer para {boss_name} sala {sala}")
             
             # Carregar estatísticas de usuários
             await cursor.execute("""
@@ -134,6 +137,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                     'last_recorded': stat[3].replace(tzinfo=brazil_tz) if stat[3] else None,
                     'username': stat[1]
                 }
+                logger.info(f"Carregado stats para usuário {stat[1]} (ID: {stat[0]})")
             
             # Carregar notificações personalizadas
             await cursor.execute("""
@@ -151,6 +155,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                     user_notifications[user_id] = []
                 if boss_name not in user_notifications[user_id]:
                     user_notifications[user_id].append(boss_name)
+                    logger.info(f"Carregado notificação para usuário {user_id}: {boss_name}")
         
         logger.info("Dados carregados do banco de dados com sucesso")
         return True

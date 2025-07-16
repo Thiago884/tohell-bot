@@ -57,7 +57,7 @@ bot = commands.Bot(
     help_command=None
 )
 
-# Estruturas de dados
+# No main.py, modifique a parte de inicialização dos bosses:
 BOSSES = [
     "Super Red Dragon", "Hell Maine", "Illusion of Kundun",
     "Death Beam Knight", "Genocider", "Phoenix of Darkness",
@@ -67,19 +67,19 @@ BOSSES = [
 # Modificar a estrutura inicial dos bosses
 boss_timers = {}
 for boss in BOSSES:
-    # Bosses especiais que podem ter sala 20
-    if boss in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:
+    # Erohim só tem sala 20
+    if boss == "Erohim":
         boss_timers[boss] = {
-            sala: {
+            20: {
                 'death_time': None,
                 'respawn_time': None,
                 'closed_time': None,
                 'recorded_by': None,
                 'opened_notified': False
-            } 
-            for sala in list(range(1, 9)) + [20]  # Salas 1-8 e 20 para bosses especiais
+            }
         }
     else:
+        # Todos os outros bosses têm salas 1-8
         boss_timers[boss] = {
             sala: {
                 'death_time': None,
@@ -88,8 +88,11 @@ for boss in BOSSES:
                 'recorded_by': None,
                 'opened_notified': False
             } 
-            for sala in range(1, 9)  # Salas 1-8 para outros bosses
+            for sala in range(1, 9)  # Salas 1-8 para todos os bosses normais
         }
+        
+    # Log para verificar as salas de cada boss
+    logger.info(f"Boss '{boss}' carregado com salas: {list(boss_timers[boss].keys())}")
 
 user_stats = defaultdict(lambda: {
     'count': 0,
