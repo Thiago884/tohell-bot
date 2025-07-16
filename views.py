@@ -23,7 +23,7 @@ def create_boss_embed(boss_timers, compact=False):
     for boss in boss_timers:
         boss_info = []
         for sala in boss_timers[boss]:
-            # Para Erohim, mostrar apenas sala 20 se existir
+            # Para Erohim, mostrar apenas sala 20
             if boss == "Erohim" and sala != 20:
                 continue
                 
@@ -64,9 +64,9 @@ def create_boss_embed(boss_timers, compact=False):
         if not boss_info and compact:
             continue
             
-        # Mostrar Erohim apenas se a sala 20 existir
+        # Mostrar Erohim apenas se houver dados para ele
         if boss == "Erohim":
-            if 20 in boss_timers[boss]:
+            if boss_info:  # Mudança aqui - verifica se há informações para mostrar
                 embed.add_field(
                     name=f"**{boss}**",
                     value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
