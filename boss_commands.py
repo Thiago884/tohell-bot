@@ -48,8 +48,7 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
     
     return False
 
-async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed:
-    """Cria embed com a tabela de timers de boss"""
+def create_boss_embed(boss_timers, compact=False):
     now = datetime.now(brazil_tz)
     
     embed = discord.Embed(
@@ -59,13 +58,9 @@ async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord
     
     for boss in boss_timers:
         boss_info = []
-        for sala in boss_timers[boss]:
-            # Para Erohim, mostrar apenas sala 20 se existir
+        for sala in sorted(boss_timers[boss].keys()):  # Ordena as salas numericamente
+            # Para Erohim, mostrar apenas sala 20
             if boss == "Erohim" and sala != 20:
-                continue
-                
-            # Para outros bosses, não mostrar sala 20 se não for um dos bosses especiais
-            if sala == 20 and boss not in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:
                 continue
                 
             timers = boss_timers[boss][sala]
@@ -86,14 +81,14 @@ async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord
             if timers['respawn_time']:
                 if now >= timers['respawn_time']:
                     if timers['closed_time'] and now >= timers['closed_time']:
-                        status = "❌"  # Boss fechado
+                        status = "❌"
                     else:
-                        status = "✅"  # Boss aberto
+                        status = "✅"
                 else:
                     time_left = format_time_remaining(timers['respawn_time'])
-                    status = f"🕒 ({time_left})"  # Boss agendado
+                    status = f"🕒 ({time_left})"
             else:
-                status = "❌"  # Sem registro
+                status = "❌"
             
             boss_info.append(
                 f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
@@ -111,10 +106,11 @@ async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord
                     inline=False
                 )
         else:
-            if boss_info:
+            # Para outros bosses, mostrar todas as salas (1-8 e 20 para bosses especiais)
+            if boss_info or not compact:  # Mostrar mesmo sem informações se não for compacto
                 embed.add_field(
                     name=f"**{boss}**",
-                    value="\n".join(boss_info),
+                    value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
                     inline=False
                 )
     
