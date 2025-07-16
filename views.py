@@ -22,17 +22,10 @@ def create_boss_embed(boss_timers, compact=False):
     
     for boss in boss_timers:
         boss_info = []
-        for sala in boss_timers[boss]:
-            # Para Erohim, mostrar apenas sala 20
-            if boss == "Erohim" and sala != 20:
-                continue
-                
-            # Para outros bosses, não mostrar sala 20 se não for um dos bosses especiais
-            if sala == 20 and boss not in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:
-                continue
-                
+        for sala in sorted(boss_timers[boss].keys()):  # Ordena as salas numericamente
             timers = boss_timers[boss][sala]
             
+            # Pular bosses que já fecharam e não foram registrados
             if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
                 continue
                 
@@ -64,21 +57,12 @@ def create_boss_embed(boss_timers, compact=False):
         if not boss_info and compact:
             continue
             
-        # Mostrar Erohim apenas se houver dados para ele
-        if boss == "Erohim":
-            if boss_info:  # Mudança aqui - verifica se há informações para mostrar
-                embed.add_field(
-                    name=f"**{boss}**",
-                    value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
-                    inline=False
-                )
-        else:
-            if boss_info:
-                embed.add_field(
-                    name=f"**{boss}**",
-                    value="\n".join(boss_info),
-                    inline=False
-                )
+        if boss_info:
+            embed.add_field(
+                name=f"**{boss}**",
+                value="\n".join(boss_info),
+                inline=False
+            )
     
     return embed
 
