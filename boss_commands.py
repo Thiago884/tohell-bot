@@ -102,12 +102,21 @@ async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord
         if not boss_info and compact:
             continue
             
-        if boss_info or boss == "Erohim":  # Mostrar Erohim mesmo sem informações
-            embed.add_field(
-                name=f"**{boss}**",
-                value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
-                inline=False
-            )
+        # Mostrar Erohim apenas se a sala 20 existir
+        if boss == "Erohim":
+            if 20 in boss_timers[boss]:
+                embed.add_field(
+                    name=f"**{boss}**",
+                    value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
+                    inline=False
+                )
+        else:
+            if boss_info:
+                embed.add_field(
+                    name=f"**{boss}**",
+                    value="\n".join(boss_info),
+                    inline=False
+                )
     
     return embed
 
