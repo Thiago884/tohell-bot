@@ -191,7 +191,7 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
     """Atualiza a mensagem da tabela de bosses"""
     try:
         logger.info("Iniciando atualização da tabela de bosses...")
-        embed = await create_boss_embed(boss_timers)
+        embed = create_boss_embed(boss_timers)  # Removido o await
         view = BossControlView(
             bot, 
             boss_timers, 
@@ -441,10 +441,10 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
 
     # Retornar as funções necessárias para outros módulos
     return (
-        lambda boss_timers=boss_timers: create_boss_embed(boss_timers),
+        create_boss_embed,  # Removido o lambda async
         lambda channel: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
-        lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
-        lambda: create_ranking_embed(bot, user_stats),
-        lambda: create_history_embed(bot, boss_timers),
-        lambda: create_unrecorded_embed(bot, boss_timers)
+        create_next_bosses_embed,
+        create_ranking_embed,
+        create_history_embed,
+        create_unrecorded_embed
     )
