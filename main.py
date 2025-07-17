@@ -66,6 +66,8 @@ BOSSES = [
 
 # Modificar a estrutura inicial dos bosses
 boss_timers = {}
+special_bosses_with_20 = ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]
+
 for boss in BOSSES:
     # Erohim só tem sala 20
     if boss == "Erohim":
@@ -79,7 +81,7 @@ for boss in BOSSES:
             }
         }
     else:
-        # Todos os outros bosses têm salas 1-8
+        # Inicializa com salas 1-8 para todos os bosses
         boss_timers[boss] = {
             sala: {
                 'death_time': None,
@@ -91,6 +93,16 @@ for boss in BOSSES:
             for sala in range(1, 9)  # Salas 1-8 para todos os bosses normais
         }
         
+        # Adiciona sala 20 apenas para bosses especiais
+        if boss in special_bosses_with_20:
+            boss_timers[boss][20] = {
+                'death_time': None,
+                'respawn_time': None,
+                'closed_time': None,
+                'recorded_by': None,
+                'opened_notified': False
+            }
+    
     # Log para verificar as salas de cada boss
     logger.info(f"Boss '{boss}' carregado com salas: {list(boss_timers[boss].keys())}")
 
