@@ -73,10 +73,62 @@ async def init_db():
             """)
             
             await conn.commit()
-        logger.info("Estrutura do banco de dados verificada com sucesso")
+        
+        # Executar migrações após criar as tabelas
+        await migrate_fix_sala_20()
+        
+        logger.info("Estrutura do banco de dados verificada e migrações aplicadas")
         return True
     except Exception as err:
         logger.error(f"Erro ao inicializar banco de dados: {err}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            await conn.ensure_closed()
+
+async def migrate_fix_sala_20():
+    """Função de migração para corrigir salas 20 em bosses não especiais"""
+    conn = None
+    try:
+        conn = await connect_db()
+        if conn is None:
+            logger.error("Não foi possível conectar ao banco para migração")
+            return False
+        
+        # Lista de bosses que podem ter sala 20
+        valid_bosses_with_20 = ["Genocider", "Super Red Dragon", "Hell Maine", 
+                               "Death Beam Knight", "Erohim"]
+        
+        async with conn.cursor() as cursor:
+            # 1. Primeiro identificamos os registros problemáticos
+            await cursor.execute("""
+                SELECT DISTINCT boss_name FROM boss_timers 
+                WHERE sala = 20 AND boss_name NOT IN (%s, %s, %s, %s, %s)
+            """, valid_bosses_with_20)
+            
+            invalid_bosses = [row[0] for row in await cursor.fetchall()]
+            
+            if not invalid_bosses:
+                logger.info("Migração: Nenhum registro inválido de sala 20 encontrado")
+                return True
+            
+            logger.warning(f"Migração: Encontrados bosses com sala 20 inválida: {', '.join(invalid_bosses)}")
+            
+            # 2. Removemos os registros inválidos
+            await cursor.execute("""
+                DELETE FROM boss_timers 
+                WHERE sala = 20 AND boss_name NOT IN (%s, %s, %s, %s, %s)
+            """, valid_bosses_with_20)
+            
+            deleted_rows = cursor.rowcount
+            await conn.commit()
+            
+            logger.warning(f"Migração: Removidos {deleted_rows} registros inválidos de sala 20")
+            
+            return True
+            
+    except Exception as err:
+        logger.error(f"Erro na migração para corrigir sala 20: {err}", exc_info=True)
         return False
     finally:
         if conn:
@@ -86,6 +138,10 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
     """Carrega dados do banco de dados para as estruturas em memória"""
     conn = None
     try:
+        # Executar migração antes de carregar os dados
+        logger.info("Verificando necessidade de migração...")
+        await migrate_fix_sala_20()
+        
         conn = await connect_db()
         if conn is None:
             logger.error("Não foi possível conectar ao banco para carregar dados")
@@ -105,16 +161,24 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             """)
             timers = await cursor.fetchall()
             
+            special_bosses_with_20 = ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]
+            
             for timer in timers:
                 boss_name = timer[0]
                 sala = timer[1]
+                
+                # Verifica se a sala é válida para este boss
+                if boss_name == "Erohim" and sala != 20:
+                    continue
+                if sala == 20 and boss_name not in special_bosses_with_20:
+                    continue
                 
                 # Garante que o boss existe
                 if boss_name not in boss_timers:
                     boss_timers[boss_name] = {}
                     logger.info(f"Adicionando novo boss não inicializado: {boss_name}")
                 
-                # Adiciona a sala (mesmo que não existisse antes)
+                # Adiciona a sala (apenas se for válida)
                 boss_timers[boss_name][sala] = {
                     'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
                     'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,

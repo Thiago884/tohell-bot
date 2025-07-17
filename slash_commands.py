@@ -465,6 +465,49 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     "Ocorreu um erro ao processar seu comando.",
                     ephemeral=True
                 )
+
+    # Comando para executar migrações manualmente
+    @bot.tree.command(name="migrate", description="Executa migrações do banco de dados (apenas admins)")
+    async def migrate_slash(interaction: discord.Interaction):
+        """Executa migrações via comando slash"""
+        try:
+            if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                await interaction.response.send_message(
+                    "⚠ Comandos só são aceitos no canal designado!",
+                    ephemeral=True
+                )
+                return
+            
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message(
+                    "❌ Apenas administradores podem usar este comando.",
+                    ephemeral=True
+                )
+                return
+            
+            await interaction.response.defer(ephemeral=True)
+            
+            from database import migrate_fix_sala_20
+            success = await migrate_fix_sala_20()
+            
+            if success:
+                await interaction.followup.send(
+                    "✅ Migração executada com sucesso!",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    "❌ Ocorreu um erro durante a migração. Verifique os logs.",
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            print(f"Erro no comando migrate: {e}")
+            traceback.print_exc()
+            await interaction.response.send_message(
+                "Ocorreu um erro ao executar a migração.",
+                ephemeral=True
+            )
     
     # Comando para mostrar próximos bosses (mantido original)
     @bot.tree.command(name="nextboss", description="Mostra os próximos bosses a abrir")
@@ -878,6 +921,12 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             embed.add_field(
                 name="/backup <create|restore>",
                 value="Cria ou restaura um backup dos dados (apenas admins)",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="/migrate",
+                value="Executa migrações do banco de dados (apenas admins)",
                 inline=False
             )
             
