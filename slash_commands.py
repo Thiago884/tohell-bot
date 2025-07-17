@@ -329,6 +329,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                 return
             
+            # Verificação de permissão antes de qualquer outra verificação
             if not interaction.user.guild_permissions.administrator:
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
@@ -702,6 +703,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 )
                 return
             
+            # Verificação de permissão antes de qualquer outra verificação
             if not interaction.user.guild_permissions.administrator:
                 await interaction.response.send_message(
                     "❌ Apenas administradores podem usar este comando.",

@@ -180,6 +180,17 @@ async def on_ready():
     
     logger.info("\n✅ Bot totalmente inicializado e pronto para uso!")
 
+@bot.event
+async def on_command_error(ctx, error):
+    """Evento disparado quando ocorre um erro em um comando"""
+    if isinstance(error, commands.NotOwner):
+        await ctx.send("❌ Apenas o dono do bot pode usar este comando!")
+    elif isinstance(error, commands.CommandNotFound):
+        pass  # Ignora erros de comando não encontrado
+    else:
+        logger.error(f"Erro no comando {ctx.command}: {error}", exc_info=True)
+        await ctx.send(f"❌ Ocorreu um erro ao executar o comando: {error}")
+
 @bot.command()
 @commands.is_owner()
 async def sync(ctx):
