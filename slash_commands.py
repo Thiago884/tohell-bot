@@ -48,7 +48,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             
             await interaction.response.defer()
             
-            embed = await create_boss_embed_func(boss_timers)
+            embed = create_boss_embed_func(boss_timers)
             view = BossControlView(
                 bot,
                 boss_timers,
@@ -187,7 +187,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             )
             
             # Atualiza a tabela
-            embed = await create_boss_embed_func(boss_timers)
+            embed = create_boss_embed_func(boss_timers)
             view = BossControlView(
                 bot,
                 boss_timers,
@@ -285,7 +285,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 )
             
             # Atualiza a tabela
-            embed = await create_boss_embed_func(boss_timers)
+            embed = create_boss_embed_func(boss_timers)
             view = BossControlView(
                 bot,
                 boss_timers,
@@ -436,7 +436,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     
                 # Atualiza a tabela
-                embed = await create_boss_embed_func(boss_timers)
+                embed = create_boss_embed_func(boss_timers)
                 view = BossControlView(
                     bot,
                     boss_timers,

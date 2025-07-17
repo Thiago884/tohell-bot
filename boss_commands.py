@@ -441,7 +441,7 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
 
     # Retornar as funções necessárias para outros módulos
     return (
-        create_boss_embed,  # Removido o lambda async
+        create_boss_embed,
         lambda channel: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
         create_next_bosses_embed,
         create_ranking_embed,
