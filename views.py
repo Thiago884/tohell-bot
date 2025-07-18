@@ -98,7 +98,8 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
         label="Horário da morte",
         placeholder="Ex: 14:30 ou 14h30",
         required=True,
-        max_length=5
+        max_length=5,
+        shortcut=True  # Permite enviar com Enter
     )
     
     foi_ontem = discord.ui.TextInput(
@@ -250,7 +251,8 @@ class LimparBossModal(Modal, title="Limpar Boss"):
     boss = discord.ui.TextInput(
         label="Nome do Boss",
         placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
-        required=True
+        required=True,
+        shortcut=True  # Permite enviar com Enter
     )
     
     sala = discord.ui.TextInput(
@@ -363,7 +365,8 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
         label="Ação (adicionar/remover)",
         placeholder="Digite 'add' para adicionar ou 'rem' para remover",
         required=True,
-        max_length=3
+        max_length=3,
+        shortcut=True  # Permite enviar com Enter
     )
 
     def __init__(self, boss_timers, user_notifications):
