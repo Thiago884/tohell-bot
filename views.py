@@ -99,14 +99,15 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
         placeholder="Ex: 14:30 ou 14h30",
         required=True,
         max_length=5,
-        shortcut=True  # Permite enviar com Enter
+        style=TextStyle.short
     )
     
     foi_ontem = discord.ui.TextInput(
         label="Foi ontem? (S/N)",
         placeholder="Digite S para sim ou N para não",
         required=False,
-        max_length=1
+        max_length=1,
+        style=TextStyle.short
     )
 
     def __init__(self, bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
@@ -252,14 +253,15 @@ class LimparBossModal(Modal, title="Limpar Boss"):
         label="Nome do Boss",
         placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
         required=True,
-        shortcut=True  # Permite enviar com Enter
+        style=TextStyle.short
     )
     
     sala = discord.ui.TextInput(
         label="Sala (1-20) - Opcional",
         placeholder="Deixe em branco para limpar todas",
         required=False,
-        max_length=2
+        max_length=2,
+        style=TextStyle.short
     )
 
     def __init__(self, bot, boss_timers, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
@@ -358,7 +360,8 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
     boss = discord.ui.TextInput(
         label="Nome do Boss",
         placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
-        required=True
+        required=True,
+        style=TextStyle.short
     )
     
     action = discord.ui.TextInput(
@@ -366,7 +369,7 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
         placeholder="Digite 'add' para adicionar ou 'rem' para remover",
         required=True,
         max_length=3,
-        shortcut=True  # Permite enviar com Enter
+        style=TextStyle.short
     )
 
     def __init__(self, boss_timers, user_notifications):
