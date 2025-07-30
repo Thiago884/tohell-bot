@@ -251,27 +251,42 @@ async def main():
         return
     
     logger.info("\n🔑 Iniciando bot...")
-    try:
-        async with bot:
-            await bot.start(token)
-            
-            # Verificação pós-login
-            channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
-            if channel:
-                from boss_commands import update_table
-                global table_message
-                table_message = await update_table(
-                    bot, channel, boss_timers,
-                    user_stats, user_notifications,
-                    table_message, NOTIFICATION_CHANNEL_ID
-                )
-    except KeyboardInterrupt:
-        logger.info("\n🛑 Desligamento solicitado pelo usuário")
-    except Exception as e:
-        logger.error(f"\n❌ Erro: {type(e).__name__}: {e}", exc_info=True)
-    finally:
-        await shutdown_sequence()
-        logger.info("✅ Bot desligado corretamente")
+    
+    max_retries = 5
+    retry_delay = 30  # segundos
+    
+    for attempt in range(max_retries):
+        try:
+            async with bot:
+                await bot.start(token)
+                
+                # Verificação pós-login
+                channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
+                if channel:
+                    from boss_commands import update_table
+                    global table_message
+                    table_message = await update_table(
+                        bot, channel, boss_timers,
+                        user_stats, user_notifications,
+                        table_message, NOTIFICATION_CHANNEL_ID
+                    )
+                break
+                
+        except discord.HTTPException as e:
+            if e.status == 429:  # Rate limited
+                retry_after = e.retry_after if hasattr(e, 'retry_after') else retry_delay
+                logger.warning(f"Rate limit atingido. Tentativa {attempt + 1}/{max_retries}. Tentando novamente em {retry_after} segundos...")
+                await asyncio.sleep(retry_after)
+                continue
+            logger.error(f"\n❌ Erro HTTP: {type(e).__name__}: {e}", exc_info=True)
+            break
+        except Exception as e:
+            logger.error(f"\n❌ Erro: {type(e).__name__}: {e}", exc_info=True)
+            break
+    else:
+        logger.error("\n❌ Falha após várias tentativas de conexão")
+    
+    await shutdown_sequence()
 
 if __name__ == "__main__":
     try:

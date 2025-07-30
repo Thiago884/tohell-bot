@@ -209,11 +209,13 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
                 lambda: create_unrecorded_embed(bot, boss_timers)
             )
             
+            # Adiciona delay entre requisições
+            await asyncio.sleep(1)
+            
             # Se não temos mensagem de tabela, envia uma nova
             if table_message is None:
                 logger.info("Nenhuma tabela existente encontrada, enviando nova...")
                 try:
-                    await asyncio.sleep(1)  # Delay para evitar rate limit
                     table_message = await channel.send(embed=embed, view=view)
                     logger.info("✅ Nova tabela enviada com sucesso!")
                     return table_message
@@ -227,13 +229,11 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
             
             # Tenta editar a mensagem existente
             try:
-                await asyncio.sleep(1)  # Delay para evitar rate limit
                 await table_message.edit(embed=embed, view=view)
                 logger.info("✅ Tabela existente atualizada com sucesso!")
                 return table_message
             except discord.NotFound:
                 logger.warning("⚠ Tabela anterior não encontrada, enviando nova...")
-                await asyncio.sleep(1)  # Delay para evitar rate limit
                 table_message = await channel.send(embed=embed, view=view)
                 return table_message
             except discord.HTTPException as e:
@@ -380,6 +380,7 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     async def live_table_updater():
         """Atualiza a tabela periodicamente com maior intervalo"""
         try:
+            await asyncio.sleep(random.uniform(1, 3))  # Delay aleatório para evitar sincronização
             channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
             if channel:
                 nonlocal table_message
@@ -393,22 +394,26 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     @tasks.loop(minutes=1)
     async def check_boss_respawns_task():
         """Task para verificar respawns de bosses com delay"""
-        await asyncio.sleep(5)  # Delay inicial para evitar sobrecarga
-        await check_boss_respawns(
-            bot, boss_timers, user_notifications, 
-            NOTIFICATION_CHANNEL_ID,
-            lambda: update_table(
-                bot, bot.get_channel(NOTIFICATION_CHANNEL_ID), 
-                boss_timers, user_stats, user_notifications, 
-                table_message, NOTIFICATION_CHANNEL_ID
+        try:
+            await asyncio.sleep(random.uniform(1, 5))  # Delay aleatório
+            await check_boss_respawns(
+                bot, boss_timers, user_notifications, 
+                NOTIFICATION_CHANNEL_ID,
+                lambda: update_table(
+                    bot, bot.get_channel(NOTIFICATION_CHANNEL_ID), 
+                    boss_timers, user_stats, user_notifications, 
+                    table_message, NOTIFICATION_CHANNEL_ID
+                )
             )
-        )
+        except Exception as e:
+            logger.error(f"Erro na task de verificação de respawns: {e}", exc_info=True)
 
     @tasks.loop(minutes=60)  # Aumentado de 30-60 para 60-120 minutos
     async def periodic_table_update():
         """Atualiza a tabela periodicamente com novo post"""
         try:
             logger.info("\nIniciando atualização periódica da tabela...")
+            await asyncio.sleep(random.uniform(1, 5))  # Delay aleatório
             channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
             if channel:
                 logger.info(f"Canal encontrado: {channel.name}")
