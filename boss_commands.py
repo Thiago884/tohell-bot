@@ -21,34 +21,43 @@ logger = logging.getLogger(__name__)
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
 async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, closed_time):
-    """Envia notificação por DM quando um boss abre"""
-    try:
-        user = await bot.fetch_user(int(user_id))
-        if user:
-            await asyncio.sleep(1)  # Delay para evitar rate limit
-            await user.send(
-                f"🔔 **Notificação de Boss** 🔔\n"
-                f"O boss **{boss_name} (Sala {sala})** que você marcou está disponível AGORA!\n"
-                f"✅ Aberto até: {closed_time.strftime('%d/%m %H:%M')} BRT\n"
-                f"Corra para pegar seu loot! 🏆"
-            )
-            return True
-    except discord.Forbidden:
-        logger.warning(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
-    except discord.HTTPException as e:
-        if e.status == 429:
-            retry_after = e.retry_after
-            logger.warning(f"Rate limit ao enviar DM. Tentando novamente em {retry_after} segundos")
-            await asyncio.sleep(retry_after)
-            return await send_notification_dm(bot, user_id, boss_name, sala, respawn_time, closed_time)
-        else:
-            logger.error(f"Erro ao enviar DM para {user_id}: {e}", exc_info=True)
-    except Exception as e:
-        logger.error(f"Erro ao enviar DM para {user_id}: {e}", exc_info=True)
+    """Envia notificação por DM quando um boss abre com tratamento de rate limits"""
+    max_retries = 3
+    retry_delay = 5
+    
+    for attempt in range(max_retries):
+        try:
+            user = await bot.fetch_user(int(user_id))
+            if user:
+                await asyncio.sleep(1)  # Delay para evitar rate limit
+                await user.send(
+                    f"🔔 **Notificação de Boss** 🔔\n"
+                    f"O boss **{boss_name} (Sala {sala})** que você marcou está disponível AGORA!\n"
+                    f"✅ Aberto até: {closed_time.strftime('%d/%m %H:%M')} BRT\n"
+                    f"Corra para pegar seu loot! 🏆"
+                )
+                return True
+        except discord.Forbidden:
+            logger.warning(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
+            return False
+        except discord.HTTPException as e:
+            if e.status == 429:
+                retry_after = e.retry_after if hasattr(e, 'retry_after') else retry_delay
+                logger.warning(f"Rate limit ao enviar DM (tentativa {attempt + 1}). Tentando novamente em {retry_after} segundos")
+                await asyncio.sleep(retry_after)
+                continue
+            logger.error(f"Erro HTTP ao enviar DM para {user_id}: {e}", exc_info=True)
+            return False
+        except Exception as e:
+            logger.error(f"Erro ao enviar DM para {user_id} (tentativa {attempt + 1}): {e}", exc_info=True)
+            if attempt == max_retries - 1:
+                return False
+            await asyncio.sleep(retry_delay)
     
     return False
 
-def create_boss_embed(boss_timers, compact=False):
+async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed:
+    """Cria embed com a tabela de timers de boss"""
     now = datetime.now(brazil_tz)
     
     embed = discord.Embed(
@@ -58,11 +67,7 @@ def create_boss_embed(boss_timers, compact=False):
     
     for boss in boss_timers:
         boss_info = []
-        for sala in sorted(boss_timers[boss].keys()):  # Ordena as salas numericamente
-            # Para Erohim, mostrar apenas sala 20
-            if boss == "Erohim" and sala != 20:
-                continue
-                
+        for sala in boss_timers[boss]:
             timers = boss_timers[boss][sala]
             
             # Pular bosses que já fecharam e não foram registrados
@@ -81,14 +86,14 @@ def create_boss_embed(boss_timers, compact=False):
             if timers['respawn_time']:
                 if now >= timers['respawn_time']:
                     if timers['closed_time'] and now >= timers['closed_time']:
-                        status = "❌"
+                        status = "❌"  # Boss fechado
                     else:
-                        status = "✅"
+                        status = "✅"  # Boss aberto
                 else:
                     time_left = format_time_remaining(timers['respawn_time'])
-                    status = f"🕒 ({time_left})"
+                    status = f"🕒 ({time_left})"  # Boss agendado
             else:
-                status = "❌"
+                status = "❌"  # Sem registro
             
             boss_info.append(
                 f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
@@ -97,22 +102,12 @@ def create_boss_embed(boss_timers, compact=False):
         if not boss_info and compact:
             continue
             
-        # Mostrar Erohim apenas se a sala 20 existir
-        if boss == "Erohim":
-            if 20 in boss_timers[boss]:
-                embed.add_field(
-                    name=f"**{boss}**",
-                    value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
-                    inline=False
-                )
-        else:
-            # Para outros bosses, mostrar todas as salas (1-8 e 20 para bosses especiais)
-            if boss_info or not compact:  # Mostrar mesmo sem informações se não for compacto
-                embed.add_field(
-                    name=f"**{boss}**",
-                    value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
-                    inline=False
-                )
+        if boss_info:
+            embed.add_field(
+                name=f"**{boss}**",
+                value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
+                inline=False
+            )
     
     return embed
 
@@ -188,51 +183,74 @@ async def create_ranking_embed(bot, user_stats: Dict) -> discord.Embed:
 async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict, 
                       user_notifications: Dict, table_message: discord.Message, 
                       NOTIFICATION_CHANNEL_ID: int):
-    """Atualiza a mensagem da tabela de bosses"""
-    try:
-        logger.info("Iniciando atualização da tabela de bosses...")
-        embed = create_boss_embed(boss_timers)  # Removido o await
-        view = BossControlView(
-            bot, 
-            boss_timers, 
-            user_stats, 
-            user_notifications, 
-            table_message, 
-            NOTIFICATION_CHANNEL_ID,
-            lambda: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
-            lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
-            lambda: create_ranking_embed(bot, user_stats),
-            lambda: create_history_embed(bot, boss_timers),
-            lambda: create_unrecorded_embed(bot, boss_timers)
-        )
-        
-        # Se não temos mensagem de tabela, envia uma nova
-        if table_message is None:
-            logger.info("Nenhuma tabela existente encontrada, enviando nova...")
-            try:
-                table_message = await channel.send(embed=embed, view=view)
-                logger.info("✅ Nova tabela enviada com sucesso!")
-                return table_message
-            except Exception as e:
-                logger.error(f"❌ Erro ao enviar nova tabela: {e}")
-                return None
-        
-        # Tenta editar a mensagem existente
+    """Atualiza a mensagem da tabela de bosses com tratamento de rate limits"""
+    max_retries = 3
+    retry_delay = 5  # segundos
+    
+    for attempt in range(max_retries):
         try:
-            await table_message.edit(embed=embed, view=view)
-            logger.info("✅ Tabela existente atualizada com sucesso!")
-            return table_message
-        except discord.NotFound:
-            logger.warning("⚠ Tabela anterior não encontrada, enviando nova...")
-            table_message = await channel.send(embed=embed, view=view)
-            return table_message
-        except Exception as e:
-            logger.error(f"❌ Erro ao editar tabela existente: {e}")
-            return table_message
+            logger.info(f"Tentativa {attempt + 1} de atualização da tabela de bosses...")
+            embed = await create_boss_embed(boss_timers)
+            view = BossControlView(
+                bot, 
+                boss_timers, 
+                user_stats, 
+                user_notifications, 
+                table_message, 
+                NOTIFICATION_CHANNEL_ID,
+                lambda: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
+                lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
+                lambda: create_ranking_embed(bot, user_stats),
+                lambda: create_history_embed(bot, boss_timers),
+                lambda: create_unrecorded_embed(bot, boss_timers)
+            )
             
-    except Exception as e:
-        logger.error(f"❌ Erro crítico na atualização da tabela: {e}", exc_info=True)
-        return table_message
+            # Se não temos mensagem de tabela, envia uma nova
+            if table_message is None:
+                logger.info("Nenhuma tabela existente encontrada, enviando nova...")
+                try:
+                    table_message = await channel.send(embed=embed, view=view)
+                    logger.info("✅ Nova tabela enviada com sucesso!")
+                    return table_message
+                except discord.HTTPException as e:
+                    if e.status == 429:  # Rate limited
+                        retry_after = e.retry_after if hasattr(e, 'retry_after') else retry_delay
+                        logger.warning(f"Rate limit ao enviar nova tabela. Tentando novamente em {retry_after} segundos")
+                        await asyncio.sleep(retry_after)
+                        continue
+                    raise
+                except Exception as e:
+                    logger.error(f"❌ Erro ao enviar nova tabela: {e}")
+                    return None
+            
+            # Tenta editar a mensagem existente
+            try:
+                await table_message.edit(embed=embed, view=view)
+                logger.info("✅ Tabela existente atualizada com sucesso!")
+                return table_message
+            except discord.NotFound:
+                logger.warning("⚠ Tabela anterior não encontrada, enviando nova...")
+                table_message = await channel.send(embed=embed, view=view)
+                return table_message
+            except discord.HTTPException as e:
+                if e.status == 429:  # Rate limited
+                    retry_after = e.retry_after if hasattr(e, 'retry_after') else retry_delay
+                    logger.warning(f"Rate limit ao editar tabela. Tentando novamente em {retry_after} segundos")
+                    await asyncio.sleep(retry_after)
+                    continue
+                raise
+            except Exception as e:
+                logger.error(f"❌ Erro ao editar tabela existente: {e}")
+                return table_message
+                
+        except Exception as e:
+            logger.error(f"❌ Erro crítico na atualização da tabela (tentativa {attempt + 1}): {e}", exc_info=True)
+            if attempt == max_retries - 1:
+                logger.error("Número máximo de tentativas alcançado. Abortando...")
+                return table_message
+            await asyncio.sleep(retry_delay)
+    
+    return table_message
 
 async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict, 
                              NOTIFICATION_CHANNEL_ID: int, update_table_func):
@@ -350,6 +368,8 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     if table_message is None:
         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
         if channel:
+            # Adiciona um delay inicial para evitar rate limit no startup
+            await asyncio.sleep(5)
             table_message = await update_table(
                 bot, channel, boss_timers, 
                 user_stats, user_notifications, 
@@ -361,6 +381,7 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     async def live_table_updater():
         """Atualiza a tabela periodicamente"""
         try:
+            await asyncio.sleep(2)  # Delay adicional para evitar rate limits
             channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
             if channel:
                 nonlocal table_message
@@ -374,6 +395,7 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     @tasks.loop(minutes=1)
     async def check_boss_respawns_task():
         """Task para verificar respawns de bosses"""
+        await asyncio.sleep(1)  # Delay adicional para evitar rate limits
         await check_boss_respawns(
             bot, boss_timers, user_notifications, 
             NOTIFICATION_CHANNEL_ID,
@@ -388,6 +410,7 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     async def periodic_table_update():
         """Atualiza a tabela periodicamente com novo post"""
         try:
+            await asyncio.sleep(5)  # Delay maior para esta task que envia nova mensagem
             logger.info("\nIniciando atualização periódica da tabela...")
             channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
             if channel:
@@ -412,9 +435,12 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
             # Tenta novamente em 5 minutos se falhar
             periodic_table_update.change_interval(minutes=5)
 
-    # Iniciar as tasks
+    # Iniciar as tasks com delays iniciais diferentes
+    await asyncio.sleep(10)  # Delay inicial para evitar rate limits no startup
     check_boss_respawns_task.start()
+    await asyncio.sleep(5)
     live_table_updater.start()
+    await asyncio.sleep(5)
     periodic_table_update.start()
 
     # Função para cancelar tasks
@@ -441,10 +467,10 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
 
     # Retornar as funções necessárias para outros módulos
     return (
-        create_boss_embed,
+        lambda boss_timers=boss_timers: create_boss_embed(boss_timers),
         lambda channel: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
-        create_next_bosses_embed,
-        create_ranking_embed,
-        create_history_embed,
-        create_unrecorded_embed
+        lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
+        lambda: create_ranking_embed(bot, user_stats),
+        lambda: create_history_embed(bot, boss_timers),
+        lambda: create_unrecorded_embed(bot, boss_timers)
     )
