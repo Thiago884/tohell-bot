@@ -15,6 +15,7 @@ from drops import setup_drops_command
 from database import init_db, load_db_data
 import logging
 from slash_commands import setup_slash_commands
+import aiohttp
 
 # Configuração do logging
 logging.basicConfig(
@@ -57,7 +58,7 @@ bot = commands.Bot(
     help_command=None
 )
 
-# No main.py, modifique a parte de inicialização dos bosses:
+# Inicialização dos bosses
 BOSSES = [
     "Super Red Dragon", "Hell Maine", "Illusion of Kundun",
     "Death Beam Knight", "Genocider", "Phoenix of Darkness",
@@ -114,6 +115,10 @@ user_stats = defaultdict(lambda: {
 
 user_notifications = defaultdict(list)
 table_message = None
+
+async def create_session():
+    """Cria uma nova sessão HTTP para o cliente Discord"""
+    return aiohttp.ClientSession()
 
 @bot.event
 async def on_ready():
@@ -242,9 +247,8 @@ async def shutdown_sequence():
     
     logger.info("✅ Sequência de desligamento concluída")
 
-async def main():
-    keep_alive()
-    
+async def run_bot():
+    """Função principal para executar o bot"""
     token = os.getenv('DISCORD_TOKEN')
     if not token:
         logger.error("\n❌ ERRO: Token não encontrado!")
@@ -257,6 +261,9 @@ async def main():
     
     for attempt in range(max_retries):
         try:
+            # Criar uma nova sessão HTTP para cada tentativa
+            bot.http._session = await create_session()
+            
             async with bot:
                 await bot.start(token)
                 
@@ -287,6 +294,22 @@ async def main():
         logger.error("\n❌ Falha após várias tentativas de conexão")
     
     await shutdown_sequence()
+
+async def main():
+    """Ponto de entrada principal"""
+    keep_alive()
+    
+    # Adicionar delay inicial para garantir que tudo esteja pronto
+    await asyncio.sleep(5)
+    
+    try:
+        await run_bot()
+    except Exception as e:
+        logger.error(f"Erro fatal: {e}", exc_info=True)
+    finally:
+        # Garantir que a sessão HTTP seja fechada corretamente
+        if hasattr(bot.http, '_session') and bot.http._session:
+            await bot.http._session.close()
 
 if __name__ == "__main__":
     try:
