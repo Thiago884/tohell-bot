@@ -260,7 +260,10 @@ async def run_bot():
     logger.info("\n🔑 Iniciando bot...")
     
     max_retries = 5
-    retry_delay = 30  # segundos
+    retry_delay = 60  # Aumentado para 60 segundos
+    
+    # Adiciona um delay inicial maior antes da primeira tentativa
+    await asyncio.sleep(10)
     
     for attempt in range(max_retries):
         try:
@@ -268,6 +271,7 @@ async def run_bot():
             bot.http._session = await create_session()
             
             async with bot:
+                logger.info(f"Tentativa {attempt + 1} de conexão...")
                 await bot.start(token)
                 
                 # Verificação pós-login
