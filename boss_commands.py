@@ -36,8 +36,8 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
     except discord.Forbidden:
         logger.warning(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
     except discord.HTTPException as e:
-        if e.status == 429:
-            retry_after = e.retry_after
+        if e.code == 429:  # Rate limited
+            retry_after = getattr(e, 'retry_after', 5)  # Default 5 seconds
             logger.warning(f"Rate limit ao enviar DM. Tentando novamente em {retry_after} segundos")
             await asyncio.sleep(retry_after)
             return await send_notification_dm(bot, user_id, boss_name, sala, respawn_time, closed_time)
@@ -220,8 +220,8 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
                     logger.info("✅ Nova tabela enviada com sucesso!")
                     return table_message
                 except discord.HTTPException as e:
-                    if e.status == 429:
-                        retry_after = e.retry_after
+                    if e.code == 429:  # Rate limited
+                        retry_after = getattr(e, 'retry_after', retry_delay)
                         logger.warning(f"Rate limit ao enviar nova tabela. Tentando novamente em {retry_after} segundos")
                         await asyncio.sleep(retry_after)
                         continue
@@ -237,8 +237,8 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
                 table_message = await channel.send(embed=embed, view=view)
                 return table_message
             except discord.HTTPException as e:
-                if e.status == 429:
-                    retry_after = e.retry_after
+                if e.code == 429:  # Rate limited
+                    retry_after = getattr(e, 'retry_after', retry_delay)
                     logger.warning(f"Rate limit ao editar tabela. Tentando novamente em {retry_after} segundos")
                     await asyncio.sleep(retry_after)
                     continue

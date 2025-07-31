@@ -123,6 +123,9 @@ async def create_session():
 @bot.event
 async def on_ready():
     """Evento disparado quando o bot está pronto"""
+    # Adiciona um delay inicial para evitar rate limits
+    await asyncio.sleep(5)
+    
     logger.info("\n" + "="*50)
     logger.info(f'✅ Bot conectado como: {bot.user.name} (ID: {bot.user.id})')
     logger.info(f'🕒 Hora do servidor: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}')
@@ -280,8 +283,8 @@ async def run_bot():
                 break
                 
         except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                retry_after = e.retry_after if hasattr(e, 'retry_after') else retry_delay
+            if e.code == 429:  # Rate limited
+                retry_after = getattr(e, 'retry_after', retry_delay)
                 logger.warning(f"Rate limit atingido. Tentativa {attempt + 1}/{max_retries}. Tentando novamente em {retry_after} segundos...")
                 await asyncio.sleep(retry_after)
                 continue
