@@ -249,6 +249,10 @@ async def shutdown_sequence():
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
     
+    # Fecha a sessão HTTP se existir
+    if hasattr(bot.http, '_session') and bot.http._session and not bot.http._session.closed:
+        await bot.http._session.close()
+    
     logger.info("✅ Sequência de desligamento concluída")
 
 async def run_bot():
