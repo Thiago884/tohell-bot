@@ -60,8 +60,9 @@ class MyBot(commands.Bot):
         self.http_session = None
 
     async def setup_hook(self):
-        # Criar uma nova sessão HTTP
-        self.http_session = aiohttp.ClientSession()
+        # Criar uma nova sessão HTTP com timeout
+        timeout = aiohttp.ClientTimeout(total=60)  # 60 segundos de timeout
+        self.http_session = aiohttp.ClientSession(timeout=timeout)
         # Substituir a sessão HTTP do discord.py pela nossa
         self.http._session = self.http_session
 
@@ -275,10 +276,11 @@ async def run_bot():
     
     logger.info("\n🔑 Iniciando bot...")
     
-    # Parâmetros de Backoff
-    max_retries = 7
-    base_delay = 20.0
-    max_delay = 300.0
+    # Parâmetros de Backoff melhorados
+    max_retries = 10  # Aumentado de 7 para 10
+    base_delay = 30.0  # Aumentado de 20 para 30 segundos
+    max_delay = 600.0  # Aumentado de 300 para 600 segundos (10 minutos)
+    jitter = 5.0  # Adiciona aleatoriedade para evitar sincronização
 
     for attempt in range(max_retries):
         try:
@@ -291,15 +293,20 @@ async def run_bot():
                 help_command=None
             )
             
-            # Adicionar delay crescente entre tentativas
+            # Adicionar delay crescente entre tentativas com jitter
             if attempt > 0:
-                wait_time = min(base_delay * (2 ** (attempt-1)) + random.uniform(1, 5), max_delay)
+                wait_time = min(base_delay * (2 ** (attempt-1)) + random.uniform(0, jitter), max_delay)
                 logger.info(f"Esperando {wait_time:.2f} segundos antes da próxima tentativa...")
                 await asyncio.sleep(wait_time)
             
             try:
-                await bot_instance.start(token)
+                # Tentar conectar com timeout
+                await asyncio.wait_for(bot_instance.start(token), timeout=60)
                 break  # Se chegou aqui, a conexão foi bem-sucedida
+            except asyncio.TimeoutError:
+                logger.warning("Timeout ao conectar. Tentando novamente...")
+                await bot_instance.close()
+                continue
             except Exception as e:
                 logger.error(f"Erro durante a execução do bot: {e}")
                 await bot_instance.close()
@@ -331,7 +338,9 @@ async def main():
     keep_alive()
     
     # Adicionar delay inicial maior para garantir que o ambiente de hospedagem se estabilize
-    await asyncio.sleep(15)
+    initial_delay = random.uniform(30, 60)  # 30-60 segundos de delay inicial
+    logger.info(f"Aguardando {initial_delay:.2f} segundos antes de iniciar...")
+    await asyncio.sleep(initial_delay)
     
     try:
         await run_bot()
