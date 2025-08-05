@@ -16,6 +16,7 @@ from database import init_db, load_db_data
 import logging
 from slash_commands import setup_slash_commands
 import aiohttp
+import random
 
 # Configuração do logging
 logging.basicConfig(
@@ -251,54 +252,66 @@ async def shutdown_sequence():
     logger.info("✅ Sequência de desligamento concluída")
 
 async def run_bot():
-    """Função principal para executar o bot"""
+    """Função principal para executar o bot com retry backoff"""
     token = os.getenv('DISCORD_TOKEN')
     if not token:
-        logger.error("\n❌ ERRO: Token não encontrado!")
+        logger.error("\n❌ ERRO: Token não encontrado na variável de ambiente DISCORD_TOKEN!")
         return
     
     logger.info("\n🔑 Iniciando bot...")
     
-    max_retries = 5
-    retry_delay = 60  # Aumentado para 60 segundos
-    
-    # Adiciona um delay inicial maior antes da primeira tentativa
-    await asyncio.sleep(10)
-    
+    # Parâmetros de Backoff
+    max_retries = 7
+    base_delay = 20.0  # Começar com 20s
+    max_delay = 300.0  # Máximo de 5 minutos de espera
+
     for attempt in range(max_retries):
         try:
-            # Criar uma nova sessão HTTP para cada tentativa
+            # Criar uma nova sessão HTTP para cada tentativa para garantir que está limpa
+            if hasattr(bot.http, '_session') and bot.http._session and not bot.http._session.closed:
+                await bot.http._session.close()
             bot.http._session = await create_session()
+
+            logger.info(f"Tentativa {attempt + 1}/{max_retries} de conexão...")
             
+            # O `async with bot` gerencia o login e a conexão.
+            # `bot.start` é um atalho para `bot.login` + `bot.connect`
             async with bot:
-                logger.info(f"Tentativa {attempt + 1} de conexão...")
                 await bot.start(token)
-                
-                # Verificação pós-login
-                channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
-                if channel:
-                    from boss_commands import update_table
-                    global table_message
-                    table_message = await update_table(
-                        bot, channel, boss_timers,
-                        user_stats, user_notifications,
-                        table_message, NOTIFICATION_CHANNEL_ID
-                    )
-                break
-                
+
+            # Se chegarmos aqui, o bot desconectou-se de forma limpa. Saia do loop.
+            logger.info("Bot desconectado de forma limpa.")
+            break
+
         except discord.HTTPException as e:
-            if e.code == 429:  # Rate limited
-                retry_after = getattr(e, 'retry_after', retry_delay)
-                logger.warning(f"Rate limit atingido. Tentativa {attempt + 1}/{max_retries}. Tentando novamente em {retry_after} segundos...")
-                await asyncio.sleep(retry_after)
-                continue
-            logger.error(f"\n❌ Erro HTTP: {type(e).__name__}: {e}", exc_info=True)
-            break
+            if e.status == 429:  # Rate limited
+                # Discord nos diz quanto tempo esperar. Se não, usamos backoff exponencial.
+                wait_time = e.retry_after if hasattr(e, 'retry_after') else (base_delay * (2 ** attempt))
+                # Adiciona um jitter aleatório para evitar colisões
+                wait_time += random.uniform(1, 5)
+                logger.warning(
+                    f"Rate limit (429) atingido. Tentando novamente em {wait_time:.2f} segundos..."
+                )
+                await asyncio.sleep(min(wait_time, max_delay)) # Respeita o teto máximo de delay
+            elif e.status in [401, 403]: # Unauthorized / Forbidden
+                 logger.error(f"\n❌ Erro de Autenticação ({e.status}). Token inválido. Verifique o token do bot.")
+                 break # Erro irrecuperável, sai do loop.
+            else:
+                logger.error(f"\n❌ Erro HTTP não tratado na conexão: {e}", exc_info=False) # Não mostrar traceback completo para erros comuns
+                wait_time = base_delay * (1.5 ** attempt) + random.uniform(1, 5)
+                logger.info(f"Tentando novamente em {wait_time:.2f} segundos...")
+                await asyncio.sleep(min(wait_time, max_delay))
+
         except Exception as e:
-            logger.error(f"\n❌ Erro: {type(e).__name__}: {e}", exc_info=True)
-            break
+            # Captura outras exceções (ex: problemas de rede)
+            logger.error(f"\n❌ Erro inesperado durante a conexão: {e}", exc_info=True)
+            wait_time = base_delay * (2 ** attempt) + random.uniform(1, 5)
+            logger.info(f"Tentando novamente em {wait_time:.2f} segundos...")
+            await asyncio.sleep(min(wait_time, max_delay))
+            
     else:
-        logger.error("\n❌ Falha após várias tentativas de conexão")
+        # Este bloco 'else' é executado se o loop 'for' terminar sem 'break'
+        logger.error(f"\n❌ Falha ao conectar ao Discord após {max_retries} tentativas. O bot será desligado.")
     
     await shutdown_sequence()
 
@@ -306,16 +319,16 @@ async def main():
     """Ponto de entrada principal"""
     keep_alive()
     
-    # Adicionar delay inicial para garantir que tudo esteja pronto
-    await asyncio.sleep(5)
+    # Adicionar delay inicial maior para garantir que o ambiente de hospedagem se estabilize
+    await asyncio.sleep(15)
     
     try:
         await run_bot()
     except Exception as e:
-        logger.error(f"Erro fatal: {e}", exc_info=True)
+        logger.error(f"Erro fatal na função main: {e}", exc_info=True)
     finally:
         # Garantir que a sessão HTTP seja fechada corretamente
-        if hasattr(bot.http, '_session') and bot.http._session:
+        if hasattr(bot.http, '_session') and bot.http._session and not bot.http._session.closed:
             await bot.http._session.close()
 
 if __name__ == "__main__":
@@ -324,4 +337,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("\n🛑 Execução interrompida pelo usuário")
     except Exception as e:
-        logger.error(f"\n❌ Erro fatal: {e}", exc_info=True)
+        logger.error(f"\n❌ Erro fatal no nível superior: {e}", exc_info=True)
