@@ -220,7 +220,7 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
                     logger.info("✅ Nova tabela enviada com sucesso!")
                     return table_message
                 except discord.HTTPException as e:
-                    if e.code == 429:  # Rate limited
+                    if e.status == 429:  # Rate limited
                         retry_after = getattr(e, 'retry_after', retry_delay)
                         logger.warning(f"Rate limit ao enviar nova tabela. Tentando novamente em {retry_after} segundos")
                         await asyncio.sleep(retry_after)
@@ -237,7 +237,7 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
                 table_message = await channel.send(embed=embed, view=view)
                 return table_message
             except discord.HTTPException as e:
-                if e.code == 429:  # Rate limited
+                if e.status == 429:  # Rate limited
                     retry_after = getattr(e, 'retry_after', retry_delay)
                     logger.warning(f"Rate limit ao editar tabela. Tentando novamente em {retry_after} segundos")
                     await asyncio.sleep(retry_after)
@@ -328,7 +328,7 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
                 await channel.send(message)
             except discord.HTTPException as e:
                 if e.status == 429:
-                    retry_after = e.retry_after
+                    retry_after = getattr(e, 'retry_after', 5)
                     logger.warning(f"Rate limit nas notificações. Tentando novamente em {retry_after} segundos")
                     await asyncio.sleep(retry_after)
                     await channel.send(message[:2000])  # Envia mensagem truncada se necessário
@@ -347,12 +347,15 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
                 )
                 await asyncio.sleep(1)  # Delay entre notificações DM
         
-        await asyncio.sleep(1)  # Delay antes de atualizar a tabela
-        await update_table_func()
+        # FIX: Only update the table if there were any state changes (indicated by notifications).
+        # This prevents an API call every minute and avoids rate limits.
+        if notifications:
+            await asyncio.sleep(1)  # Delay antes de atualizar a tabela
+            await update_table_func()
     
     except discord.HTTPException as e:
         if e.status == 429:
-            retry_after = e.retry_after
+            retry_after = getattr(e, 'retry_after', 5)
             logger.warning(f"Rate limit na verificação de respawns. Tentando novamente em {retry_after} segundos")
             await asyncio.sleep(retry_after)
         else:
@@ -469,7 +472,7 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
         create_boss_embed,
         lambda channel: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
         create_next_bosses_embed,
-        create_ranking_embed,
-        create_history_embed,
-        create_unrecorded_embed
+        lambda: create_ranking_embed(bot, user_stats),
+        lambda: create_history_embed(bot, boss_timers),
+        lambda: create_unrecorded_embed(bot, boss_timers)
     )
