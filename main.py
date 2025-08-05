@@ -60,11 +60,16 @@ class MyBot(commands.Bot):
         self.http_session = None
 
     async def setup_hook(self):
+        # Criar uma nova sessão HTTP
         self.http_session = aiohttp.ClientSession()
+        # Substituir a sessão HTTP do discord.py pela nossa
+        self.http._session = self.http_session
 
     async def close(self):
+        # Fechar nossa sessão HTTP primeiro
         if self.http_session and not self.http_session.closed:
             await self.http_session.close()
+        # Depois chamar o close do bot
         await super().close()
 
 bot = MyBot(
@@ -279,19 +284,26 @@ async def run_bot():
         try:
             logger.info(f"Tentativa {attempt + 1}/{max_retries} de conexão...")
             
-            # Garante que o bot está limpo antes de cada tentativa
-            if bot.is_ready():
-                await bot.close()
+            # Criar uma nova instância do bot para cada tentativa
+            bot_instance = MyBot(
+                command_prefix='!',
+                intents=intents,
+                help_command=None
+            )
             
-            # Adiciona um delay crescente entre tentativas
+            # Adicionar delay crescente entre tentativas
             if attempt > 0:
                 wait_time = min(base_delay * (2 ** (attempt-1)) + random.uniform(1, 5), max_delay)
                 logger.info(f"Esperando {wait_time:.2f} segundos antes da próxima tentativa...")
                 await asyncio.sleep(wait_time)
             
-            async with bot:
-                await bot.start(token)
+            try:
+                await bot_instance.start(token)
                 break  # Se chegou aqui, a conexão foi bem-sucedida
+            except Exception as e:
+                logger.error(f"Erro durante a execução do bot: {e}")
+                await bot_instance.close()
+                continue
 
         except discord.HTTPException as e:
             if e.status == 429:  # Rate limited
@@ -326,9 +338,9 @@ async def main():
     except Exception as e:
         logger.error(f"Erro fatal na função main: {e}", exc_info=True)
     finally:
-        # Garantir que a sessão HTTP seja fechada corretamente
-        if hasattr(bot.http, '_session') and bot.http._session and not bot.http._session.closed:
-            await bot.http._session.close()
+        # Garantir que o bot seja fechado corretamente
+        if 'bot_instance' in locals():
+            await bot_instance.close()
 
 if __name__ == "__main__":
     try:
