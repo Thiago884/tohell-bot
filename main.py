@@ -53,7 +53,21 @@ def run_flask():
 
 # Configuração do Bot Discord
 intents = discord.Intents.all()
-bot = commands.Bot(
+
+class MyBot(commands.Bot):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.http_session = None
+
+    async def setup_hook(self):
+        self.http_session = aiohttp.ClientSession()
+
+    async def close(self):
+        if self.http_session and not self.http_session.closed:
+            await self.http_session.close()
+        await super().close()
+
+bot = MyBot(
     command_prefix='!',
     intents=intents,
     help_command=None
@@ -116,10 +130,6 @@ user_stats = defaultdict(lambda: {
 
 user_notifications = defaultdict(list)
 table_message = None
-
-async def create_session():
-    """Cria uma nova sessão HTTP para o cliente Discord"""
-    return aiohttp.ClientSession()
 
 @bot.event
 async def on_ready():
@@ -249,10 +259,6 @@ async def shutdown_sequence():
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
     
-    # Fecha a sessão HTTP se existir
-    if hasattr(bot.http, '_session') and bot.http._session and not bot.http._session.closed:
-        await bot.http._session.close()
-    
     logger.info("✅ Sequência de desligamento concluída")
 
 async def run_bot():
@@ -266,55 +272,44 @@ async def run_bot():
     
     # Parâmetros de Backoff
     max_retries = 7
-    base_delay = 20.0  # Começar com 20s
-    max_delay = 300.0  # Máximo de 5 minutos de espera
+    base_delay = 20.0
+    max_delay = 300.0
 
     for attempt in range(max_retries):
         try:
-            # Criar uma nova sessão HTTP para cada tentativa para garantir que está limpa
-            if hasattr(bot.http, '_session') and bot.http._session and not bot.http._session.closed:
-                await bot.http._session.close()
-            bot.http._session = await create_session()
-
             logger.info(f"Tentativa {attempt + 1}/{max_retries} de conexão...")
             
-            # O `async with bot` gerencia o login e a conexão.
-            # `bot.start` é um atalho para `bot.login` + `bot.connect`
+            # Garante que o bot está limpo antes de cada tentativa
+            if bot.is_ready():
+                await bot.close()
+            
+            # Adiciona um delay crescente entre tentativas
+            if attempt > 0:
+                wait_time = min(base_delay * (2 ** (attempt-1)) + random.uniform(1, 5), max_delay)
+                logger.info(f"Esperando {wait_time:.2f} segundos antes da próxima tentativa...")
+                await asyncio.sleep(wait_time)
+            
             async with bot:
                 await bot.start(token)
-
-            # Se chegarmos aqui, o bot desconectou-se de forma limpa. Saia do loop.
-            logger.info("Bot desconectado de forma limpa.")
-            break
+                break  # Se chegou aqui, a conexão foi bem-sucedida
 
         except discord.HTTPException as e:
             if e.status == 429:  # Rate limited
-                # Discord nos diz quanto tempo esperar. Se não, usamos backoff exponencial.
-                wait_time = e.retry_after if hasattr(e, 'retry_after') else (base_delay * (2 ** attempt))
-                # Adiciona um jitter aleatório para evitar colisões
-                wait_time += random.uniform(1, 5)
-                logger.warning(
-                    f"Rate limit (429) atingido. Tentando novamente em {wait_time:.2f} segundos..."
-                )
-                await asyncio.sleep(min(wait_time, max_delay)) # Respeita o teto máximo de delay
-            elif e.status in [401, 403]: # Unauthorized / Forbidden
-                 logger.error(f"\n❌ Erro de Autenticação ({e.status}). Token inválido. Verifique o token do bot.")
-                 break # Erro irrecuperável, sai do loop.
+                retry_after = getattr(e, 'retry_after', base_delay * (2 ** attempt))
+                logger.warning(f"Rate limit (429) atingido. Tentando novamente em {retry_after:.2f} segundos...")
+                await asyncio.sleep(retry_after)
+            elif e.status in [401, 403]:
+                logger.error(f"\n❌ Erro de Autenticação ({e.status}). Token inválido. Verifique o token do bot.")
+                break
             else:
-                logger.error(f"\n❌ Erro HTTP não tratado na conexão: {e}", exc_info=False) # Não mostrar traceback completo para erros comuns
-                wait_time = base_delay * (1.5 ** attempt) + random.uniform(1, 5)
-                logger.info(f"Tentando novamente em {wait_time:.2f} segundos...")
-                await asyncio.sleep(min(wait_time, max_delay))
-
+                logger.error(f"\n❌ Erro HTTP não tratado na conexão: {e}")
+                continue
+                
         except Exception as e:
-            # Captura outras exceções (ex: problemas de rede)
             logger.error(f"\n❌ Erro inesperado durante a conexão: {e}", exc_info=True)
-            wait_time = base_delay * (2 ** attempt) + random.uniform(1, 5)
-            logger.info(f"Tentando novamente em {wait_time:.2f} segundos...")
-            await asyncio.sleep(min(wait_time, max_delay))
+            continue
             
     else:
-        # Este bloco 'else' é executado se o loop 'for' terminar sem 'break'
         logger.error(f"\n❌ Falha ao conectar ao Discord após {max_retries} tentativas. O bot será desligado.")
     
     await shutdown_sequence()
