@@ -58,11 +58,14 @@ class MyBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.http_session = None
+        self._session = None  # Adicionado para armazenar a sessão do bot
 
     async def setup_hook(self):
         # Criar uma nova sessão HTTP com timeout
         timeout = aiohttp.ClientTimeout(total=60)  # 60 segundos de timeout
         self.http_session = aiohttp.ClientSession(timeout=timeout)
+        # Armazenar a sessão original para fechamento posterior
+        self._session = self.http._session
         # Substituir a sessão HTTP do discord.py pela nossa
         self.http._session = self.http_session
 
@@ -70,6 +73,9 @@ class MyBot(commands.Bot):
         # Fechar nossa sessão HTTP primeiro
         if self.http_session and not self.http_session.closed:
             await self.http_session.close()
+        # Restaurar a sessão original do discord.py
+        if self._session and not self._session.closed:
+            await self._session.close()
         # Depois chamar o close do bot
         await super().close()
 
@@ -278,7 +284,13 @@ async def shutdown_sequence():
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     for task in tasks:
         task.cancel()
+    
+    # Espera as tasks serem canceladas
     await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Fecha a sessão do bot
+    if not bot.is_closed():
+        await bot.close()
     
     logger.info("✅ Sequência de desligamento concluída")
 
@@ -291,30 +303,24 @@ async def run_bot():
     
     logger.info("\n🔑 Iniciando bot...")
     
-    # Parâmetros de Backoff melhorados
-    max_retries = 5  # Reduzido de 10 para 5
-    base_delay = 5.0  # Reduzido de 30 para 5 segundos
-    max_delay = 60.0  # Reduzido de 600 para 60 segundos
-    jitter = 2.0  # Reduzido de 5 para 2 segundos
+    max_retries = 5
+    base_delay = 5.0
+    max_delay = 60.0
+    jitter = 2.0
 
     for attempt in range(max_retries):
         try:
             logger.info(f"Tentativa {attempt + 1}/{max_retries} de conexão...")
             
-            # Usar a instância global do bot
-            bot_instance = bot
-            
-            # Adicionar delay crescente entre tentativas com jitter
             if attempt > 0:
-                wait_time = base_delay * (2 ** (attempt-1)) + random.uniform(0, jitter)
+                wait_time = min(base_delay * (2 ** (attempt-1)) + random.uniform(0, jitter), max_delay)
                 logger.info(f"Esperando {wait_time:.2f} segundos antes da próxima tentativa...")
                 await asyncio.sleep(wait_time)
             
             try:
-                # Configurar timeout explícito
-                async with asyncio.timeout(30):  # 30 segundos de timeout
-                    await bot_instance.start(token)
-                break  # Se chegou aqui, a conexão foi bem-sucedida
+                async with asyncio.timeout(30):
+                    await bot.start(token)
+                break
             except asyncio.TimeoutError:
                 logger.warning("Timeout ao conectar. Tentando novamente...")
                 continue
@@ -323,8 +329,8 @@ async def run_bot():
                 continue
 
         except discord.HTTPException as e:
-            if e.status == 429:  # Rate limited
-                retry_after = getattr(e, 'retry_after', base_delay * (2 ** attempt))
+            if e.status == 429:
+                retry_after = getattr(e, 'retry_after', min(base_delay * (2 ** attempt), max_delay))
                 logger.warning(f"Rate limit (429) atingido. Tentando novamente em {retry_after:.2f} segundos...")
                 await asyncio.sleep(retry_after)
             elif e.status in [401, 403]:
@@ -358,8 +364,8 @@ async def main():
         logger.error(f"Erro fatal na função main: {e}", exc_info=True)
     finally:
         # Garantir que o bot seja fechado corretamente
-        if 'bot_instance' in locals():
-            await bot_instance.close()
+        if not bot.is_closed():
+            await bot.close()
 
 if __name__ == "__main__":
     try:
