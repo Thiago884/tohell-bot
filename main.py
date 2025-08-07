@@ -137,6 +137,33 @@ user_stats = defaultdict(lambda: {
 user_notifications = defaultdict(list)
 table_message = None
 
+async def sync_commands(bot, force=False):
+    """Sincroniza comandos slash com tratamento de comandos já registrados"""
+    try:
+        if force:
+            # Força a sincronização removendo comandos existentes
+            bot.tree.clear_commands(guild=None)
+            synced = await bot.tree.sync()
+            logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente (forçado)")
+        else:
+            # Tenta sincronizar normalmente
+            synced = await bot.tree.sync()
+            logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente")
+
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            if force:
+                bot.tree.clear_commands(guild=guild)
+            bot.tree.copy_global_to(guild=guild)
+            synced_guild = await bot.tree.sync(guild=guild)
+            logger.info(f"✅ {len(synced_guild)} comandos sincronizados no servidor")
+            
+    except discord.app_commands.errors.CommandAlreadyRegistered as e:
+        logger.warning(f"⚠ Comandos já registrados: {e}")
+    except Exception as e:
+        logger.error(f"❌ Erro ao sincronizar comandos: {e}")
+        traceback.print_exc()
+
 @bot.event
 async def on_ready():
     """Evento disparado quando o bot está pronto"""
@@ -149,20 +176,8 @@ async def on_ready():
     logger.info("="*50 + "\n")
     
     # Sincronização de comandos slash
-    try:
-        # Sincronização global
-        synced = await bot.tree.sync()
-        logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente")
-
-        # Sincronização no servidor específico (opcional)
-        if GUILD_ID:
-            guild = discord.Object(id=GUILD_ID)
-            bot.tree.copy_global_to(guild=guild)
-            synced_guild = await bot.tree.sync(guild=guild)
-            logger.info(f"✅ {len(synced_guild)} comandos sincronizados no servidor")
-    except Exception as e:
-        logger.error(f"❌ Erro ao sincronizar comandos: {e}")
-
+    await sync_commands(bot)
+    
     # Verifica o canal de notificação
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
     if channel:
