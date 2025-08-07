@@ -291,7 +291,7 @@ async def run_bot():
             
             # Adicionar delay crescente entre tentativas com jitter
             if attempt > 0:
-                wait_time = min(base_delay * (2 ** (attempt-1)) + random.uniform(0, jitter))
+                wait_time = base_delay * (2 ** (attempt-1)) + random.uniform(0, jitter)
                 logger.info(f"Esperando {wait_time:.2f} segundos antes da próxima tentativa...")
                 await asyncio.sleep(wait_time)
             

@@ -447,22 +447,30 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
 
     # Função para cancelar tasks
     async def shutdown_tasks():
-        """Cancela todas as tasks do módulo"""
+        """Executa o desligamento limpo"""
+        logger.info("\n🛑 Iniciando sequência de desligamento...")
+        
+        # Cancela tasks específicas do bot
+        check_boss_respawns_task.cancel()
+        live_table_updater.cancel()
+        periodic_table_update.cancel()
+        
         try:
-            check_boss_respawns_task.cancel()
-            live_table_updater.cancel()
-            periodic_table_update.cancel()
+            await check_boss_respawns_task
+        except asyncio.CancelledError:
+            pass
             
-            # Aguarda as tasks serem realmente canceladas
-            await asyncio.gather(
-                check_boss_respawns_task,
-                live_table_updater,
-                periodic_table_update,
-                return_exceptions=True
-            )
-            logger.info("Todas as tasks foram canceladas com sucesso")
-        except Exception as e:
-            logger.error(f"Erro ao cancelar tasks: {e}", exc_info=True)
+        try:
+            await live_table_updater
+        except asyncio.CancelledError:
+            pass
+            
+        try:
+            await periodic_table_update
+        except asyncio.CancelledError:
+            pass
+            
+        logger.info("✅ Tasks canceladas com sucesso")
 
     # Adiciona a função de shutdown ao bot para ser chamada no desligamento
     bot.boss_commands_shutdown = shutdown_tasks
