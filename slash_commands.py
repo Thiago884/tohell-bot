@@ -8,7 +8,11 @@ from typing import Optional, List
 import os
 import traceback
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time
-from database import save_timer, save_user_stats, clear_timer, add_user_notification, remove_user_notification, load_db_data, add_sala_to_all_bosses, remove_sala_from_all_bosses
+from database import (
+    save_timer, save_user_stats, clear_timer, 
+    add_user_notification, remove_user_notification, load_db_data,
+    add_sala_to_all_bosses, remove_sala_from_all_bosses, create_backup, restore_backup
+)
 from views import BossControlView
 from discord.app_commands import CommandAlreadyRegistered
 
@@ -743,7 +747,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     ephemeral=True
                 )
     
-    # Comando para backup (apenas admins) (mantido original)
+    # Comando para backup (apenas admins) - corrigido
     if "backup" not in command_names:
         @bot.tree.command(name="backup", description="Gerencia backups do banco de dados (apenas admins)")
         @app_commands.describe(
@@ -763,7 +767,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     return
                 
-                # Verificação de permissão antes de qualquer outra verificação
+                # Verificação de permissão
                 if not interaction.user.guild_permissions.administrator:
                     await interaction.response.send_message(
                         "❌ Apenas administradores podem usar este comando.",
@@ -771,8 +775,9 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     return
                 
+                await interaction.response.defer(ephemeral=True)
+                
                 if action == "create":
-                    await interaction.response.defer(ephemeral=True)
                     backup_file = await create_backup()
                     if backup_file:
                         try:
@@ -794,7 +799,6 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         )
                 
                 elif action == "restore":
-                    await interaction.response.defer(ephemeral=True)
                     backup_files = [f for f in os.listdir() if f.startswith('backup_') and f.endswith('.json')]
                     if not backup_files:
                         await interaction.followup.send(
@@ -838,7 +842,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                 
                 else:
-                    await interaction.response.send_message(
+                    await interaction.followup.send(
                         "Ação inválida. Use 'create' ou 'restore'",
                         ephemeral=True
                     )
@@ -846,10 +850,13 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             except Exception as e:
                 print(f"Erro no comando slash backup: {e}")
                 traceback.print_exc()
-                await interaction.response.send_message(
-                    "Ocorreu um erro ao processar o backup.",
-                    ephemeral=True
-                )
+                try:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao processar o backup.",
+                        ephemeral=True
+                    )
+                except:
+                    pass
     
     # Comando de ajuda (mantido original)
     if "bosshelp" not in command_names:
