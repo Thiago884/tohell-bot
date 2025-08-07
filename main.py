@@ -181,8 +181,23 @@ async def on_ready():
     logger.info(f'🕒 Hora do servidor: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}')
     logger.info("="*50 + "\n")
     
-    # Sincronização de comandos slash
-    await sync_commands(bot)
+    # Sincronização de comandos slash - limpa comandos existentes primeiro
+    bot.tree.clear_commands(guild=None)
+    if GUILD_ID:
+        bot.tree.clear_commands(guild=discord.Object(id=GUILD_ID))
+    
+    try:
+        synced = await bot.tree.sync()
+        logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente")
+        
+        if GUILD_ID:
+            guild = discord.Object(id=GUILD_ID)
+            bot.tree.copy_global_to(guild=guild)
+            synced_guild = await bot.tree.sync(guild=guild)
+            logger.info(f"✅ {len(synced_guild)} comandos sincronizados no servidor")
+    except Exception as e:
+        logger.error(f"❌ Erro ao sincronizar comandos: {e}")
+        traceback.print_exc()
     
     # Verifica o canal de notificação
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
