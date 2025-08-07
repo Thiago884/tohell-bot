@@ -58,24 +58,18 @@ class MyBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.http_session = None
-        self._session = None  # Adicionado para armazenar a sessão do bot
 
     async def setup_hook(self):
         # Criar uma nova sessão HTTP com timeout
         timeout = aiohttp.ClientTimeout(total=60)  # 60 segundos de timeout
         self.http_session = aiohttp.ClientSession(timeout=timeout)
-        # Armazenar a sessão original para fechamento posterior
-        self._session = self.http._session
         # Substituir a sessão HTTP do discord.py pela nossa
-        self.http._session = self.http_session
+        self.http._HTTPClient__session = self.http_session
 
     async def close(self):
         # Fechar nossa sessão HTTP primeiro
         if self.http_session and not self.http_session.closed:
             await self.http_session.close()
-        # Restaurar a sessão original do discord.py
-        if self._session and not self._session.closed:
-            await self._session.close()
         # Depois chamar o close do bot
         await super().close()
 
