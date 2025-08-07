@@ -277,39 +277,34 @@ async def run_bot():
     logger.info("\n🔑 Iniciando bot...")
     
     # Parâmetros de Backoff melhorados
-    max_retries = 10  # Aumentado de 7 para 10
-    base_delay = 30.0  # Aumentado de 20 para 30 segundos
-    max_delay = 600.0  # Aumentado de 300 para 600 segundos (10 minutos)
-    jitter = 5.0  # Adiciona aleatoriedade para evitar sincronização
+    max_retries = 5  # Reduzido de 10 para 5
+    base_delay = 5.0  # Reduzido de 30 para 5 segundos
+    max_delay = 60.0  # Reduzido de 600 para 60 segundos
+    jitter = 2.0  # Reduzido de 5 para 2 segundos
 
     for attempt in range(max_retries):
         try:
             logger.info(f"Tentativa {attempt + 1}/{max_retries} de conexão...")
             
-            # Criar uma nova instância do bot para cada tentativa
-            bot_instance = MyBot(
-                command_prefix='!',
-                intents=intents,
-                help_command=None
-            )
+            # Usar a instância global do bot
+            bot_instance = bot
             
             # Adicionar delay crescente entre tentativas com jitter
             if attempt > 0:
-                wait_time = min(base_delay * (2 ** (attempt-1)) + random.uniform(0, jitter), max_delay)
+                wait_time = min(base_delay * (2 ** (attempt-1)) + random.uniform(0, jitter))
                 logger.info(f"Esperando {wait_time:.2f} segundos antes da próxima tentativa...")
                 await asyncio.sleep(wait_time)
             
             try:
-                # Tentar conectar com timeout
-                await asyncio.wait_for(bot_instance.start(token), timeout=60)
+                # Configurar timeout explícito
+                async with asyncio.timeout(30):  # 30 segundos de timeout
+                    await bot_instance.start(token)
                 break  # Se chegou aqui, a conexão foi bem-sucedida
             except asyncio.TimeoutError:
                 logger.warning("Timeout ao conectar. Tentando novamente...")
-                await bot_instance.close()
                 continue
             except Exception as e:
                 logger.error(f"Erro durante a execução do bot: {e}")
-                await bot_instance.close()
                 continue
 
         except discord.HTTPException as e:
