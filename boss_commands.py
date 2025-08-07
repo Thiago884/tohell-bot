@@ -368,6 +368,13 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
                             NOTIFICATION_CHANNEL_ID: int):
     """Configura todas as funcionalidades relacionadas a bosses"""
     
+    # Verificar se as tasks já foram iniciadas
+    if hasattr(bot, '_tasks_started'):
+        logger.info("Tasks já iniciadas anteriormente, pulando nova inicialização")
+        return
+    
+    bot._tasks_started = True
+    
     # Verifica se a tabela já foi enviada
     if table_message is None:
         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
@@ -471,6 +478,9 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
             pass
             
         logger.info("✅ Tasks canceladas com sucesso")
+        # Remove a flag de tasks iniciadas para permitir reinicialização
+        if hasattr(bot, '_tasks_started'):
+            del bot._tasks_started
 
     # Adiciona a função de shutdown ao bot para ser chamada no desligamento
     bot.boss_commands_shutdown = shutdown_tasks
