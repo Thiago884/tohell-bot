@@ -60,10 +60,13 @@ class MyBot(commands.Bot):
         self.http_session = None
 
     async def setup_hook(self):
-        # Criar uma nova sessão HTTP com timeout
-        timeout = aiohttp.ClientTimeout(total=60)  # 60 segundos de timeout
+        # Fechar sessão existente se houver
+        if self.http_session and not self.http_session.closed:
+            await self.http_session.close()
+            
+        # Criar nova sessão
+        timeout = aiohttp.ClientTimeout(total=60)
         self.http_session = aiohttp.ClientSession(timeout=timeout)
-        # Substituir a sessão HTTP do discord.py pela nossa
         self.http._HTTPClient__session = self.http_session
 
     async def close(self):
@@ -140,29 +143,23 @@ table_message = None
 async def sync_commands(bot, force=False):
     """Sincroniza comandos slash com tratamento de comandos já registrados"""
     try:
-        if force:
-            # Força a sincronização removendo comandos existentes
-            bot.tree.clear_commands(guild=None)
-            synced = await bot.tree.sync()
-            logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente (forçado)")
-        else:
-            # Tenta sincronizar normalmente
-            synced = await bot.tree.sync()
-            logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente")
-
+        # Sincronizar comandos globais
+        synced = await bot.tree.sync()
+        logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente")
+        
+        # Sincronizar comandos de guild específica se configurado
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
-            if force:
-                bot.tree.clear_commands(guild=guild)
             bot.tree.copy_global_to(guild=guild)
             synced_guild = await bot.tree.sync(guild=guild)
             logger.info(f"✅ {len(synced_guild)} comandos sincronizados no servidor")
             
-    except discord.app_commands.errors.CommandAlreadyRegistered as e:
-        logger.warning(f"⚠ Comandos já registrados: {e}")
     except Exception as e:
         logger.error(f"❌ Erro ao sincronizar comandos: {e}")
         traceback.print_exc()
+        # Tentar novamente em 5 segundos
+        await asyncio.sleep(5)
+        await sync_commands(bot, force=True)
 
 @bot.event
 async def on_ready():
@@ -312,51 +309,30 @@ async def run_bot():
     
     logger.info("\n🔑 Iniciando bot...")
     
-    max_retries = 5
+    max_retries = 3  # Reduzir para 3 tentativas
     base_delay = 5.0
-    max_delay = 60.0
-    jitter = 2.0
-
+    
     for attempt in range(max_retries):
         try:
             logger.info(f"Tentativa {attempt + 1}/{max_retries} de conexão...")
             
-            if attempt > 0:
-                wait_time = min(base_delay * (2 ** (attempt-1)) + random.uniform(0, jitter), max_delay)
-                logger.info(f"Esperando {wait_time:.2f} segundos antes da próxima tentativa...")
-                await asyncio.sleep(wait_time)
-            
-            try:
-                async with asyncio.timeout(30):
-                    await bot.start(token)
-                break
-            except asyncio.TimeoutError:
-                logger.warning("Timeout ao conectar. Tentando novamente...")
-                continue
-            except Exception as e:
-                logger.error(f"Erro durante a execução do bot: {e}")
-                continue
-
-        except discord.HTTPException as e:
-            if e.status == 429:
-                retry_after = getattr(e, 'retry_after', min(base_delay * (2 ** attempt), max_delay))
-                logger.warning(f"Rate limit (429) atingido. Tentando novamente em {retry_after:.2f} segundos...")
-                await asyncio.sleep(retry_after)
-            elif e.status in [401, 403]:
-                logger.error(f"\n❌ Erro de Autenticação ({e.status}). Token inválido. Verifique o token do bot.")
-                break
-            else:
-                logger.error(f"\n❌ Erro HTTP não tratado na conexão: {e}")
-                continue
+            # Fechar o bot se já estiver em execução
+            if not bot.is_closed():
+                await bot.close()
                 
-        except Exception as e:
-            logger.error(f"\n❌ Erro inesperado durante a conexão: {e}", exc_info=True)
-            continue
+            await bot.start(token)
+            break  # Se chegou aqui, a conexão foi bem-sucedida
             
-    else:
-        logger.error(f"\n❌ Falha ao conectar ao Discord após {max_retries} tentativas. O bot será desligado.")
-    
-    await shutdown_sequence()
+        except Exception as e:
+            logger.error(f"Erro na tentativa {attempt + 1}: {str(e)}")
+            if attempt == max_retries - 1:
+                logger.error("❌ Falha ao conectar após várias tentativas")
+                await shutdown_sequence()
+                return
+            
+            wait_time = min(base_delay * (2 ** attempt), 30)  # Max 30 segundos
+            logger.info(f"Esperando {wait_time:.2f} segundos antes da próxima tentativa...")
+            await asyncio.sleep(wait_time)
 
 async def main():
     """Ponto de entrada principal"""
