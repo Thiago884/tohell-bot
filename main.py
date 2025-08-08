@@ -63,7 +63,6 @@ intents = discord.Intents.all()
 class MyBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.http_session = None
         self._is_closed = False
         self._tasks_started = False
         self.start_time = datetime.now()
@@ -71,38 +70,36 @@ class MyBot(commands.Bot):
     async def setup_hook(self):
         """Configuração inicial do bot com tratamento de sessão HTTP"""
         logger.info("Configurando hook inicial...")
-        
-        # Fechar sessão existente se houver
-        if hasattr(self, 'http_session') and self.http_session and not self.http_session.closed:
-            logger.debug("Fechando sessão HTTP existente...")
-            await self.http_session.close()
-            
-        # Criar nova sessão com timeout configurado
+
+        # O discord.py cria uma sessão HTTP padrão. Para usar uma sessão customizada,
+        # primeiro guardamos uma referência à sessão antiga.
+        old_session = self.http._HTTPClient__session
+
+        # Em seguida, criamos nossa nova sessão e a atribuímos ao cliente HTTP do bot.
         timeout = aiohttp.ClientTimeout(total=60)
-        self.http_session = aiohttp.ClientSession(timeout=timeout)
-        logger.debug("Nova sessão HTTP criada")
-        
-        # Atualizar a sessão HTTP do discord.py
-        self.http._HTTPClient__session = self.http_session
-        logger.info("Hook inicial configurado com sucesso")
+        self.http._HTTPClient__session = aiohttp.ClientSession(timeout=timeout)
+        logger.debug("Sessão HTTP personalizada criada e atribuída.")
+
+        # Finalmente, fechamos a sessão antiga para evitar vazamentos de recursos.
+        if old_session:
+            await old_session.close()
+            logger.debug("Sessão HTTP padrão fechada com sucesso.")
+
+        logger.info("Hook inicial configurado com sucesso.")
 
     async def close(self):
         """Fechamento limpo do bot"""
         if self._is_closed:
             return
-            
+
         logger.info("Iniciando fechamento limpo do bot...")
         self._is_closed = True
-        
-        # Fechar nossa sessão HTTP primeiro
-        if hasattr(self, 'http_session') and self.http_session and not self.http_session.closed:
-            logger.debug("Fechando sessão HTTP...")
-            await self.http_session.close()
-            
-        # Depois chamar o close do bot
-        logger.debug("Chamando close() da classe pai...")
+
+        # A chamada a super().close() já cuida do fechamento da sessão HTTP
+        # que foi atribuída em setup_hook.
+        logger.debug("Chamando close() da classe pai para finalizar a conexão...")
         await super().close()
-        logger.info("Bot fechado corretamente")
+        logger.info("Bot fechado corretamente.")
 
     async def on_error(self, event, *args, **kwargs):
         logger.error(f'Erro no evento {event}:', exc_info=True)
@@ -145,10 +142,10 @@ for boss in BOSSES:
                 'closed_time': None,
                 'recorded_by': None,
                 'opened_notified': False
-            } 
+            }
             for sala in range(1, 9)  # Salas 1-8 para todos os bosses normais
         }
-        
+
         # Adiciona sala 20 apenas para bosses especiais
         if boss in special_bosses_with_20:
             boss_timers[boss][20] = {
@@ -158,7 +155,7 @@ for boss in BOSSES:
                 'recorded_by': None,
                 'opened_notified': False
             }
-    
+
     # Log detalhado para verificar as salas de cada boss
     logger.debug(f"Boss '{boss}' carregado com salas: {list(boss_timers[boss].keys())}")
 
@@ -175,18 +172,18 @@ async def sync_commands(bot, force=False):
     """Sincroniza comandos slash com tratamento de comandos já registrados"""
     try:
         logger.info("Iniciando sincronização de comandos...")
-        
+
         # Sincronizar comandos globais
         synced = await bot.tree.sync()
         logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente")
-        
+
         # Sincronizar comandos de guild específica se configurado
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
             bot.tree.copy_global_to(guild=guild)
             synced_guild = await bot.tree.sync(guild=guild)
             logger.info(f"✅ {len(synced_guild)} comandos sincronizados no servidor")
-            
+
     except Exception as e:
         logger.error(f"❌ Erro ao sincronizar comandos: {e}", exc_info=True)
         # Tentar novamente em 5 segundos
@@ -201,20 +198,20 @@ async def on_ready():
     logger.info(f'🕒 Hora do servidor: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}')
     logger.info(f'⏱ Tempo de inicialização: {(datetime.now() - bot.start_time).total_seconds():.2f} segundos')
     logger.info("="*50 + "\n")
-    
+
     # Adiciona um delay inicial para evitar rate limits
     await asyncio.sleep(5)
-    
+
     # Sincronização de comandos slash - limpa comandos existentes primeiro
     logger.info("Limpando comandos existentes...")
     bot.tree.clear_commands(guild=None)
     if GUILD_ID:
         bot.tree.clear_commands(guild=discord.Object(id=GUILD_ID))
-    
+
     try:
         synced = await bot.tree.sync()
         logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente")
-        
+
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
             bot.tree.copy_global_to(guild=guild)
@@ -222,19 +219,19 @@ async def on_ready():
             logger.info(f"✅ {len(synced_guild)} comandos sincronizados no servidor")
     except Exception as e:
         logger.error(f"❌ Erro ao sincronizar comandos: {e}", exc_info=True)
-    
+
     # Verifica o canal de notificação
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
     if channel:
         logger.info(f'📢 Canal de notificações: #{channel.name} (ID: {channel.id})')
-        
+
         global table_message
         table_message = None
         try:
             from boss_commands import update_table
             table_message = await update_table(
-                bot, channel, boss_timers, 
-                user_stats, user_notifications, 
+                bot, channel, boss_timers,
+                user_stats, user_notifications,
                 table_message, NOTIFICATION_CHANNEL_ID
             )
             logger.info("✅ Tabela enviada com sucesso no canal!")
@@ -242,7 +239,7 @@ async def on_ready():
             logger.error(f"❌ Erro ao enviar tabela inicial: {e}", exc_info=True)
     else:
         logger.error(f'⚠ ATENÇÃO: Canal de notificação (ID: {NOTIFICATION_CHANNEL_ID}) não encontrado!')
-    
+
     await bot.change_presence(activity=discord.Game(name="Use /bosshelp"))
 
     # Inicialização do banco de dados
@@ -253,25 +250,25 @@ async def on_ready():
         logger.info("✅ Dados carregados com sucesso!")
     except Exception as e:
         logger.error(f"❌ Erro ao inicializar banco de dados: {e}", exc_info=True)
-    
+
     # Configura comandos
     logger.info("\nConfigurando comandos...")
     try:
         boss_funcs = await setup_boss_commands(
-            bot, boss_timers, user_stats, 
+            bot, boss_timers, user_stats,
             user_notifications, table_message, NOTIFICATION_CHANNEL_ID
         )
-        
+
         await setup_slash_commands(
             bot, boss_timers, user_stats, user_notifications,
             table_message, NOTIFICATION_CHANNEL_ID, *boss_funcs
         )
-        
+
         await setup_drops_command(bot)
         logger.info("✅ Comandos configurados com sucesso!")
     except Exception as e:
         logger.error(f"❌ Erro ao configurar comandos: {e}", exc_info=True)
-    
+
     logger.info("\n✅ Bot totalmente inicializado e pronto para uso!")
     logger.info(f"⏱ Tempo total de inicialização: {(datetime.now() - bot.start_time).total_seconds():.2f} segundos")
 
@@ -293,12 +290,12 @@ async def sync(ctx):
     try:
         synced = await bot.tree.sync()
         msg = f"✅ {len(synced)} comandos sincronizados globalmente"
-        
+
         if ctx.guild:
             bot.tree.copy_global_to(guild=ctx.guild)
             synced_guild = await bot.tree.sync(guild=ctx.guild)
             msg += f"\n✅ {len(synced_guild)} comandos sincronizados neste servidor"
-        
+
         await ctx.send(msg)
     except Exception as e:
         await ctx.send(f"❌ Erro ao sincronizar comandos: {e}")
@@ -312,70 +309,70 @@ def keep_alive():
 async def shutdown_sequence():
     """Executa o desligamento limpo"""
     logger.info("\n🛑 Iniciando sequência de desligamento...")
-    
+
     # Cancela tasks específicas do bot
     if hasattr(bot, 'boss_commands_shutdown'):
         logger.info("Cancelando tasks de boss commands...")
         await bot.boss_commands_shutdown()
-    
+
     # Cancela outras tasks
     tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     logger.info(f"Cancelando {len(tasks)} tasks pendentes...")
     for task in tasks:
         task.cancel()
-    
+
     # Espera as tasks serem canceladas
     logger.info("Aguardando tasks serem canceladas...")
     await asyncio.gather(*tasks, return_exceptions=True)
-    
+
     # Fecha a sessão do bot
     if not bot.is_closed():
         logger.info("Fechando conexão do bot...")
         await bot.close()
-    
+
     logger.info("✅ Sequência de desligamento concluída")
 
 async def run_bot():
     """Função principal para executar o bot com retry backoff"""
     global bot
-    
+
     token = os.getenv('DISCORD_TOKEN')
     if not token:
         logger.error("\n❌ ERRO: Token não encontrado na variável de ambiente DISCORD_TOKEN!")
         return
-    
+
     logger.info("\n🔑 Iniciando bot...")
-    
+
     max_retries = 3
     base_delay = 5.0
-    
+
     for attempt in range(max_retries):
         try:
             logger.info(f"\nTentativa {attempt + 1}/{max_retries} de conexão...")
-            
+
             # Fechar o bot se já estiver em execução
             if not bot.is_closed():
                 logger.debug("Fechando instância anterior do bot...")
                 await bot.close()
-                
+
             # Criar nova instância do bot para garantir limpeza
             bot = MyBot(
                 command_prefix='!',
                 intents=intents,
                 help_command=None
             )
-            
+
             logger.debug("Iniciando conexão com o Discord...")
             await bot.start(token)
             break  # Se chegou aqui, a conexão foi bem-sucedida
-            
+
         except Exception as e:
             logger.error(f"❌ Erro na tentativa {attempt + 1}: {str(e)}", exc_info=True)
             if attempt == max_retries - 1:
                 logger.error("❌ Falha ao conectar após várias tentativas")
                 await shutdown_sequence()
                 return
-            
+
             wait_time = min(base_delay * (2 ** attempt), 30)  # Max 30 segundos
             logger.info(f"⏱ Esperando {wait_time:.2f} segundos antes da próxima tentativa...")
             await asyncio.sleep(wait_time)
@@ -388,18 +385,18 @@ async def shutdown_signal_handler():
 async def main():
     """Ponto de entrada principal"""
     keep_alive()
-    
+
     # Adicionar delay inicial maior para garantir que o ambiente de hospedagem se estabilize
     initial_delay = random.uniform(30, 60)  # 30-60 segundos de delay inicial
     logger.info(f"⏱ Aguardando {initial_delay:.2f} segundos antes de iniciar...")
     await asyncio.sleep(initial_delay)
-    
+
     try:
         # Configurar manipulador de sinal
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(shutdown_signal_handler()))
-        
+
         await run_bot()
     except Exception as e:
         logger.error(f"❌ Erro fatal na função main: {e}", exc_info=True)
