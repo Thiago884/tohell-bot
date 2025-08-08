@@ -65,9 +65,11 @@ class MyBot(commands.Bot):
         if hasattr(self, 'http_session') and self.http_session and not self.http_session.closed:
             await self.http_session.close()
             
-        # Criar nova sessão
+        # Criar nova sessão com timeout configurado
         timeout = aiohttp.ClientTimeout(total=60)
         self.http_session = aiohttp.ClientSession(timeout=timeout)
+        
+        # Atualizar a sessão HTTP do discord.py
         self.http._HTTPClient__session = self.http_session
 
     async def close(self):
@@ -82,6 +84,9 @@ class MyBot(commands.Bot):
             
         # Depois chamar o close do bot
         await super().close()
+
+    async def on_error(self, event, *args, **kwargs):
+        logger.error(f'Erro no evento {event}:', exc_info=True)
 
 bot = MyBot(
     command_prefix='!',
@@ -316,7 +321,7 @@ async def run_bot():
     
     logger.info("\n🔑 Iniciando bot...")
     
-    max_retries = 3  # Reduzir para 3 tentativas
+    max_retries = 3
     base_delay = 5.0
     
     for attempt in range(max_retries):
