@@ -12,6 +12,59 @@ from database import save_timer, save_user_stats, clear_timer, add_user_notifica
 
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
+def create_boss_embed(boss_timers, compact=False):
+    now = datetime.now(brazil_tz)
+    
+    embed = discord.Embed(
+        title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
+        color=discord.Color.gold()
+    )
+    
+    for boss in boss_timers:
+        boss_info = []
+        for sala in boss_timers[boss]:
+            timers = boss_timers[boss][sala]
+            
+            if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
+                continue
+                
+            if compact and timers['death_time'] is None:
+                continue
+                
+            death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
+            respawn_time = timers['respawn_time'].strftime("%H:%M") if timers['respawn_time'] else "--:--"
+            closed_time = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
+            recorded_by = f" ({timers['recorded_by']})" if timers['recorded_by'] else ""
+            
+            status = ""
+            if timers['respawn_time']:
+                if now >= timers['respawn_time']:
+                    if timers['closed_time'] and now >= timers['closed_time']:
+                        status = "❌"
+                    else:
+                        status = "✅"
+                else:
+                    time_left = format_time_remaining(timers['respawn_time'])
+                    status = f"🕒 ({time_left})"
+            else:
+                status = "❌"
+            
+            boss_info.append(
+                f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
+            )
+        
+        if not boss_info and compact:
+            continue
+            
+        if boss_info:
+            embed.add_field(
+                name=f"**{boss}**",
+                value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
+                inline=False
+            )
+    
+    return embed
+
 class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
     boss = discord.ui.TextInput(
         label="Nome do Boss",
@@ -20,26 +73,24 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
     )
     
     sala = discord.ui.TextInput(
-        label="Sala (1-20)",
-        placeholder="Digite um número de 1 a 20",
+        label="Sala (1-8)",
+        placeholder="Digite um número de 1 a 8",
         required=True,
-        max_length=2
+        max_length=1
     )
     
     horario = discord.ui.TextInput(
         label="Horário da morte",
         placeholder="Ex: 14:30 ou 14h30",
         required=True,
-        max_length=5,
-        style=TextStyle.short
+        max_length=5
     )
     
     foi_ontem = discord.ui.TextInput(
         label="Foi ontem? (S/N)",
         placeholder="Digite S para sim ou N para não",
         required=False,
-        max_length=1,
-        style=TextStyle.short
+        max_length=1
     )
 
     def __init__(self, bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
@@ -68,29 +119,15 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
             
             try:
                 sala = int(self.sala.value)
-                # Verifica se a sala existe para este boss
-                if sala not in self.boss_timers[boss_name]:
+                if sala not in self.boss_timers[boss_name].keys():
                     await interaction.response.send_message(
-                        f"Sala inválida. Salas disponíveis para {boss_name}: {', '.join(map(str, self.boss_timers[boss_name].keys()))}",
+                        f"Sala inválida. Salas disponíveis: {', '.join(map(str, self.boss_timers[boss_name].keys()))}",
                         ephemeral=True
                     )
                     return
             except ValueError:
                 await interaction.response.send_message(
-                    "Sala inválida. Digite um número válido.",
-                    ephemeral=True
-                )
-                return
-
-            # Verificação corrigida - só impede se o boss estiver agendado (ainda não abriu)
-            timers = self.boss_timers[boss_name][sala]
-            now = datetime.now(brazil_tz)
-            
-            if timers['respawn_time'] and now < timers['respawn_time']:  # Boss agendado e ainda não abriu
-                await interaction.response.send_message(
-                    f"⚠ O boss **{boss_name} (Sala {sala})** já está agendado e ainda não abriu!\n"
-                    f"Status atual: 🕒 Abre em {format_time_remaining(timers['respawn_time'])}\n"
-                    f"Para registrar um novo horário, primeiro use o botão 'Limpar Boss'",
+                    "Sala inválida. Digite um número entre 1 e 8.",
                     ephemeral=True
                 )
                 return
@@ -150,7 +187,21 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 )
                 
                 # Enviar a tabela atualizada
-                await self.update_table_func()
+                embed = create_boss_embed(self.boss_timers)
+                view = BossControlView(
+                    self.bot,
+                    self.boss_timers,
+                    self.user_stats,
+                    self.user_notifications,
+                    self.table_message,
+                    self.NOTIFICATION_CHANNEL_ID,
+                    self.update_table_func,
+                    self.create_next_bosses_embed_func,
+                    self.create_ranking_embed_func,
+                    self.create_history_embed_func,
+                    self.create_unrecorded_embed_func
+                )
+                await interaction.followup.send(embed=embed, view=view)
                 
             except ValueError:
                 await interaction.response.send_message(
@@ -170,16 +221,14 @@ class LimparBossModal(Modal, title="Limpar Boss"):
     boss = discord.ui.TextInput(
         label="Nome do Boss",
         placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
-        required=True,
-        style=TextStyle.short
+        required=True
     )
     
     sala = discord.ui.TextInput(
-        label="Sala (1-20) - Opcional",
+        label="Sala (1-8) - Opcional",
         placeholder="Deixe em branco para limpar todas",
         required=False,
-        max_length=2,
-        style=TextStyle.short
+        max_length=1
     )
 
     def __init__(self, bot, boss_timers, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
@@ -244,13 +293,27 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                     )
                 except ValueError:
                     await interaction.response.send_message(
-                        "Sala inválida. Digite um número entre 1 e 20 ou deixe em branco para limpar todas.",
+                        "Sala inválida. Digite um número entre 1 e 8 ou deixe em branco para limpar todas.",
                         ephemeral=True
                     )
                     return
             
             # Enviar a tabela atualizada
-            await self.update_table_func()
+            embed = create_boss_embed(self.boss_timers)
+            view = BossControlView(
+                self.bot,
+                self.boss_timers,
+                {},  # user_stats não é usado na view
+                {},  # user_notifications não é usado na view
+                self.table_message,
+                self.NOTIFICATION_CHANNEL_ID,
+                self.update_table_func,
+                self.create_next_bosses_embed_func,
+                self.create_ranking_embed_func,
+                self.create_history_embed_func,
+                self.create_unrecorded_embed_func
+            )
+            await interaction.followup.send(embed=embed, view=view)
             
         except Exception as e:
             print(f"Erro no modal de limpar boss: {str(e)}")
@@ -264,16 +327,14 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
     boss = discord.ui.TextInput(
         label="Nome do Boss",
         placeholder="Ex: Hydra, Hell Maine, Red Dragon...",
-        required=True,
-        style=TextStyle.short
+        required=True
     )
     
     action = discord.ui.TextInput(
         label="Ação (adicionar/remover)",
         placeholder="Digite 'add' para adicionar ou 'rem' para remover",
         required=True,
-        max_length=3,
-        style=TextStyle.short
+        max_length=3
     )
 
     def __init__(self, boss_timers, user_notifications):
@@ -311,7 +372,7 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
                         )
                 else:
                     await interaction.response.send_message(
-                        f"ℹ Você já está sendo notificado para **{boss_name}.",
+                        f"ℹ Você já está sendo notificado para **{boss_name}**.",
                         ephemeral=True
                     )
             
@@ -320,7 +381,7 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
                     if await remove_user_notification(user_id, boss_name):
                         self.user_notifications[user_id].remove(boss_name)
                         await interaction.response.send_message(
-                            f"✅ Você NÃO será mais notificado para **{boss_name}.",
+                            f"✅ Você NÃO será mais notificado para **{boss_name}**.",
                             ephemeral=True
                         )
                     else:
@@ -330,7 +391,7 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
                         )
                 else:
                     await interaction.response.send_message(
-                        f"ℹ Você não tinha notificação ativa para **{boss_name}.",
+                        f"ℹ Você não tinha notificação ativa para **{boss_name}**.",
                         ephemeral=True
                     )
             else:
