@@ -12,74 +12,6 @@ from database import save_timer, save_user_stats, clear_timer, add_user_notifica
 
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
-def create_boss_embed(boss_timers, compact=False):
-    now = datetime.now(brazil_tz)
-    
-    embed = discord.Embed(
-        title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
-        color=discord.Color.gold()
-    )
-    
-    for boss in boss_timers:
-        boss_info = []
-        for sala in sorted(boss_timers[boss].keys()):  # Ordena as salas numericamente
-            # Para Erohim, mostrar apenas sala 20
-            if boss == "Erohim" and sala != 20:
-                continue
-                
-            timers = boss_timers[boss][sala]
-            
-            # Pular bosses que já fecharam e não foram registrados
-            if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
-                continue
-                
-            if compact and timers['death_time'] is None:
-                continue
-                
-            death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
-            respawn_time = timers['respawn_time'].strftime("%H:%M") if timers['respawn_time'] else "--:--"
-            closed_time = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
-            recorded_by = f" ({timers['recorded_by']})" if timers['recorded_by'] else ""
-            
-            status = ""
-            if timers['respawn_time']:
-                if now >= timers['respawn_time']:
-                    if timers['closed_time'] and now >= timers['closed_time']:
-                        status = "❌"
-                    else:
-                        status = "✅"
-                else:
-                    time_left = format_time_remaining(timers['respawn_time'])
-                    status = f"🕒 ({time_left})"
-            else:
-                status = "❌"
-            
-            boss_info.append(
-                f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
-            )
-        
-        if not boss_info and compact:
-            continue
-            
-        # Mostrar Erohim apenas se a sala 20 existir
-        if boss == "Erohim":
-            if 20 in boss_timers[boss]:
-                embed.add_field(
-                    name=f"**{boss}**",
-                    value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
-                    inline=False
-                )
-        else:
-            # Para outros bosses, mostrar todas as salas (1-8 e 20 para bosses especiais)
-            if boss_info or not compact:  # Mostrar mesmo sem informações se não for compacto
-                embed.add_field(
-                    name=f"**{boss}**",
-                    value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
-                    inline=False
-                )
-    
-    return embed
-
 class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
     boss = discord.ui.TextInput(
         label="Nome do Boss",
@@ -218,21 +150,7 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 )
                 
                 # Enviar a tabela atualizada
-                embed = create_boss_embed(self.boss_timers)
-                view = BossControlView(
-                    self.bot,
-                    self.boss_timers,
-                    self.user_stats,
-                    self.user_notifications,
-                    self.table_message,
-                    self.NOTIFICATION_CHANNEL_ID,
-                    self.update_table_func,
-                    self.create_next_bosses_embed_func,
-                    self.create_ranking_embed_func,
-                    self.create_history_embed_func,
-                    self.create_unrecorded_embed_func
-                )
-                await interaction.followup.send(embed=embed, view=view)
+                await self.update_table_func()
                 
             except ValueError:
                 await interaction.response.send_message(
@@ -332,21 +250,7 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                     return
             
             # Enviar a tabela atualizada
-            embed = create_boss_embed(self.boss_timers)
-            view = BossControlView(
-                self.bot,
-                self.boss_timers,
-                {},  # user_stats não é usado na view
-                {},  # user_notifications não é usado na view
-                self.table_message,
-                self.NOTIFICATION_CHANNEL_ID,
-                self.update_table_func,
-                self.create_next_bosses_embed_func,
-                self.create_ranking_embed_func,
-                self.create_history_embed_func,
-                self.create_unrecorded_embed_func
-            )
-            await interaction.followup.send(embed=embed, view=view)
+            await self.update_table_func()
             
         except Exception as e:
             print(f"Erro no modal de limpar boss: {str(e)}")

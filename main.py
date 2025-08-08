@@ -337,6 +337,8 @@ async def shutdown_sequence():
 
 async def run_bot():
     """Função principal para executar o bot com retry backoff"""
+    global bot
+    
     token = os.getenv('DISCORD_TOKEN')
     if not token:
         logger.error("\n❌ ERRO: Token não encontrado na variável de ambiente DISCORD_TOKEN!")
@@ -357,7 +359,6 @@ async def run_bot():
                 await bot.close()
                 
             # Criar nova instância do bot para garantir limpeza
-            global bot
             bot = MyBot(
                 command_prefix='!',
                 intents=intents,
