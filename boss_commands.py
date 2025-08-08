@@ -36,8 +36,8 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
     except discord.Forbidden:
         logger.warning(f"Usuário {user_id} bloqueou DMs ou não aceita mensagens")
     except discord.HTTPException as e:
-        if e.code == 429:  # Rate limited
-            retry_after = getattr(e, 'retry_after', 5)  # Default 5 seconds
+        if e.status == 429:
+            retry_after = e.retry_after
             logger.warning(f"Rate limit ao enviar DM. Tentando novamente em {retry_after} segundos")
             await asyncio.sleep(retry_after)
             return await send_notification_dm(bot, user_id, boss_name, sala, respawn_time, closed_time)
@@ -45,9 +45,11 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
             logger.error(f"Erro ao enviar DM para {user_id}: {e}", exc_info=True)
     except Exception as e:
         logger.error(f"Erro ao enviar DM para {user_id}: {e}", exc_info=True)
+    
     return False
 
-def create_boss_embed(boss_timers, compact=False):
+async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed:
+    """Cria embed com a tabela de timers de boss"""
     now = datetime.now(brazil_tz)
     
     embed = discord.Embed(
@@ -57,11 +59,7 @@ def create_boss_embed(boss_timers, compact=False):
     
     for boss in boss_timers:
         boss_info = []
-        for sala in sorted(boss_timers[boss].keys()):  # Ordena as salas numericamente
-            # Para Erohim, mostrar apenas sala 20
-            if boss == "Erohim" and sala != 20:
-                continue
-                
+        for sala in boss_timers[boss]:
             timers = boss_timers[boss][sala]
             
             # Pular bosses que já fecharam e não foram registrados
@@ -80,14 +78,14 @@ def create_boss_embed(boss_timers, compact=False):
             if timers['respawn_time']:
                 if now >= timers['respawn_time']:
                     if timers['closed_time'] and now >= timers['closed_time']:
-                        status = "❌"
+                        status = "❌"  # Boss fechado
                     else:
-                        status = "✅"
+                        status = "✅"  # Boss aberto
                 else:
                     time_left = format_time_remaining(timers['respawn_time'])
-                    status = f"🕒 ({time_left})"
+                    status = f"🕒 ({time_left})"  # Boss agendado
             else:
-                status = "❌"
+                status = "❌"  # Sem registro
             
             boss_info.append(
                 f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
@@ -96,22 +94,12 @@ def create_boss_embed(boss_timers, compact=False):
         if not boss_info and compact:
             continue
             
-        # Mostrar Erohim apenas se a sala 20 existir
-        if boss == "Erohim":
-            if 20 in boss_timers[boss]:
-                embed.add_field(
-                    name=f"**{boss}**",
-                    value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
-                    inline=False
-                )
-        else:
-            # Para outros bosses, mostrar todas as salas (1-8 e 20 para bosses especiais)
-            if boss_info or not compact:  # Mostrar mesmo sem informações se não for compacto
-                embed.add_field(
-                    name=f"**{boss}**",
-                    value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
-                    inline=False
-                )
+        if boss_info:
+            embed.add_field(
+                name=f"**{boss}**",
+                value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
+                inline=False
+            )
     
     return embed
 
@@ -187,71 +175,51 @@ async def create_ranking_embed(bot, user_stats: Dict) -> discord.Embed:
 async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict, 
                       user_notifications: Dict, table_message: discord.Message, 
                       NOTIFICATION_CHANNEL_ID: int):
-    """Atualiza a mensagem da tabela de bosses com tratamento de rate limit"""
-    max_retries = 3
-    retry_delay = 5  # segundos
-    
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"Tentativa {attempt + 1} de atualização da tabela de bosses...")
-            embed = create_boss_embed(boss_timers)
-            view = BossControlView(
-                bot, 
-                boss_timers, 
-                user_stats, 
-                user_notifications, 
-                table_message, 
-                NOTIFICATION_CHANNEL_ID,
-                lambda: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
-                lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
-                lambda: create_ranking_embed(bot, user_stats),
-                lambda: create_history_embed(bot, boss_timers),
-                lambda: create_unrecorded_embed(bot, boss_timers)
-            )
-            
-            # Adiciona delay entre requisições
-            await asyncio.sleep(1)
-            
-            # Se não temos mensagem de tabela, envia uma nova
-            if table_message is None:
-                logger.info("Nenhuma tabela existente encontrada, enviando nova...")
-                try:
-                    table_message = await channel.send(embed=embed, view=view)
-                    logger.info("✅ Nova tabela enviada com sucesso!")
-                    return table_message
-                except discord.HTTPException as e:
-                    if e.status == 429:  # Rate limited
-                        retry_after = getattr(e, 'retry_after', retry_delay)
-                        logger.warning(f"Rate limit ao enviar nova tabela. Tentando novamente em {retry_after} segundos")
-                        await asyncio.sleep(retry_after)
-                        continue
-                    raise
-            
-            # Tenta editar a mensagem existente
+    """Atualiza a mensagem da tabela de bosses"""
+    try:
+        logger.info("Iniciando atualização da tabela de bosses...")
+        embed = await create_boss_embed(boss_timers)
+        view = BossControlView(
+            bot, 
+            boss_timers, 
+            user_stats, 
+            user_notifications, 
+            table_message, 
+            NOTIFICATION_CHANNEL_ID,
+            lambda: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
+            lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
+            lambda: create_ranking_embed(bot, user_stats),
+            lambda: create_history_embed(bot, boss_timers),
+            lambda: create_unrecorded_embed(bot, boss_timers)
+        )
+        
+        # Se não temos mensagem de tabela, envia uma nova
+        if table_message is None:
+            logger.info("Nenhuma tabela existente encontrada, enviando nova...")
             try:
-                await table_message.edit(embed=embed, view=view)
-                logger.info("✅ Tabela existente atualizada com sucesso!")
-                return table_message
-            except discord.NotFound:
-                logger.warning("⚠ Tabela anterior não encontrada, enviando nova...")
                 table_message = await channel.send(embed=embed, view=view)
+                logger.info("✅ Nova tabela enviada com sucesso!")
                 return table_message
-            except discord.HTTPException as e:
-                if e.status == 429:  # Rate limited
-                    retry_after = getattr(e, 'retry_after', retry_delay)
-                    logger.warning(f"Rate limit ao editar tabela. Tentando novamente em {retry_after} segundos")
-                    await asyncio.sleep(retry_after)
-                    continue
-                raise
-                
+            except Exception as e:
+                logger.error(f"❌ Erro ao enviar nova tabela: {e}")
+                return None
+        
+        # Tenta editar a mensagem existente
+        try:
+            await table_message.edit(embed=embed, view=view)
+            logger.info("✅ Tabela existente atualizada com sucesso!")
+            return table_message
+        except discord.NotFound:
+            logger.warning("⚠ Tabela anterior não encontrada, enviando nova...")
+            table_message = await channel.send(embed=embed, view=view)
+            return table_message
         except Exception as e:
-            logger.error(f"❌ Erro na tentativa {attempt + 1}: {e}")
-            if attempt == max_retries - 1:
-                logger.error("❌ Falha ao atualizar tabela após várias tentativas")
-                return table_message
-            await asyncio.sleep(retry_delay)
-    
-    return table_message
+            logger.error(f"❌ Erro ao editar tabela existente: {e}")
+            return table_message
+            
+    except Exception as e:
+        logger.error(f"❌ Erro crítico na atualização da tabela: {e}", exc_info=True)
+        return table_message
 
 async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict, 
                              NOTIFICATION_CHANNEL_ID: int, update_table_func):
@@ -328,7 +296,7 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
                 await channel.send(message)
             except discord.HTTPException as e:
                 if e.status == 429:
-                    retry_after = getattr(e, 'retry_after', 5)
+                    retry_after = e.retry_after
                     logger.warning(f"Rate limit nas notificações. Tentando novamente em {retry_after} segundos")
                     await asyncio.sleep(retry_after)
                     await channel.send(message[:2000])  # Envia mensagem truncada se necessário
@@ -347,15 +315,12 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
                 )
                 await asyncio.sleep(1)  # Delay entre notificações DM
         
-        # FIX: Only update the table if there were any state changes (indicated by notifications).
-        # This prevents an API call every minute and avoids rate limits.
-        if notifications:
-            await asyncio.sleep(1)  # Delay antes de atualizar a tabela
-            await update_table_func()
+        await asyncio.sleep(1)  # Delay antes de atualizar a tabela
+        await update_table_func()
     
     except discord.HTTPException as e:
         if e.status == 429:
-            retry_after = getattr(e, 'retry_after', 5)
+            retry_after = e.retry_after
             logger.warning(f"Rate limit na verificação de respawns. Tentando novamente em {retry_after} segundos")
             await asyncio.sleep(retry_after)
         else:
@@ -368,13 +333,6 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
                             NOTIFICATION_CHANNEL_ID: int):
     """Configura todas as funcionalidades relacionadas a bosses"""
     
-    # Verificar se as tasks já foram iniciadas
-    if hasattr(bot, '_tasks_started'):
-        logger.info("Tasks já iniciadas anteriormente, pulando nova inicialização")
-        return
-    
-    bot._tasks_started = True
-    
     # Verifica se a tabela já foi enviada
     if table_message is None:
         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
@@ -386,11 +344,10 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
             )
     
     # Tasks
-    @tasks.loop(seconds=120)  # Aumentado de 60 para 120 segundos
+    @tasks.loop(seconds=60)
     async def live_table_updater():
-        """Atualiza a tabela periodicamente com maior intervalo"""
+        """Atualiza a tabela periodicamente"""
         try:
-            await asyncio.sleep(random.uniform(1, 3))  # Delay aleatório para evitar sincronização
             channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
             if channel:
                 nonlocal table_message
@@ -403,27 +360,22 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
 
     @tasks.loop(minutes=1)
     async def check_boss_respawns_task():
-        """Task para verificar respawns de bosses com delay"""
-        try:
-            await asyncio.sleep(random.uniform(1, 5))  # Delay aleatório
-            await check_boss_respawns(
-                bot, boss_timers, user_notifications, 
-                NOTIFICATION_CHANNEL_ID,
-                lambda: update_table(
-                    bot, bot.get_channel(NOTIFICATION_CHANNEL_ID), 
-                    boss_timers, user_stats, user_notifications, 
-                    table_message, NOTIFICATION_CHANNEL_ID
-                )
+        """Task para verificar respawns de bosses"""
+        await check_boss_respawns(
+            bot, boss_timers, user_notifications, 
+            NOTIFICATION_CHANNEL_ID,
+            lambda: update_table(
+                bot, bot.get_channel(NOTIFICATION_CHANNEL_ID), 
+                boss_timers, user_stats, user_notifications, 
+                table_message, NOTIFICATION_CHANNEL_ID
             )
-        except Exception as e:
-            logger.error(f"Erro na task de verificação de respawns: {e}", exc_info=True)
+        )
 
-    @tasks.loop(minutes=60)  # Aumentado de 30-60 para 60-120 minutos
+    @tasks.loop(minutes=30)
     async def periodic_table_update():
         """Atualiza a tabela periodicamente com novo post"""
         try:
             logger.info("\nIniciando atualização periódica da tabela...")
-            await asyncio.sleep(random.uniform(1, 5))  # Delay aleatório
             channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
             if channel:
                 logger.info(f"Canal encontrado: {channel.name}")
@@ -437,15 +389,15 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
             else:
                 logger.info(f"Canal com ID {NOTIFICATION_CHANNEL_ID} não encontrado!")
             
-            # Define um novo intervalo aleatório entre 60 e 120 minutos
-            new_interval = random.randint(60, 120)
+            # Define um novo intervalo aleatório entre 30 e 60 minutos
+            new_interval = random.randint(30, 60)
             logger.info(f"Próxima atualização em {new_interval} minutos")
             periodic_table_update.change_interval(minutes=new_interval)
         
         except Exception as e:
             logger.error(f"Erro na atualização periódica: {e}", exc_info=True)
-            # Tenta novamente em 15 minutos se falhar
-            periodic_table_update.change_interval(minutes=15)
+            # Tenta novamente em 5 minutos se falhar
+            periodic_table_update.change_interval(minutes=5)
 
     # Iniciar as tasks
     check_boss_respawns_task.start()
@@ -454,42 +406,31 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
 
     # Função para cancelar tasks
     async def shutdown_tasks():
-        """Executa o desligamento limpo"""
-        logger.info("\n🛑 Iniciando sequência de desligamento...")
-        
-        # Cancela tasks específicas do bot
-        check_boss_respawns_task.cancel()
-        live_table_updater.cancel()
-        periodic_table_update.cancel()
-        
+        """Cancela todas as tasks do módulo"""
         try:
-            await check_boss_respawns_task
-        except asyncio.CancelledError:
-            pass
+            check_boss_respawns_task.cancel()
+            live_table_updater.cancel()
+            periodic_table_update.cancel()
             
-        try:
-            await live_table_updater
-        except asyncio.CancelledError:
-            pass
-            
-        try:
-            await periodic_table_update
-        except asyncio.CancelledError:
-            pass
-            
-        logger.info("✅ Tasks canceladas com sucesso")
-        # Remove a flag de tasks iniciadas para permitir reinicialização
-        if hasattr(bot, '_tasks_started'):
-            del bot._tasks_started
+            # Aguarda as tasks serem realmente canceladas
+            await asyncio.gather(
+                check_boss_respawns_task,
+                live_table_updater,
+                periodic_table_update,
+                return_exceptions=True
+            )
+            logger.info("Todas as tasks foram canceladas com sucesso")
+        except Exception as e:
+            logger.error(f"Erro ao cancelar tasks: {e}", exc_info=True)
 
     # Adiciona a função de shutdown ao bot para ser chamada no desligamento
     bot.boss_commands_shutdown = shutdown_tasks
 
     # Retornar as funções necessárias para outros módulos
     return (
-        create_boss_embed,
+        lambda boss_timers=boss_timers: create_boss_embed(boss_timers),
         lambda channel: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
-        create_next_bosses_embed,
+        lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
         lambda: create_ranking_embed(bot, user_stats),
         lambda: create_history_embed(bot, boss_timers),
         lambda: create_unrecorded_embed(bot, boss_timers)
