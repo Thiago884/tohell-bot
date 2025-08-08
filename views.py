@@ -73,10 +73,10 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
     )
     
     sala = discord.ui.TextInput(
-        label="Sala (1-8)",
-        placeholder="Digite um número de 1 a 8",
+        label="Sala (1-20)",
+        placeholder="Digite um número de 1 a 20",
         required=True,
-        max_length=1
+        max_length=2
     )
     
     horario = discord.ui.TextInput(
@@ -127,7 +127,7 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                     return
             except ValueError:
                 await interaction.response.send_message(
-                    "Sala inválida. Digite um número entre 1 e 8.",
+                    "Sala inválida. Digite um número entre 1 e 20.",
                     ephemeral=True
                 )
                 return
@@ -225,10 +225,10 @@ class LimparBossModal(Modal, title="Limpar Boss"):
     )
     
     sala = discord.ui.TextInput(
-        label="Sala (1-8) - Opcional",
+        label="Sala (1-20) - Opcional",
         placeholder="Deixe em branco para limpar todas",
         required=False,
-        max_length=1
+        max_length=2
     )
 
     def __init__(self, bot, boss_timers, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
@@ -256,47 +256,88 @@ class LimparBossModal(Modal, title="Limpar Boss"):
             sala = self.sala.value.strip()
             
             if not sala:
-                for s in self.boss_timers[boss_name]:
-                    self.boss_timers[boss_name][s] = {
-                        'death_time': None,
-                        'respawn_time': None,
-                        'closed_time': None,
-                        'recorded_by': None,
-                        'opened_notified': False
-                    }
-                await clear_timer(boss_name)
+                # Confirmação para limpar todos os bosses
+                confirm_view = discord.ui.View(timeout=60)
+                confirm_button = discord.ui.Button(label="Sim, limpar todos", style=discord.ButtonStyle.red)
+                cancel_button = discord.ui.Button(label="Cancelar", style=discord.ButtonStyle.gray)
+                
+                async def confirm_callback(interaction: discord.Interaction):
+                    for s in self.boss_timers[boss_name]:
+                        self.boss_timers[boss_name][s] = {
+                            'death_time': None,
+                            'respawn_time': None,
+                            'closed_time': None,
+                            'recorded_by': None,
+                            'opened_notified': False
+                        }
+                    await clear_timer(boss_name)
+                    await interaction.response.edit_message(
+                        content=f"✅ Todos os timers do boss **{boss_name}** foram resetados.",
+                        view=None
+                    )
+                    
+                    # Enviar a tabela atualizada
+                    embed = create_boss_embed(self.boss_timers)
+                    view = BossControlView(
+                        self.bot,
+                        self.boss_timers,
+                        {},  # user_stats não é usado na view
+                        {},  # user_notifications não é usado na view
+                        self.table_message,
+                        self.NOTIFICATION_CHANNEL_ID,
+                        self.update_table_func,
+                        self.create_next_bosses_embed_func,
+                        self.create_ranking_embed_func,
+                        self.create_history_embed_func,
+                        self.create_unrecorded_embed_func
+                    )
+                    await interaction.followup.send(embed=embed, view=view)
+                
+                async def cancel_callback(interaction: discord.Interaction):
+                    await interaction.response.edit_message(
+                        content="Operação cancelada.",
+                        view=None
+                    )
+                
+                confirm_button.callback = confirm_callback
+                cancel_button.callback = cancel_callback
+                confirm_view.add_item(confirm_button)
+                confirm_view.add_item(cancel_button)
+                
                 await interaction.response.send_message(
-                    f"✅ Todos os timers do boss **{boss_name}** foram resetados.",
+                    f"Você deixou o campo de sala em branco. Deseja limpar TODOS os timers do boss **{boss_name}**?",
+                    view=confirm_view,
                     ephemeral=True
                 )
-            else:
-                try:
-                    sala = int(sala)
-                    if sala not in self.boss_timers[boss_name]:
-                        await interaction.response.send_message(
-                            f"Sala inválida. Salas disponíveis: {', '.join(map(str, self.boss_timers[boss_name].keys()))}",
-                            ephemeral=True
-                        )
-                        return
-                    
-                    self.boss_timers[boss_name][sala] = {
-                        'death_time': None,
-                        'respawn_time': None,
-                        'closed_time': None,
-                        'recorded_by': None,
-                        'opened_notified': False
-                    }
-                    await clear_timer(boss_name, sala)
+                return
+            
+            try:
+                sala = int(sala)
+                if sala not in self.boss_timers[boss_name]:
                     await interaction.response.send_message(
-                        f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
-                        ephemeral=True
-                    )
-                except ValueError:
-                    await interaction.response.send_message(
-                        "Sala inválida. Digite um número entre 1 e 8 ou deixe em branco para limpar todas.",
+                        f"Sala inválida. Salas disponíveis: {', '.join(map(str, self.boss_timers[boss_name].keys()))}",
                         ephemeral=True
                     )
                     return
+                
+                self.boss_timers[boss_name][sala] = {
+                    'death_time': None,
+                    'respawn_time': None,
+                    'closed_time': None,
+                    'recorded_by': None,
+                    'opened_notified': False
+                }
+                await clear_timer(boss_name, sala)
+                await interaction.response.send_message(
+                    f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
+                    ephemeral=True
+                )
+            except ValueError:
+                await interaction.response.send_message(
+                    "Sala inválida. Digite um número entre 1 e 20 ou deixe em branco para limpar todas.",
+                    ephemeral=True
+                )
+                return
             
             # Enviar a tabela atualizada
             embed = create_boss_embed(self.boss_timers)
