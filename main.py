@@ -42,7 +42,7 @@ def health():
 
 @app.route('/status')
 def status():
-    return "Bot is online and ready" if bot.is_ready() else "Bot is connecting", 200
+    return "Bot is online and ready" if hasattr(bot, 'is_ready') and bot.is_ready() else "Bot is connecting", 200
 
 @app.route('/static/<path:filename>')
 def serve_static(filename):
@@ -58,10 +58,11 @@ class MyBot(commands.Bot):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.http_session = None
+        self._is_closed = False
 
     async def setup_hook(self):
         # Fechar sessão existente se houver
-        if self.http_session and not self.http_session.closed:
+        if hasattr(self, 'http_session') and self.http_session and not self.http_session.closed:
             await self.http_session.close()
             
         # Criar nova sessão
@@ -70,9 +71,15 @@ class MyBot(commands.Bot):
         self.http._HTTPClient__session = self.http_session
 
     async def close(self):
+        if self._is_closed:
+            return
+            
+        self._is_closed = True
+        
         # Fechar nossa sessão HTTP primeiro
-        if self.http_session and not self.http_session.closed:
+        if hasattr(self, 'http_session') and self.http_session and not self.http_session.closed:
             await self.http_session.close()
+            
         # Depois chamar o close do bot
         await super().close()
 
