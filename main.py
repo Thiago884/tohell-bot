@@ -55,7 +55,10 @@ def serve_static(filename):
     return send_from_directory('static', filename)
 
 def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+    # Render fornece a porta através da variável de ambiente PORT.
+    # Usamos 8080 como padrão para facilitar o desenvolvimento local.
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
 
 # Configuração do Bot Discord com tratamento melhorado de sessão HTTP
 intents = discord.Intents.all()
