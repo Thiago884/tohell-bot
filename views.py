@@ -13,6 +13,7 @@ from database import save_timer, save_user_stats, clear_timer, add_user_notifica
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
 def create_boss_embed(boss_timers, compact=False):
+    """Cria embed com a tabela de timers de boss (função síncrona)"""
     now = datetime.now(brazil_tz)
     
     embed = discord.Embed(
@@ -548,7 +549,7 @@ class BossControlView(View):
             if not interaction.response.is_done():
                 await interaction.response.defer()
             
-            embed = await self.create_next_bosses_embed_func(self.boss_timers)
+            embed = self.create_next_bosses_embed_func(self.boss_timers)
             await interaction.followup.send(embed=embed)
         except Exception as e:
             print(f"ERRO DETALHADO no botão de próximos bosses: {str(e)}")
@@ -568,7 +569,7 @@ class BossControlView(View):
             if not interaction.response.is_done():
                 await interaction.response.defer()
             
-            embed = await self.create_ranking_embed_func()
+            embed = self.create_ranking_embed_func()
             await interaction.followup.send(embed=embed)
         except Exception as e:
             print(f"ERRO DETALHADO no botão de ranking: {str(e)}")
@@ -701,8 +702,7 @@ class BossControlView(View):
                 )
                 
                 async def restore_selected(interaction: discord.Interaction):
-                    if not interaction.response.is_done():
-                        await interaction.response.defer(ephemeral=True)
+                    await interaction.response.defer(ephemeral=True)
                     backup_file = select.values[0]
                     
                     if await restore_backup(backup_file):
@@ -716,7 +716,7 @@ class BossControlView(View):
                         await self.update_table_func(interaction.channel)
                     else:
                         await interaction.followup.send(
-                            f"❌ Falha ao restaurar backup **{backup_file}**!",
+                            f"❌ Falha ao restaurar backup **{backup_file}!",
                             ephemeral=True
                         )
                 

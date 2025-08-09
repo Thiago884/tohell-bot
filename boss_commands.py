@@ -48,7 +48,7 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
     
     return False
 
-async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed:
+def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed:
     """Cria embed com a tabela de timers de boss"""
     now = datetime.now(brazil_tz)
     
@@ -103,7 +103,7 @@ async def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord
     
     return embed
 
-async def create_next_bosses_embed(boss_timers: Dict) -> discord.Embed:
+def create_next_bosses_embed(boss_timers: Dict) -> discord.Embed:
     """Cria embed com os próximos bosses a abrir"""
     next_bosses = get_next_bosses(boss_timers)
     
@@ -178,7 +178,7 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
     """Atualiza a mensagem da tabela de bosses"""
     try:
         logger.info("Iniciando atualização da tabela de bosses...")
-        embed = await create_boss_embed(boss_timers)
+        embed = create_boss_embed(boss_timers)
         view = BossControlView(
             bot, 
             boss_timers, 

@@ -537,7 +537,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     return
                 
                 await interaction.response.defer()
-                embed = await create_next_bosses_embed_func(boss_timers)
+                embed = create_next_bosses_embed_func(boss_timers)
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
@@ -562,7 +562,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     return
                 
                 await interaction.response.defer()
-                embed = await create_ranking_embed_func()
+                embed = create_ranking_embed_func()
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
@@ -711,7 +711,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     return
                 
                 await interaction.response.defer()
-                embed = await create_history_embed_func()
+                embed = await create_history_embed_func()  # Mantido o await
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
@@ -736,7 +736,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     return
                 
                 await interaction.response.defer()
-                embed = await create_unrecorded_embed_func()
+                embed = await create_unrecorded_embed_func()  # Mantido o await
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
