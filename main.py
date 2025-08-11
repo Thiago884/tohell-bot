@@ -15,6 +15,7 @@ from drops import setup_drops_command
 from database import init_db, load_db_data
 import logging
 from slash_commands import setup_slash_commands
+import time
 
 # Configuração do logging
 logging.basicConfig(
@@ -47,7 +48,10 @@ def serve_static(filename):
     return send_from_directory('static', filename)
 
 def run_flask():
-    app.run(host='0.0.0.0', port=8080)
+    try:
+        app.run(host='0.0.0.0', port=8080)
+    except Exception as e:
+        logger.error(f"Erro no servidor Flask: {e}")
 
 # Configuração do Bot Discord
 intents = discord.Intents.all()
@@ -207,27 +211,48 @@ async def main():
         return
     
     logger.info("\n🔑 Iniciando bot...")
-    try:
-        async with bot:
-            await bot.start(token)
-            
-            # Verificação pós-login
-            channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
-            if channel:
-                from boss_commands import update_table
-                global table_message
-                table_message = await update_table(
-                    bot, channel, boss_timers,
-                    user_stats, user_notifications,
-                    table_message, NOTIFICATION_CHANNEL_ID
-                )
-    except KeyboardInterrupt:
-        logger.info("\n🛑 Desligamento solicitado pelo usuário")
-    except Exception as e:
-        logger.error(f"\n❌ Erro: {type(e).__name__}: {e}", exc_info=True)
-    finally:
-        await shutdown_sequence()
-        logger.info("✅ Bot desligado corretamente")
+    
+    max_retries = 5
+    retry_delay = 30  # segundos
+    
+    for attempt in range(max_retries):
+        try:
+            async with bot:
+                await bot.start(token)
+                
+                # Verificação pós-login
+                channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
+                if channel:
+                    from boss_commands import update_table
+                    global table_message
+                    table_message = await update_table(
+                        bot, channel, boss_timers,
+                        user_stats, user_notifications,
+                        table_message, NOTIFICATION_CHANNEL_ID
+                    )
+                break
+                
+        except HTTPException as e:
+            if e.status == 429:
+                logger.error(f"\n❌ Rate limit atingido (tentativa {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    logger.info(f"🕒 Aguardando {retry_delay} segundos antes de tentar novamente...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Aumenta o delay exponencialmente
+                    continue
+                else:
+                    logger.error("❌ Número máximo de tentativas atingido. Desligando...")
+            else:
+                logger.error(f"\n❌ Erro HTTP: {type(e).__name__}: {e}", exc_info=True)
+        except KeyboardInterrupt:
+            logger.info("\n🛑 Desligamento solicitado pelo usuário")
+            break
+        except Exception as e:
+            logger.error(f"\n❌ Erro: {type(e).__name__}: {e}", exc_info=True)
+            break
+        finally:
+            await shutdown_sequence()
+            logger.info("✅ Bot desligado corretamente")
 
 if __name__ == "__main__":
     try:
