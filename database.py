@@ -436,3 +436,76 @@ async def restore_backup(backup_file: str) -> bool:
     finally:
         if conn:
             await conn.ensure_closed()
+
+async def add_sala_to_all_bosses(sala: int) -> bool:
+    """Adiciona uma sala a todos os bosses no banco de dados"""
+    conn = None
+    try:
+        conn = await connect_db()
+        if conn is None:
+            return False
+            
+        async with conn.cursor() as cursor:
+            # Para cada boss, adiciona a sala se não existir
+            for boss in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:
+                await cursor.execute("""
+                INSERT IGNORE INTO boss_timers (boss_name, sala)
+                VALUES (%s, %s)
+                """, (boss, sala))
+                
+            await conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao adicionar sala {sala}: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            await conn.ensure_closed()
+
+async def remove_sala_from_all_bosses(sala: int) -> bool:
+    """Remove uma sala de todos os bosses no banco de dados"""
+    conn = None
+    try:
+        conn = await connect_db()
+        if conn is None:
+            return False
+            
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+            DELETE FROM boss_timers 
+            WHERE sala = %s
+            """, (sala,))
+            
+            await conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao remover sala {sala}: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            await conn.ensure_closed()
+
+async def migrate_fix_sala_20() -> bool:
+    """Migração para corrigir salas 20"""
+    conn = None
+    try:
+        conn = await connect_db()
+        if conn is None:
+            return False
+            
+        async with conn.cursor() as cursor:
+            # Remove sala 20 de bosses que não deveriam tê-la
+            await cursor.execute("""
+            DELETE FROM boss_timers 
+            WHERE sala = 20 
+            AND boss_name NOT IN ('Genocider', 'Super Red Dragon', 'Hell Maine', 'Death Beam Knight', 'Erohim')
+            """)
+            
+            await conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Erro na migração: {e}", exc_info=True)
+        return False
+    finally:
+        if conn:
+            await conn.ensure_closed()
