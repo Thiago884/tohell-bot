@@ -18,7 +18,7 @@ async def connect_db():
         conn = await asyncmy.connect(
             host="192.185.214.113",
             user="thia5326_tohell",
-            password="Thi#goba1102@@",
+            password="Thi@goba1102@@",
             database="thia5326_tohell_bot"
         )
         return conn
@@ -73,62 +73,10 @@ async def init_db():
             """)
             
             await conn.commit()
-        
-        # Executar migrações após criar as tabelas
-        await migrate_fix_sala_20()
-        
-        logger.info("Estrutura do banco de dados verificada e migrações aplicadas")
+        logger.info("Estrutura do banco de dados verificada com sucesso")
         return True
     except Exception as err:
         logger.error(f"Erro ao inicializar banco de dados: {err}", exc_info=True)
-        return False
-    finally:
-        if conn:
-            await conn.ensure_closed()
-
-async def migrate_fix_sala_20():
-    """Função de migração para corrigir salas 20 em bosses não especiais"""
-    conn = None
-    try:
-        conn = await connect_db()
-        if conn is None:
-            logger.error("Não foi possível conectar ao banco para migração")
-            return False
-        
-        # Lista de bosses que podem ter sala 20
-        valid_bosses_with_20 = ["Genocider", "Super Red Dragon", "Hell Maine", 
-                               "Death Beam Knight", "Erohim"]
-        
-        async with conn.cursor() as cursor:
-            # 1. Primeiro identificamos os registros problemáticos
-            await cursor.execute("""
-                SELECT DISTINCT boss_name FROM boss_timers 
-                WHERE sala = 20 AND boss_name NOT IN (%s, %s, %s, %s, %s)
-            """, valid_bosses_with_20)
-            
-            invalid_bosses = [row[0] for row in await cursor.fetchall()]
-            
-            if not invalid_bosses:
-                logger.info("Migração: Nenhum registro inválido de sala 20 encontrado")
-                return True
-            
-            logger.warning(f"Migração: Encontrados bosses com sala 20 inválida: {', '.join(invalid_bosses)}")
-            
-            # 2. Removemos os registros inválidos
-            await cursor.execute("""
-                DELETE FROM boss_timers 
-                WHERE sala = 20 AND boss_name NOT IN (%s, %s, %s, %s, %s)
-            """, valid_bosses_with_20)
-            
-            deleted_rows = cursor.rowcount
-            await conn.commit()
-            
-            logger.warning(f"Migração: Removidos {deleted_rows} registros inválidos de sala 20")
-            
-            return True
-            
-    except Exception as err:
-        logger.error(f"Erro na migração para corrigir sala 20: {err}", exc_info=True)
         return False
     finally:
         if conn:
@@ -138,21 +86,12 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
     """Carrega dados do banco de dados para as estruturas em memória"""
     conn = None
     try:
-        # Executar migração antes de carregar os dados
-        logger.info("Verificando necessidade de migração...")
-        await migrate_fix_sala_20()
-        
         conn = await connect_db()
         if conn is None:
             logger.error("Não foi possível conectar ao banco para carregar dados")
             return False
         
         async with conn.cursor() as cursor:
-            # Primeiro limpe as salas existentes na memória
-            for boss in boss_timers:
-                boss_timers[boss].clear()
-                logger.info(f"Limpando salas para {boss}")
-            
             # Carregar timers de boss
             await cursor.execute("""
                 SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
@@ -161,32 +100,18 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             """)
             timers = await cursor.fetchall()
             
-            special_bosses_with_20 = ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]
-            
             for timer in timers:
                 boss_name = timer[0]
                 sala = timer[1]
                 
-                # Verifica se a sala é válida para este boss
-                if boss_name == "Erohim" and sala != 20:
-                    continue
-                if sala == 20 and boss_name not in special_bosses_with_20:
-                    continue
-                
-                # Garante que o boss existe
-                if boss_name not in boss_timers:
-                    boss_timers[boss_name] = {}
-                    logger.info(f"Adicionando novo boss não inicializado: {boss_name}")
-                
-                # Adiciona a sala (apenas se for válida)
-                boss_timers[boss_name][sala] = {
-                    'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
-                    'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
-                    'closed_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
-                    'recorded_by': timer[5],
-                    'opened_notified': bool(timer[6])
-                }
-                logger.info(f"Carregado timer para {boss_name} sala {sala}")
+                if boss_name in boss_timers and sala in boss_timers[boss_name]:
+                    boss_timers[boss_name][sala] = {
+                        'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
+                        'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
+                        'closed_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
+                        'recorded_by': timer[5],
+                        'opened_notified': bool(timer[6])
+                    }
             
             # Carregar estatísticas de usuários
             await cursor.execute("""
@@ -201,7 +126,6 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                     'last_recorded': stat[3].replace(tzinfo=brazil_tz) if stat[3] else None,
                     'username': stat[1]
                 }
-                logger.info(f"Carregado stats para usuário {stat[1]} (ID: {stat[0]})")
             
             # Carregar notificações personalizadas
             await cursor.execute("""
@@ -219,7 +143,6 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                     user_notifications[user_id] = []
                 if boss_name not in user_notifications[user_id]:
                     user_notifications[user_id].append(boss_name)
-                    logger.info(f"Carregado notificação para usuário {user_id}: {boss_name}")
         
         logger.info("Dados carregados do banco de dados com sucesso")
         return True
@@ -509,69 +432,6 @@ async def restore_backup(backup_file: str) -> bool:
         
     except Exception as e:
         logger.error(f"Erro ao restaurar backup: {e}", exc_info=True)
-        return False
-    finally:
-        if conn:
-            await conn.ensure_closed()
-
-async def add_sala_to_all_bosses(sala: int) -> bool:
-    """Adiciona uma nova sala para todos os bosses no banco de dados"""
-    conn = None
-    try:
-        conn = await connect_db()
-        if conn is None:
-            return False
-        
-        async with conn.cursor() as cursor:
-            # Primeiro, alteramos a tabela para permitir valores nulos nas colunas necessárias
-            await cursor.execute("""
-            ALTER TABLE boss_timers 
-            MODIFY COLUMN death_time DATETIME NULL,
-            MODIFY COLUMN respawn_time DATETIME NULL,
-            MODIFY COLUMN closed_time DATETIME NULL,
-            MODIFY COLUMN recorded_by VARCHAR(50) NULL
-            """)
-            
-            # Para cada boss, insira a nova sala com valores nulos
-            await cursor.execute("SELECT DISTINCT boss_name FROM boss_timers")
-            bosses = [row[0] for row in await cursor.fetchall()]
-            
-            for boss in bosses:
-                # Apenas adicionar sala 20 para bosses específicos
-                if sala == 20 and boss not in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:
-                    continue
-                    
-                await cursor.execute("""
-                INSERT INTO boss_timers (boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified)
-                VALUES (%s, %s, NULL, NULL, NULL, NULL, FALSE)
-                ON DUPLICATE KEY UPDATE
-                    boss_name = VALUES(boss_name),
-                    sala = VALUES(sala)
-                """, (boss, sala))
-            
-            await conn.commit()
-        return True
-    except Exception as err:
-        logger.error(f"Erro ao adicionar sala {sala}: {err}", exc_info=True)
-        return False
-    finally:
-        if conn:
-            await conn.ensure_closed()
-
-async def remove_sala_from_all_bosses(sala: int) -> bool:
-    """Remove uma sala de todos os bosses no banco de dados"""
-    conn = None
-    try:
-        conn = await connect_db()
-        if conn is None:
-            return False
-        
-        async with conn.cursor() as cursor:
-            await cursor.execute("DELETE FROM boss_timers WHERE sala = %s", (sala,))
-            await conn.commit()
-        return True
-    except Exception as err:
-        logger.error(f"Erro ao remover sala {sala}: {err}", exc_info=True)
         return False
     finally:
         if conn:

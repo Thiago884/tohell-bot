@@ -10,6 +10,7 @@ from collections import defaultdict
 import traceback
 from datetime import datetime, timedelta
 import pytz
+import random  # Import random for backoff jitter
 from boss_commands import setup_boss_commands
 from drops import setup_drops_command
 from database import init_db, load_db_data
@@ -220,45 +221,51 @@ async def main():
     
     logger.info("\n🔑 Iniciando bot...")
     
-    # Configuração de tentativas com backoff exponencial
     max_attempts = 5
-    base_delay = 5  # segundos
+    base_delay = 5
     
-    for attempt in range(max_attempts):
-        try:
-            async with bot:
+    try:
+        for attempt in range(max_attempts):
+            try:
+                # We removed 'async with bot:'. We will manage bot.close() ourselves.
+                # bot.start() is blocking. It will run until the bot disconnects.
                 await bot.start(token)
-                
-                # Verificação pós-login
-                channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
-                if channel:
-                    from boss_commands import update_table
-                    global table_message
-                    table_message = await update_table(
-                        bot, channel, boss_timers,
-                        user_stats, user_notifications,
-                        table_message, NOTIFICATION_CHANNEL_ID
+                # If bot.start() returns, it means a graceful disconnect.
+                logger.info("Bot desconectado graciosamente.")
+                break
+                    
+            except discord.HTTPException as e:
+                if e.status == 429 and attempt < max_attempts - 1:
+                    # Exponential backoff is better for rate limits.
+                    # The random element helps prevent a "thundering herd" problem.
+                    wait_time = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    logger.warning(
+                        f"Rate limit atingido na inicialização. "
+                        f"Tentando novamente em {wait_time:.2f} segundos... (Tentativa {attempt + 1}/{max_attempts})"
                     )
-                break  # Sai do loop se a conexão for bem-sucedida
-                
-        except discord.HTTPException as e:
-            if e.status == 429 and attempt < max_attempts - 1:
-                wait_time = base_delay * (attempt + 1)
-                logger.warning(f"Rate limit atingido. Tentando novamente em {wait_time} segundos... (Tentativa {attempt + 1}/{max_attempts})")
-                await asyncio.sleep(wait_time)
-                continue
-            raise
-        except KeyboardInterrupt:
-            logger.info("\n🛑 Desligamento solicitado pelo usuário")
-            break
-        except Exception as e:
-            logger.error(f"\n❌ Erro: {type(e).__name__}: {e}", exc_info=True)
-            break
-    else:
-        logger.error("❌ Número máximo de tentativas de conexão atingido. Não foi possível conectar ao Discord.")
-    
-    await shutdown_sequence()
-    logger.info("✅ Bot desligado corretamente")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"Erro HTTP na conexão: {e}. Desistindo.")
+                    raise  # Re-raise to exit the loop and enter the final 'except' block.
+        else:
+            # This 'else' belongs to the 'for' loop and runs if the loop completes without 'break'.
+            logger.error("❌ Número máximo de tentativas de conexão atingido. Não foi possível conectar ao Discord.")
+
+    except KeyboardInterrupt:
+        logger.info("\n🛑 Desligamento solicitado pelo usuário")
+    except discord.LoginFailure:
+        logger.error("❌ Falha no login: Token inválido ou privilégios de 'Intents' não habilitados.")
+    except discord.HTTPException:
+        # This catches the re-raised exception from the loop.
+        logger.error("Falha na conexão com o Discord após múltiplas tentativas.")
+    except Exception as e:
+        logger.error(f"\n❌ Erro fatal: {type(e).__name__}: {e}", exc_info=True)
+    finally:
+        # This block will run regardless of how the 'try' block was exited.
+        await shutdown_sequence()
+        if bot and not bot.is_closed():
+            await bot.close()
+        logger.info("✅ Bot desligado corretamente")
 
 if __name__ == "__main__":
     try:
