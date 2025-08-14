@@ -83,6 +83,18 @@ user_notifications = defaultdict(list)
 table_message = None
 
 @bot.event
+async def on_connect():
+    logger.info("✅ Conectado ao Discord")
+
+@bot.event
+async def on_disconnect():
+    logger.warning("⚠ Desconectado do Discord")
+
+@bot.event
+async def on_error(event, *args, **kwargs):
+    logger.error(f"Erro no evento {event}: {args} {kwargs}", exc_info=True)
+
+@bot.event
 async def on_ready():
     """Evento disparado quando o bot está pronto"""
     logger.info("\n" + "="*50)
@@ -207,27 +219,46 @@ async def main():
         return
     
     logger.info("\n🔑 Iniciando bot...")
-    try:
-        async with bot:
-            await bot.start(token)
-            
-            # Verificação pós-login
-            channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
-            if channel:
-                from boss_commands import update_table
-                global table_message
-                table_message = await update_table(
-                    bot, channel, boss_timers,
-                    user_stats, user_notifications,
-                    table_message, NOTIFICATION_CHANNEL_ID
-                )
-    except KeyboardInterrupt:
-        logger.info("\n🛑 Desligamento solicitado pelo usuário")
-    except Exception as e:
-        logger.error(f"\n❌ Erro: {type(e).__name__}: {e}", exc_info=True)
-    finally:
-        await shutdown_sequence()
-        logger.info("✅ Bot desligado corretamente")
+    
+    # Configuração de tentativas com backoff exponencial
+    max_attempts = 5
+    base_delay = 5  # segundos
+    
+    for attempt in range(max_attempts):
+        try:
+            async with bot:
+                await bot.start(token)
+                
+                # Verificação pós-login
+                channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
+                if channel:
+                    from boss_commands import update_table
+                    global table_message
+                    table_message = await update_table(
+                        bot, channel, boss_timers,
+                        user_stats, user_notifications,
+                        table_message, NOTIFICATION_CHANNEL_ID
+                    )
+                break  # Sai do loop se a conexão for bem-sucedida
+                
+        except discord.HTTPException as e:
+            if e.status == 429 and attempt < max_attempts - 1:
+                wait_time = base_delay * (attempt + 1)
+                logger.warning(f"Rate limit atingido. Tentando novamente em {wait_time} segundos... (Tentativa {attempt + 1}/{max_attempts})")
+                await asyncio.sleep(wait_time)
+                continue
+            raise
+        except KeyboardInterrupt:
+            logger.info("\n🛑 Desligamento solicitado pelo usuário")
+            break
+        except Exception as e:
+            logger.error(f"\n❌ Erro: {type(e).__name__}: {e}", exc_info=True)
+            break
+    else:
+        logger.error("❌ Número máximo de tentativas de conexão atingido. Não foi possível conectar ao Discord.")
+    
+    await shutdown_sequence()
+    logger.info("✅ Bot desligado corretamente")
 
 if __name__ == "__main__":
     try:
