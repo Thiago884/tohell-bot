@@ -7,6 +7,7 @@ import pytz
 from typing import Optional, List
 import os
 import traceback
+import logging
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time
 from database import (
     save_timer, save_user_stats, clear_timer, 
@@ -15,6 +16,9 @@ from database import (
 )
 from views import BossControlView
 from discord.app_commands import CommandAlreadyRegistered
+
+# Configuração do logger
+logger = logging.getLogger(__name__)
 
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
@@ -75,12 +79,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 await interaction.followup.send(embed=embed, view=view)
                 
             except Exception as e:
-                print(f"Erro no comando slash bosses: {e}")
-                traceback.print_exc()
-                await interaction.response.send_message(
-                    "Ocorreu um erro ao exibir a tabela de bosses.",
-                    ephemeral=True
-                )
+                logger.error(f"Erro no comando slash bosses: {e}", exc_info=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao exibir a tabela de bosses.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao exibir a tabela de bosses.",
+                        ephemeral=True
+                    )
     
     # Comando para registrar boss (COM CORREÇÃO)
     if "boss" not in command_names:
@@ -101,35 +110,62 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         ):
             """Registra a morte de um boss via comando slash"""
             try:
+                if not interaction.response.is_done():
+                    await interaction.response.defer(thinking=True)
+                
                 if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                    await interaction.response.send_message(
-                        "⚠ Comandos só são aceitos no canal designado!",
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            "⚠ Comandos só são aceitos no canal designado!",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.followup.send(
+                            "⚠ Comandos só são aceitos no canal designado!",
+                            ephemeral=True
+                        )
                     return
                 
                 if sala < 1 or sala > 20:
-                    await interaction.response.send_message(
-                        "❌ Número de sala inválido. Deve ser entre 1 e 20.",
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            "❌ Número de sala inválido. Deve ser entre 1 e 20.",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.followup.send(
+                            "❌ Número de sala inválido. Deve ser entre 1 e 20.",
+                            ephemeral=True
+                        )
                     return
                 
                 full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
                 if full_boss_name is None:
-                    await interaction.response.send_message(
-                        f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.followup.send(
+                            f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
+                            ephemeral=True
+                        )
                     return
                 
                 boss_name = full_boss_name
                 
                 if sala not in boss_timers[boss_name]:
-                    await interaction.response.send_message(
-                        f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.followup.send(
+                            f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
+                            ephemeral=True
+                        )
                     return
                 
                 # Verificação corrigida - só impede se o boss estiver agendado (ainda não abriu)
@@ -137,29 +173,49 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 now = datetime.now(brazil_tz)
                 
                 if timers['respawn_time'] and now < timers['respawn_time']:  # Boss agendado e ainda não abriu
-                    await interaction.response.send_message(
-                        f"⚠ O boss **{boss_name} (Sala {sala})** já está agendado e ainda não abriu!\n"
-                        f"Status atual: 🕒 Abre em {format_time_remaining(timers['respawn_time'])}\n"
-                        f"Para registrar um novo horário, primeiro use `/clearboss {boss_name} {sala}`",
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            f"⚠ O boss **{boss_name} (Sala {sala})** já está agendado e ainda não abriu!\n"
+                            f"Status atual: 🕒 Abre em {format_time_remaining(timers['respawn_time'])}\n"
+                            f"Para registrar um novo horário, primeiro use `/clearboss {boss_name} {sala}`",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.followup.send(
+                            f"⚠ O boss **{boss_name} (Sala {sala})** já está agendado e ainda não abriu!\n"
+                            f"Status atual: 🕒 Abre em {format_time_remaining(timers['respawn_time'])}\n"
+                            f"Para registrar um novo horário, primeiro use `/clearboss {boss_name} {sala}`",
+                            ephemeral=True
+                        )
                     return
                 
                 time_parts = parse_time_input(hora_morte)
                 if not time_parts:
-                    await interaction.response.send_message(
-                        "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.followup.send(
+                            "Formato de hora inválido. Use HH:MM ou HHhMM (ex: 14:30 ou 14h30)",
+                            ephemeral=True
+                        )
                     return
                 
                 hour, minute = time_parts
                 
                 if not validate_time(hour, minute):
-                    await interaction.response.send_message(
-                        "Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.",
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            "Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.followup.send(
+                            "Horário inválido. Hora deve estar entre 00-23 e minutos entre 00-59.",
+                            ephemeral=True
+                        )
                     return
                 
                 now = datetime.now(brazil_tz)
@@ -188,13 +244,22 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
                 await save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
                 
-                await interaction.response.send_message(
-                    f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
-                    f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
-                    f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
-                    f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
-                    ephemeral=False
-                )
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
+                        f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
+                        f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
+                        f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
+                        ephemeral=False
+                    )
+                else:
+                    await interaction.followup.send(
+                        f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
+                        f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
+                        f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
+                        f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
+                        ephemeral=False
+                    )
                 
                 # Atualiza a tabela
                 embed = create_boss_embed_func(boss_timers)
@@ -214,12 +279,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 await interaction.followup.send(embed=embed, view=view)
                 
             except Exception as e:
-                print(f"Erro no comando slash boss: {e}")
-                traceback.print_exc()
-                await interaction.response.send_message(
-                    "Ocorreu um erro ao processar seu comando.",
-                    ephemeral=True
-                )
+                logger.error(f"Erro no comando slash boss: {e}", exc_info=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao processar seu comando.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao processar seu comando.",
+                        ephemeral=True
+                    )
     
     # Comando para limpar boss (mantido original)
     if "clearboss" not in command_names:
@@ -313,12 +383,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 await interaction.followup.send(embed=embed, view=view)
                 
             except Exception as e:
-                print(f"Erro no comando slash clearboss: {e}")
-                traceback.print_exc()
-                await interaction.response.send_message(
-                    "Ocorreu um erro ao processar seu comando.",
-                    ephemeral=True
-                )
+                logger.error(f"Erro no comando slash clearboss: {e}", exc_info=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao processar seu comando.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao processar seu comando.",
+                        ephemeral=True
+                    )
     
     # Comando para gerenciar salas
     if "managesalas" not in command_names:
@@ -466,8 +541,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     await interaction.channel.send(embed=embed, view=view)
                 
             except Exception as e:
-                print(f"Erro no comando slash managesalas: {e}")
-                traceback.print_exc()
+                logger.error(f"Erro no comando slash managesalas: {e}", exc_info=True)
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
                         "Ocorreu um erro ao processar seu comando.",
@@ -516,12 +590,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     
             except Exception as e:
-                print(f"Erro no comando migrate: {e}")
-                traceback.print_exc()
-                await interaction.response.send_message(
-                    "Ocorreu um erro ao executar a migração.",
-                    ephemeral=True
-                )
+                logger.error(f"Erro no comando migrate: {e}", exc_info=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao executar a migração.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao executar a migração.",
+                        ephemeral=True
+                    )
     
     # Comando para mostrar próximos bosses (mantido original)
     if "nextboss" not in command_names:
@@ -541,12 +620,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
-                print(f"Erro no comando slash nextboss: {e}")
-                traceback.print_exc()
-                await interaction.response.send_message(
-                    "Ocorreu um erro ao buscar os próximos bosses.",
-                    ephemeral=True
-                )
+                logger.error(f"Erro no comando slash nextboss: {e}", exc_info=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao buscar os próximos bosses.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao buscar os próximos bosses.",
+                        ephemeral=True
+                    )
     
     # Comando para mostrar ranking (mantido original)
     if "ranking" not in command_names:
@@ -566,12 +650,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
-                print(f"Erro no comando slash ranking: {e}")
-                traceback.print_exc()
-                await interaction.response.send_message(
-                    "Ocorreu um erro ao gerar o ranking.",
-                    ephemeral=True
-                )
+                logger.error(f"Erro no comando slash ranking: {e}", exc_info=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao gerar o ranking.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao gerar o ranking.",
+                        ephemeral=True
+                    )
     
     # Comando para gerenciar notificações (mantido original)
     if "notify" not in command_names:
@@ -653,12 +742,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     
             except Exception as e:
-                print(f"Erro no comando slash notify: {e}")
-                traceback.print_exc()
-                await interaction.response.send_message(
-                    "Ocorreu um erro ao processar sua solicitação.",
-                    ephemeral=True
-                )
+                logger.error(f"Erro no comando slash notify: {e}", exc_info=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao processar sua solicitação.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao processar sua solicitação.",
+                        ephemeral=True
+                    )
     
     # Comando para mostrar notificações do usuário (mantido original)
     if "mynotifications" not in command_names:
@@ -690,12 +784,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     
             except Exception as e:
-                print(f"Erro no comando slash mynotifications: {e}")
-                traceback.print_exc()
-                await interaction.response.send_message(
-                    "Ocorreu um erro ao buscar suas notificações.",
-                    ephemeral=True
-                )
+                logger.error(f"Erro no comando slash mynotifications: {e}", exc_info=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao buscar suas notificações.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao buscar suas notificações.",
+                        ephemeral=True
+                    )
     
     # Comando para mostrar histórico (mantido original)
     if "historico" not in command_names:
@@ -715,12 +814,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
-                print(f"Erro no comando slash historico: {e}")
-                traceback.print_exc()
-                await interaction.response.send_message(
-                    "Ocorreu um erro ao buscar o histórico.",
-                    ephemeral=True
-                )
+                logger.error(f"Erro no comando slash historico: {e}", exc_info=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao buscar o histórico.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao buscar o histórico.",
+                        ephemeral=True
+                    )
     
     # Comando para mostrar bosses não anotados (mantido original)
     if "naoanotados" not in command_names:
@@ -740,12 +844,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
-                print(f"Erro no comando slash naoanotados: {e}")
-                traceback.print_exc()
-                await interaction.response.send_message(
-                    "Ocorreu um erro ao buscar os bosses não anotados.",
-                    ephemeral=True
-                )
+                logger.error(f"Erro no comando slash naoanotados: {e}", exc_info=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao buscar os bosses não anotados.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao buscar os bosses não anotados.",
+                        ephemeral=True
+                    )
     
     # Comando para backup (apenas admins) - corrigido
     if "backup" not in command_names:
@@ -848,8 +957,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     
             except Exception as e:
-                print(f"Erro no comando slash backup: {e}")
-                traceback.print_exc()
+                logger.error(f"Erro no comando slash backup: {e}", exc_info=True)
                 try:
                     await interaction.followup.send(
                         "Ocorreu um erro ao processar o backup.",
@@ -964,9 +1072,14 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 await interaction.response.send_message(embed=embed)
                 
             except Exception as e:
-                print(f"Erro no comando slash bosshelp: {e}")
-                traceback.print_exc()
-                await interaction.response.send_message(
-                    "Ocorreu um erro ao exibir a ajuda.",
-                    ephemeral=True
-                )
+                logger.error(f"Erro no comando slash bosshelp: {e}", exc_info=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao exibir a ajuda.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao exibir a ajuda.",
+                        ephemeral=True
+                    )

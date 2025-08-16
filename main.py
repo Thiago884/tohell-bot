@@ -177,6 +177,9 @@ async def on_ready():
 @commands.is_owner()
 async def sync(ctx):
     """Sincroniza comandos slash"""
+    if not ctx.message.content.strip() == '!sync':
+        return  # Ignora se não for exatamente !sync
+    
     try:
         synced = await bot.tree.sync()
         msg = f"✅ {len(synced)} comandos sincronizados globalmente"
