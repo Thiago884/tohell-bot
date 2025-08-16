@@ -126,13 +126,13 @@ async def on_ready():
     
     await bot.change_presence(activity=discord.Game(name="Use /bosshelp"))
 
-    # Sincronização de comandos
+    # Sincronização de comandos - MODIFICADO
     try:
-        # Sincronização global
+        # Primeiro sincroniza globalmente
         synced = await bot.tree.sync()
         logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente")
 
-        # Sincronização no servidor específico (opcional)
+        # Depois sincroniza no servidor específico (se GUILD_ID estiver definido)
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
             bot.tree.copy_global_to(guild=guild)
@@ -140,6 +140,7 @@ async def on_ready():
             logger.info(f"✅ {len(synced_guild)} comandos sincronizados no servidor")
     except Exception as e:
         logger.error(f"❌ Erro ao sincronizar comandos: {e}")
+        traceback.print_exc()
 
     # Inicialização do banco de dados
     logger.info("\nInicializando banco de dados...")

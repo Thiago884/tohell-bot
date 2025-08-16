@@ -16,9 +16,9 @@ async def connect_db():
     """Estabelece conexão com o banco de dados MySQL"""
     try:
         conn = await asyncmy.connect(
-            host="192.185.214.113",
+            host="br92.hostgator.com.br",
             user="thia5326_tohell",
-            password="Thi@goba1102@@",
+            password="Thi#goba1102@@",
             database="thia5326_tohell_bot"
         )
         return conn
