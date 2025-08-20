@@ -48,6 +48,7 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
     
     return False
 
+# boss_commands.py - Modificação na função create_boss_embed
 def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed:
     """Cria embed com a tabela de timers de boss"""
     now = datetime.now(brazil_tz)
@@ -62,9 +63,9 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
         for sala in sorted(boss_timers[boss].keys()):  # Ordenar salas numericamente
             timers = boss_timers[boss][sala]
             
-            # Pular bosses que já fecharam e não foram registrados
-            if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
-                continue
+            # REMOVER FILTRO que esconde bosses fechados
+            # if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
+            #    continue
                 
             if compact and timers['death_time'] is None:
                 continue
@@ -134,8 +135,8 @@ def create_next_bosses_embed(boss_timers: Dict) -> discord.Embed:
     embed.description = "\n\n".join(boss_info)
     return embed
 
-async def create_ranking_embed(bot, user_stats: Dict) -> discord.Embed:
-    """Cria embed com o ranking de usuários que mais registraram bosses"""
+def create_ranking_embed(user_stats: Dict) -> discord.Embed:
+    """Cria embed com o ranking de usuários que mais registraram bosses (FUNÇÃO SÍNCRONA)"""
     sorted_users = sorted(user_stats.items(), key=lambda x: x[1]['count'], reverse=True)
     
     embed = discord.Embed(
@@ -149,11 +150,8 @@ async def create_ranking_embed(bot, user_stats: Dict) -> discord.Embed:
     
     ranking_text = []
     for idx, (user_id, stats) in enumerate(sorted_users[:10]):
-        try:
-            user = await bot.fetch_user(int(user_id))
-            username = user.name
-        except:
-            username = stats.get('username', f"Usuário {user_id}")
+        # Usamos o username salvo em vez de buscar via API (para ser síncrono)
+        username = stats.get('username', f"Usuário {user_id}")
         
         medal = ""
         if idx == 0:
@@ -188,7 +186,7 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
             NOTIFICATION_CHANNEL_ID,
             lambda: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
             lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
-            lambda: create_ranking_embed(bot, user_stats),
+            lambda: create_ranking_embed(user_stats),
             lambda: create_history_embed(bot, boss_timers),
             lambda: create_unrecorded_embed(bot, boss_timers)
         )
@@ -278,7 +276,7 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
                         # Apenas marca que foi fechado, sem apagar os horários
                         boss_timers[boss][sala]['opened_notified'] = False
 
-                        # Atualiza no banco com os mesmos dados (para manter integridade)
+                        # Atualiza no banco com os mesmo dados (para manter integridade)
                         await save_timer(
                             boss,
                             sala,
@@ -431,7 +429,7 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
         lambda boss_timers=boss_timers: create_boss_embed(boss_timers),
         lambda channel: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
         lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
-        lambda: create_ranking_embed(bot, user_stats),
+        lambda: create_ranking_embed(user_stats),  # CORRIGIDO: função síncrona
         lambda: create_history_embed(bot, boss_timers),
         lambda: create_unrecorded_embed(bot, boss_timers)
     )

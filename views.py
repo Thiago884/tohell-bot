@@ -12,6 +12,7 @@ from database import save_timer, save_user_stats, clear_timer, add_user_notifica
 
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
+# views.py - Modificação na função create_boss_embed
 def create_boss_embed(boss_timers, compact=False):
     """Cria embed com a tabela de timers de boss (função síncrona)"""
     now = datetime.now(brazil_tz)
@@ -26,8 +27,9 @@ def create_boss_embed(boss_timers, compact=False):
         for sala in sorted(boss_timers[boss].keys()):  # Ordenar salas numericamente
             timers = boss_timers[boss][sala]
             
-            if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
-                continue
+            # REMOVER FILTRO que esconde bosses fechados
+            # if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
+            #     continue
                 
             if compact and timers['death_time'] is None:
                 continue
@@ -580,6 +582,7 @@ class BossControlView(View):
                 return
 
             await interaction.response.defer()
+            # Correção: função síncrona, sem await
             embed = self.create_ranking_embed_func()
             await interaction.followup.send(embed=embed)
         except Exception as e:
@@ -677,7 +680,7 @@ class BossControlView(View):
                             )
                     except Exception as e:
                         await interaction.followup.send(
-                            f"✅ Backup criado, mas erro ao enviar arquivo: {e}",
+                            f"✅ Backup criado, mais erro ao enviar arquivo: {e}",
                             ephemeral=True
                         )
                 else:

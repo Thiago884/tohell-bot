@@ -370,8 +370,8 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 view = BossControlView(
                     bot,
                     boss_timers,
-                    {},  # user_stats não é usado na view
-                    {},  # user_notifications não é usado na view
+                    user_stats,
+                    user_notifications,
                     table_message,
                     NOTIFICATION_CHANNEL_ID,
                     update_table_func,
@@ -476,7 +476,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     message = f"✅ Sala {sala} adicionada aos bosses relevantes!"
                 
                 elif action == 'rem':
-                    # Verificar se sala existe em algum boss
+                    # Verificar if sala existe em algum boss
                     sala_exists = any(sala in boss_timers[boss] for boss in boss_timers)
                     if not sala_exists:
                         if not interaction.response.is_done():
@@ -528,8 +528,8 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     view = BossControlView(
                         bot,
                         boss_timers,
-                        {},  # user_stats não é usado na view
-                        {},  # user_notifications não é usado na view
+                        user_stats,
+                        user_notifications,
                         table_message,
                         NOTIFICATION_CHANNEL_ID,
                         update_table_func,
@@ -585,7 +585,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                 else:
                     await interaction.followup.send(
-                        "❌ Ocorreu um erro durante la migração. Verifique os logs.",
+                        "❌ Ocorreu um erro durante a migração. Verifique os logs.",
                         ephemeral=True
                     )
                     
@@ -593,12 +593,12 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 logger.error(f"Erro no comando migrate: {e}", exc_info=True)
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        "Ocorreu um erro ao executar la migração.",
+                        "Ocorreu um erro ao executar a migração.",
                         ephemeral=True
                     )
                 else:
                     await interaction.followup.send(
-                        "Ocorreu um erro ao executar la migração.",
+                        "Ocorreu um erro ao executar a migração.",
                         ephemeral=True
                     )
     
@@ -646,7 +646,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     return
                 
                 await interaction.response.defer()
-                embed = create_ranking_embed_func()
+                embed = create_ranking_embed_func(user_stats)
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
@@ -810,7 +810,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     return
                 
                 await interaction.response.defer()
-                embed = await create_history_embed_func()  # Mantido o await
+                embed = await create_history_embed_func()
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
@@ -840,7 +840,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     return
                 
                 await interaction.response.defer()
-                embed = await create_unrecorded_embed_func()  # Mantido o await
+                embed = await create_unrecorded_embed_func()
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
@@ -993,7 +993,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 
                 embed.add_field(
                     name="/boss <nome> <sala> <hora_morte> [foi_ontem]",
-                    value="Registra la morte de um boss no horário especificado\nExemplo: `/boss Hydra 8 14:30`\nBosses disponíveis: " + ", ".join(boss_timers.keys()),
+                    value="Registra a morte de um boss no horário especificado\nExemplo: `/boss Hydra 8 14:30`\nBosses disponíveis: " + ", ".join(boss_timers.keys()),
                     inline=False
                 )
                 
