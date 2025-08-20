@@ -8,6 +8,7 @@ from typing import Optional, List
 import os
 import traceback
 import logging
+from pathlib import Path
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, parse_time_input, validate_time
 from database import (
     save_timer, save_user_stats, clear_timer, 
@@ -19,6 +20,10 @@ from discord.app_commands import CommandAlreadyRegistered
 
 # Configuração do logger
 logger = logging.getLogger(__name__)
+
+# Configuração do diretório de backups
+BACKUP_DIR = Path("backups")
+BACKUP_DIR.mkdir(exist_ok=True)
 
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
@@ -315,7 +320,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 
                 if sala is not None and (sala < 1 or sala > 20):
                     await interaction.response.send_message(
-                        "❌ Número de sala inválido. Deve ser entre 1 e 20.",
+                        "❌ Número de sala inválido. Deve ser entre 1 и 20.",
                         ephemeral=True
                     )
                     return
@@ -908,7 +913,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         )
                 
                 elif action == "restore":
-                    backup_files = [f for f in os.listdir() if f.startswith('backup_') and f.endswith('.json')]
+                    backup_files = [f for f in os.listdir(BACKUP_DIR) if f.startswith('backup_') and f.endswith('.json')]
                     if not backup_files:
                         await interaction.followup.send(
                             "Nenhum arquivo de backup encontrado.",

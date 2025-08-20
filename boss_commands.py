@@ -63,10 +63,6 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
         for sala in sorted(boss_timers[boss].keys()):  # Ordenar salas numericamente
             timers = boss_timers[boss][sala]
             
-            # REMOVER FILTRO que esconde bosses fechados
-            # if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
-            #    continue
-                
             if compact and timers['death_time'] is None:
                 continue
                 
