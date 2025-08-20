@@ -87,15 +87,16 @@ async def load_all_salas():
         salas = [1, 2, 3, 4, 5, 6, 7, 8]
     
     for boss in BOSSES:
-        for sala in salas:
-            if sala not in boss_timers[boss]:
-                boss_timers[boss][sala] = {
-                    'death_time': None,
-                    'respawn_time': None,
-                    'closed_time': None,
-                    'recorded_by': None,
-                    'opened_notified': False
-                }
+        # Para cada boss, criar estrutura ordenada
+        boss_timers[boss] = {}
+        for sala in sorted(salas):  # Ordenar salas
+            boss_timers[boss][sala] = {
+                'death_time': None,
+                'respawn_time': None,
+                'closed_time': None,
+                'recorded_by': None,
+                'opened_notified': False
+            }
 
 @bot.event
 async def on_connect():

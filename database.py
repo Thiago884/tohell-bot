@@ -473,11 +473,14 @@ async def add_sala_to_all_bosses(sala: int) -> bool:
             return False
             
         async with conn.cursor() as cursor:
-            # Para cada boss, adiciona a sala se não existir
-            bosses = ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim", 
-                     "Hydra", "Phoenix of Darkness", "Illusion of Kundun", "Rei Kundun"]
+            # Definir quais bosses podem ter a sala 20
+            if sala == 20:
+                bosses_with_sala_20 = ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]
+            else:
+                bosses_with_sala_20 = ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim", 
+                                     "Hydra", "Phoenix of Darkness", "Illusion of Kundun", "Rei Kundun"]
             
-            for boss in bosses:
+            for boss in bosses_with_sala_20:
                 # Verifica se já existe para evitar duplicação
                 await cursor.execute("""
                 SELECT COUNT(*) FROM boss_timers 
@@ -524,8 +527,8 @@ async def remove_sala_from_all_bosses(sala: int) -> bool:
         if conn:
             await conn.ensure_closed()
 
-async def migrate_fix_sala_20() -> bool:
-    """Migração para corrigir salas 20"""
+async def migrate_remove_sala_20_from_wrong_bosses() -> bool:
+    """Migração para remover sala 20 de bosses que não deveriam tê-la"""
     conn = None
     try:
         conn = await connect_db()
@@ -548,3 +551,7 @@ async def migrate_fix_sala_20() -> bool:
     finally:
         if conn:
             await conn.ensure_closed()
+
+async def migrate_fix_sala_20() -> bool:
+    """Migração para corrigir salas 20"""
+    return await migrate_remove_sala_20_from_wrong_bosses()
