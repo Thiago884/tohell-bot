@@ -1,3 +1,4 @@
+# database.py
 import asyncmy
 import pytz
 from datetime import datetime, timedelta
@@ -92,11 +93,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             return False
         
         async with conn.cursor() as cursor:
-            # Primeiro, limpe a estrutura atual
-            for boss in boss_timers:
-                boss_timers[boss].clear()
-            
-            # Carregar timers de boss
+            # Carregar timers de boss - NÃO LIMPAR A ESTRUTURA EXISTENTE
             await cursor.execute("""
                 SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
                 FROM boss_timers
@@ -110,9 +107,9 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                 
                 # Garante que o boss existe na estrutura
                 if boss_name not in boss_timers:
-                    continue
+                    boss_timers[boss_name] = {}
                 
-                # Adiciona a sala ao boss
+                # Adiciona a sala ao boss com os dados do banco
                 boss_timers[boss_name][sala] = {
                     'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
                     'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
@@ -121,7 +118,8 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                     'opened_notified': bool(timer[6])
                 }
             
-            # Carregar estatísticas de usuários
+            # Carregar estatísticas de usuários - LIMPAR E RECARREGAR
+            user_stats.clear()
             await cursor.execute("""
                 SELECT user_id, username, count, last_recorded 
                 FROM user_stats
@@ -135,7 +133,8 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                     'username': stat[1]
                 }
             
-            # Carregar notificações personalizadas
+            # Carregar notificações personalizadas - LIMPAR E RECARREGAR
+            user_notifications.clear()
             await cursor.execute("""
                 SELECT user_id, boss_name 
                 FROM user_notifications

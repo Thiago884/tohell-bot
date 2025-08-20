@@ -88,7 +88,9 @@ async def load_all_salas():
     
     for boss in BOSSES:
         # Para cada boss, criar estrutura ordenada com filtros
-        boss_timers[boss] = {}
+        # Não sobrescrever se já existirem dados
+        if boss not in boss_timers:
+            boss_timers[boss] = {}
         
         for sala in sorted(salas):  # Ordenar salas
             # Erohim só pode ter sala 20
@@ -99,13 +101,15 @@ async def load_all_salas():
             if boss in ["Hydra", "Phoenix of Darkness", "Illusion of Kundun", "Rei Kundun"] and sala == 20:
                 continue
                 
-            boss_timers[boss][sala] = {
-                'death_time': None,
-                'respawn_time': None,
-                'closed_time': None,
-                'recorded_by': None,
-                'opened_notified': False
-            }
+            # Só adicionar a sala se não existir
+            if sala not in boss_timers[boss]:
+                boss_timers[boss][sala] = {
+                    'death_time': None,
+                    'respawn_time': None,
+                    'closed_time': None,
+                    'recorded_by': None,
+                    'opened_notified': False
+                }
 
 @bot.event
 async def on_connect():
@@ -126,6 +130,20 @@ async def on_ready():
     logger.info(f'✅ Bot conectado como: {bot.user.name} (ID: {bot.user.id})')
     logger.info(f'🕒 Hora do servidor: {datetime.now().strftime("%d/%m/%Y %H:%M:%S")}')
     logger.info("="*50 + "\n")
+    
+    # Inicialização do banco de dados - PRIMEIRO carrega os dados
+    logger.info("\nInicializando banco de dados...")
+    try:
+        await init_db()
+        await load_db_data(boss_timers, user_stats, user_notifications)
+        
+        # DEPOIS carrega a estrutura de salas
+        await load_all_salas()
+        
+        logger.info("✅ Dados carregados com sucesso!")
+    except Exception as e:
+        logger.error(f"❌ Erro ao inicializar banco de dados: {e}")
+        traceback.print_exc()
     
     # Verifica o canal de notificação
     channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
@@ -164,20 +182,6 @@ async def on_ready():
             logger.info(f"✅ {len(synced_guild)} comandos sincronizados no servidor")
     except Exception as e:
         logger.error(f"❌ Erro ao sincronizar comandos: {e}")
-        traceback.print_exc()
-
-    # Inicialização do banco de dados - PRIMEIRO carrega os dados
-    logger.info("\nInicializando banco de dados...")
-    try:
-        await init_db()
-        await load_db_data(boss_timers, user_stats, user_notifications)
-        
-        # DEPOIS carrega a estrutura de salas
-        await load_all_salas()
-        
-        logger.info("✅ Dados carregados com sucesso!")
-    except Exception as e:
-        logger.error(f"❌ Erro ao inicializar banco de dados: {e}")
         traceback.print_exc()
     
     # Configura comandos
