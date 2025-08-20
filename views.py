@@ -22,17 +22,16 @@ def create_boss_embed(boss_timers, compact=False):
     )
     
     for boss in boss_timers:
-        boss_info = []
-        # Ordenar as salas numericamente
-        salas_ordenadas = sorted(boss_timers[boss].keys())
+        # Para o boss Erohim, verificar se a sala 20 existe antes de mostrar
+        if boss == "Erohim":
+            # Verificar se a sala 20 existe para o Erohim
+            if 20 not in boss_timers[boss]:
+                continue  # Pular Erohim se a sala 20 não existir
         
-        for sala in salas_ordenadas:
+        boss_info = []
+        for sala in boss_timers[boss]:
             timers = boss_timers[boss][sala]
             
-            # Para o boss Erohim, mostrar APENAS a sala 20
-            if boss == "Erohim" and sala != 20:
-                continue
-                
             if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
                 continue
                 
