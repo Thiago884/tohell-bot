@@ -78,7 +78,7 @@ user_notifications = defaultdict(list)
 table_message = None
 
 async def load_all_salas():
-    """Carrega todas as salas do banco de dados"""
+    """Carrega todas as salas do banco de dados com filtros específicos"""
     from database import get_all_salas_from_db
     salas = await get_all_salas_from_db()
     
@@ -87,9 +87,18 @@ async def load_all_salas():
         salas = [1, 2, 3, 4, 5, 6, 7, 8]
     
     for boss in BOSSES:
-        # Para cada boss, criar estrutura ordenada
+        # Para cada boss, criar estrutura ordenada com filtros
         boss_timers[boss] = {}
+        
         for sala in sorted(salas):  # Ordenar salas
+            # Erohim só pode ter sala 20
+            if boss == "Erohim" and sala != 20:
+                continue
+                
+            # Outros bosses não podem ter sala 20
+            if boss in ["Hydra", "Phoenix of Darkness", "Illusion of Kundun", "Rei Kundun"] and sala == 20:
+                continue
+                
             boss_timers[boss][sala] = {
                 'death_time': None,
                 'respawn_time': None,
@@ -157,13 +166,13 @@ async def on_ready():
         logger.error(f"❌ Erro ao sincronizar comandos: {e}")
         traceback.print_exc()
 
-    # Inicialização do banco de dados
+    # Inicialização do banco de dados - PRIMEIRO carrega os dados
     logger.info("\nInicializando banco de dados...")
     try:
         await init_db()
         await load_db_data(boss_timers, user_stats, user_notifications)
         
-        # CARREGUE TODAS AS SALAS DO BANCO
+        # DEPOIS carrega a estrutura de salas
         await load_all_salas()
         
         logger.info("✅ Dados carregados com sucesso!")
