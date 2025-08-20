@@ -395,7 +395,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # Comando para gerenciar salas
+    # Comando para gerenciar salas (ATUALIZADO)
     if "managesalas" not in command_names:
         @bot.tree.command(name="managesalas", description="Adiciona ou remove salas de todos os bosses (apenas admins)")
         @app_commands.describe(
@@ -417,7 +417,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         )
                     return
                 
-                # Verificação de permissão antes de qualquer outra verificação
+                # Verificação de permissão
                 if not interaction.user.guild_permissions.administrator:
                     if not interaction.response.is_done():
                         await interaction.response.send_message(
@@ -457,7 +457,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                             )
                         return
                     
-                    # Adicionar na memória
+                    # Adicionar na memória para todos os bosses
                     for boss in boss_timers:
                         # Apenas adicionar sala 20 para bosses específicos
                         if sala == 20 and boss not in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:
@@ -585,7 +585,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                 else:
                     await interaction.followup.send(
-                        "❌ Ocorreu um erro durante a migração. Verifique os logs.",
+                        "❌ Ocorreu um erro durante la migração. Verifique os logs.",
                         ephemeral=True
                     )
                     
@@ -593,12 +593,12 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 logger.error(f"Erro no comando migrate: {e}", exc_info=True)
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
-                        "Ocorreu um erro ao executar a migração.",
+                        "Ocorreu um erro ao executar la migração.",
                         ephemeral=True
                     )
                 else:
                     await interaction.followup.send(
-                        "Ocorreu um erro ao executar a migração.",
+                        "Ocorreu um erro ao executar la migração.",
                         ephemeral=True
                     )
     
@@ -993,7 +993,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 
                 embed.add_field(
                     name="/boss <nome> <sala> <hora_morte> [foi_ontem]",
-                    value="Registra a morte de um boss no horário especificado\nExemplo: `/boss Hydra 8 14:30`\nBosses disponíveis: " + ", ".join(boss_timers.keys()),
+                    value="Registra la morte de um boss no horário especificado\nExemplo: `/boss Hydra 8 14:30`\nBosses disponíveis: " + ", ".join(boss_timers.keys()),
                     inline=False
                 )
                 

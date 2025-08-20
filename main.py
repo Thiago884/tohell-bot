@@ -64,15 +64,9 @@ BOSSES = [
     "Death Beam Knight", "Genocider", "Phoenix of Darkness",
     "Hydra", "Rei Kundun", "Erohim"  # Adicione Erohim aqui se não estiver
 ]
-SALAS = [1, 2, 3, 4, 5, 6, 7, 8]
 
-boss_timers = {boss: {sala: {
-    'death_time': None,
-    'respawn_time': None,
-    'closed_time': None,
-    'recorded_by': None,
-    'opened_notified': False
-} for sala in SALAS} for boss in BOSSES}
+# Inicializa apenas com estrutura básica, as salas serão carregadas do banco
+boss_timers = {boss: {} for boss in BOSSES}
 
 user_stats = defaultdict(lambda: {
     'count': 0,
@@ -82,6 +76,26 @@ user_stats = defaultdict(lambda: {
 
 user_notifications = defaultdict(list)
 table_message = None
+
+async def load_all_salas():
+    """Carrega todas as salas do banco de dados"""
+    from database import get_all_salas_from_db
+    salas = await get_all_salas_from_db()
+    
+    if not salas:
+        # Se não houver salas no banco, usa as padrão
+        salas = [1, 2, 3, 4, 5, 6, 7, 8]
+    
+    for boss in BOSSES:
+        for sala in salas:
+            if sala not in boss_timers[boss]:
+                boss_timers[boss][sala] = {
+                    'death_time': None,
+                    'respawn_time': None,
+                    'closed_time': None,
+                    'recorded_by': None,
+                    'opened_notified': False
+                }
 
 @bot.event
 async def on_connect():
@@ -147,6 +161,10 @@ async def on_ready():
     try:
         await init_db()
         await load_db_data(boss_timers, user_stats, user_notifications)
+        
+        # CARREGUE TODAS AS SALAS DO BANCO
+        await load_all_salas()
+        
         logger.info("✅ Dados carregados com sucesso!")
     except Exception as e:
         logger.error(f"❌ Erro ao inicializar banco de dados: {e}")

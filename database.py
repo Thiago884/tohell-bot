@@ -92,6 +92,10 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             return False
         
         async with conn.cursor() as cursor:
+            # Primeiro, limpe a estrutura atual
+            for boss in boss_timers:
+                boss_timers[boss].clear()
+            
             # Carregar timers de boss
             await cursor.execute("""
                 SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
@@ -104,14 +108,18 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                 boss_name = timer[0]
                 sala = timer[1]
                 
-                if boss_name in boss_timers and sala in boss_timers[boss_name]:
-                    boss_timers[boss_name][sala] = {
-                        'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
-                        'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
-                        'closed_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
-                        'recorded_by': timer[5],
-                        'opened_notified': bool(timer[6])
-                    }
+                # Garante que o boss existe na estrutura
+                if boss_name not in boss_timers:
+                    continue
+                
+                # Adiciona a sala ao boss
+                boss_timers[boss_name][sala] = {
+                    'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
+                    'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
+                    'closed_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
+                    'recorded_by': timer[5],
+                    'opened_notified': bool(timer[6])
+                }
             
             # Carregar estatísticas de usuários
             await cursor.execute("""
@@ -437,6 +445,25 @@ async def restore_backup(backup_file: str) -> bool:
         if conn:
             await conn.ensure_closed()
 
+async def get_all_salas_from_db() -> List[int]:
+    """Obtém todas as salas únicas existentes no banco de dados"""
+    conn = None
+    try:
+        conn = await connect_db()
+        if conn is None:
+            return []
+        
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT DISTINCT sala FROM boss_timers ORDER BY sala")
+            salas = await cursor.fetchall()
+            return [sala[0] for sala in salas] if salas else []
+    except Exception as e:
+        logger.error(f"Erro ao buscar salas do banco: {e}", exc_info=True)
+        return []
+    finally:
+        if conn:
+            await conn.ensure_closed()
+
 async def add_sala_to_all_bosses(sala: int) -> bool:
     """Adiciona uma sala a todos os bosses no banco de dados"""
     conn = None
@@ -447,12 +474,24 @@ async def add_sala_to_all_bosses(sala: int) -> bool:
             
         async with conn.cursor() as cursor:
             # Para cada boss, adiciona a sala se não existir
-            for boss in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:  # Inclua Erohim aqui
+            bosses = ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim", 
+                     "Hydra", "Phoenix of Darkness", "Illusion of Kundun", "Rei Kundun"]
+            
+            for boss in bosses:
+                # Verifica se já existe para evitar duplicação
                 await cursor.execute("""
-                INSERT IGNORE INTO boss_timers (boss_name, sala)
-                VALUES (%s, %s)
+                SELECT COUNT(*) FROM boss_timers 
+                WHERE boss_name = %s AND sala = %s
                 """, (boss, sala))
                 
+                exists = (await cursor.fetchone())[0] > 0
+                
+                if not exists:
+                    await cursor.execute("""
+                    INSERT INTO boss_timers (boss_name, sala)
+                    VALUES (%s, %s)
+                    """, (boss, sala))
+                    
             await conn.commit()
         return True
     except Exception as e:
