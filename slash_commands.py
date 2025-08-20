@@ -43,13 +43,51 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             for boss in bosses if current.lower() in boss.lower()
         ][:25]
     
-    # Autocomplete para salas
+    # Autocomplete para salas - CORRIGIDO
     async def sala_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[int]]:
-        salas = list(boss_timers[list(boss_timers.keys())[0]].keys())
-        return [
-            app_commands.Choice(name=f"Sala {sala}", value=sala)
-            for sala in salas if current in str(sala)
-        ][:25]
+        """Autocomplete de salas baseado no boss selecionado"""
+        try:
+            # Obter o boss selecionado da interação atual
+            options = interaction.data.get('options', [])
+            boss_name = None
+            
+            for option in options:
+                if option['name'] == 'boss_name':
+                    boss_name = option['value']
+                    break
+            
+            if not boss_name:
+                # Se não encontrou o boss, retorna salas padrão
+                salas = list(boss_timers[list(boss_timers.keys())[0]].keys())
+                return [
+                    app_commands.Choice(name=f"Sala {sala}", value=sala)
+                    for sala in salas if current in str(sala)
+                ][:25]
+            
+            # Encontrar o nome completo do boss
+            full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
+            if not full_boss_name:
+                salas = list(boss_timers[list(boss_timers.keys())[0]].keys())
+                return [
+                    app_commands.Choice(name=f"Sala {sala}", value=sala)
+                    for sala in salas if current in str(sala)
+                ][:25]
+            
+            # Retornar salas específicas do boss
+            salas = list(boss_timers[full_boss_name].keys())
+            return [
+                app_commands.Choice(name=f"Sala {sala}", value=sala)
+                for sala in salas if current in str(sala)
+            ][:25]
+            
+        except Exception as e:
+            logger.error(f"Erro no autocomplete de salas: {e}")
+            # Fallback para salas padrão em caso de erro
+            salas = list(boss_timers[list(boss_timers.keys())[0]].keys())
+            return [
+                app_commands.Choice(name=f"Sala {sala}", value=sala)
+                for sala in salas if current in str(sala)
+            ][:25]
     
     # Comando para mostrar tabela completa de bosses
     if "bosses" not in command_names:
@@ -102,7 +140,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         @app_commands.autocomplete(boss_name=boss_autocomplete, sala=sala_autocomplete)
         @app_commands.describe(
             boss_name="Nome do boss",
-            sala="Número da sala (1-20)",
+            sala="Número da sala",
             hora_morte="Horário da morte (formato HH:MM ou HHhMM)",
             foi_ontem="Se a morte foi ontem (padrão: não)"
         )
@@ -131,19 +169,6 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         )
                     return
                 
-                if sala < 1 or sala > 20:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            "❌ Número de sala inválido. Deve ser entre 1 e 20.",
-                            ephemeral=True
-                        )
-                    else:
-                        await interaction.followup.send(
-                            "❌ Número de sala inválido. Deve ser entre 1 e 20.",
-                            ephemeral=True
-                        )
-                    return
-                
                 full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
                 if full_boss_name is None:
                     if not interaction.response.is_done():
@@ -160,15 +185,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 
                 boss_name = full_boss_name
                 
+                # VALIDAÇÃO CORRIGIDA: Verificar se a sala existe para este boss específico
                 if sala not in boss_timers[boss_name]:
+                    available_salas = ', '.join(map(str, sorted(boss_timers[boss_name].keys())))
                     if not interaction.response.is_done():
                         await interaction.response.send_message(
-                            f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
+                            f"❌ Sala {sala} inválida para {boss_name}. Salas disponíveis: {available_salas}",
                             ephemeral=True
                         )
                     else:
                         await interaction.followup.send(
-                            f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
+                            f"❌ Sala {sala} inválida para {boss_name}. Salas disponíveis: {available_salas}",
                             ephemeral=True
                         )
                     return

@@ -120,22 +120,24 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
             boss_name = get_boss_by_abbreviation(self.boss.value, self.boss_timers)
             if boss_name is None:
                 await interaction.followup.send(
-                    f"Boss inválido. Bosses disponíveis: {', '.join(self.boss_timers.keys())}\nAbreviações: Hell, Illusion, DBK, Phoenix, Red, Rei, Geno",
+                    f"Boss inválido. Bosses disponíveis: {', '.join(self.boss_timers.keys())}",
                     ephemeral=True
                 )
                 return
             
             try:
                 sala = int(self.sala.value)
-                if sala not in self.boss_timers[boss_name].keys():
+                # VALIDAÇÃO CORRIGIDA: Verificar se a sala existe para este boss
+                if sala not in self.boss_timers[boss_name]:
+                    available_salas = ', '.join(map(str, sorted(self.boss_timers[boss_name].keys())))
                     await interaction.followup.send(
-                        f"Sala inválida. Salas disponíveis: {', '.join(map(str, self.boss_timers[boss_name].keys()))}",
+                        f"Sala {sala} inválida para {boss_name}. Salas disponíveis: {available_salas}",
                         ephemeral=True
                     )
                     return
             except ValueError:
                 await interaction.followup.send(
-                    "Sala inválida. Digite um número entre 1 e 20.",
+                    "Sala inválida. Digite um número válido.",
                     ephemeral=True
                 )
                 return
@@ -678,6 +680,7 @@ class BossControlView(View):
                                 file=discord.File(f, filename=backup_file),
                                 ephemeral=True
                             )
+                        os.remove(backup_file)  # Limpar arquivo após envio
                     except Exception as e:
                         await interaction.followup.send(
                             f"✅ Backup criado, mais erro ao enviar arquivo: {e}",
