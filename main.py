@@ -62,7 +62,7 @@ bot = commands.Bot(
 BOSSES = [
     "Super Red Dragon", "Hell Maine", "Illusion of Kundun",
     "Death Beam Knight", "Genocider", "Phoenix of Darkness",
-    "Hydra", "Rei Kundun"
+    "Hydra", "Rei Kundun", "Erohim"  # Adicione Erohim aqui se não estiver
 ]
 SALAS = [1, 2, 3, 4, 5, 6, 7, 8]
 

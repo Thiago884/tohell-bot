@@ -713,7 +713,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                             )
                     else:
                         await interaction.response.send_message(
-                            f"ℹ Você já está sendo notificado para **{boss_name}.",
+                            f"ℹ Você já está sendo notificado para **{boss_name}**.",
                             ephemeral=True
                         )
                 
@@ -722,7 +722,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         if await remove_user_notification(user_id, boss_name):
                             user_notifications[user_id].remove(boss_name)
                             await interaction.response.send_message(
-                                f"✅ Você NÃO será mais notificado para **{boss_name}.",
+                                f"✅ Você NÃO será mais notificado para **{boss_name}**.",
                                 ephemeral=True
                             )
                         else:
@@ -732,7 +732,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                             )
                     else:
                         await interaction.response.send_message(
-                            f"ℹ Você não tinha notificação ativa para **{boss_name}.",
+                            f"ℹ Você não tinha notificação ativa para **{boss_name}**.",
                             ephemeral=True
                         )
                 else:
@@ -892,13 +892,13 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         try:
                             with open(backup_file, 'rb') as f:
                                 await interaction.followup.send(
-                                    f"✅ Backup criado com sucesso!",
+                                    "✅ Backup criado com sucesso!",
                                     file=discord.File(f, filename=backup_file),
                                     ephemeral=True
                                 )
                         except Exception as e:
                             await interaction.followup.send(
-                                f"✅ Backup criado, mas erro ao enviar arquivo: {e}",
+                                f"✅ Backup criado, mais erro ao enviar arquivo: {e}",
                                 ephemeral=True
                             )
                     else:
@@ -937,7 +937,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                             await update_table_func(interaction.channel)
                         else:
                             await interaction.followup.send(
-                                f"❌ Falha ao restaurar backup **{backup_file}!",
+                                f"❌ Falha ao restaurar backup **{backup_file}**!",
                                 ephemeral=True
                             )
                     

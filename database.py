@@ -447,7 +447,7 @@ async def add_sala_to_all_bosses(sala: int) -> bool:
             
         async with conn.cursor() as cursor:
             # Para cada boss, adiciona a sala se não existir
-            for boss in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:
+            for boss in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:  # Inclua Erohim aqui
                 await cursor.execute("""
                 INSERT IGNORE INTO boss_timers (boss_name, sala)
                 VALUES (%s, %s)

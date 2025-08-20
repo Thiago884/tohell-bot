@@ -58,6 +58,12 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
     )
     
     for boss in boss_timers:
+        # Para o boss Erohim, verificar se a sala 20 existe antes de mostrar
+        if boss == "Erohim":
+            # Verificar se a sala 20 existe para o Erohim
+            if 20 not in boss_timers[boss]:
+                continue  # Pular Erohim se a sala 20 não existir
+        
         boss_info = []
         for sala in boss_timers[boss]:
             timers = boss_timers[boss][sala]

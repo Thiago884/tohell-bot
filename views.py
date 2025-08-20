@@ -22,6 +22,12 @@ def create_boss_embed(boss_timers, compact=False):
     )
     
     for boss in boss_timers:
+        # Para o boss Erohim, verificar se a sala 20 existe antes de mostrar
+        if boss == "Erohim":
+            # Verificar se a sala 20 existe para o Erohim
+            if 20 not in boss_timers[boss]:
+                continue  # Pular Erohim se a sala 20 não existir
+        
         boss_info = []
         for sala in boss_timers[boss]:
             timers = boss_timers[boss][sala]
@@ -65,7 +71,7 @@ def create_boss_embed(boss_timers, compact=False):
             )
     
     return embed
-
+    
 class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
     boss = discord.ui.TextInput(
         label="Nome do Boss",
@@ -88,11 +94,11 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
     )
     
     foi_ontem = discord.ui.TextInput(
-        label="Foi ontem? (S/N)",
+        label="Foi Ontem (S/N) Opcional",
         placeholder="Digite S para sim ou N para não",
         required=False,
         max_length=1,
-        default="N"
+        default=""
     )
 
     def __init__(self, bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
