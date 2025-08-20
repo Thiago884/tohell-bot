@@ -97,8 +97,8 @@ async def load_all_salas():
             if boss == "Erohim" and sala != 20:
                 continue
                 
-            # Outros bosses não podem ter sala 20
-            if boss in ["Hydra", "Phoenix of Darkness", "Illusion of Kundun", "Rei Kundun"] and sala == 20:
+            # Outros bosses não podem ter sala 20 (exceto os específicos)
+            if boss not in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"] and sala == 20:
                 continue
                 
             # Só adicionar a sala se não existir
