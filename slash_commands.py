@@ -320,7 +320,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 
                 if sala is not None and (sala < 1 or sala > 20):
                     await interaction.response.send_message(
-                        "❌ Número de sala inválido. Deve ser entre 1 и 20.",
+                        "❌ Número de sala inválido. Deve ser entre 1 e 20.",
                         ephemeral=True
                     )
                     return
@@ -481,7 +481,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     message = f"✅ Sala {sala} adicionada aos bosses relevantes!"
                 
                 elif action == 'rem':
-                    # Verificar if sala existe em algum boss
+                    # Verificar se sala existe em algum boss
                     sala_exists = any(sala in boss_timers[boss] for boss in boss_timers)
                     if not sala_exists:
                         if not interaction.response.is_done():
