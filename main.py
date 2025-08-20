@@ -62,7 +62,7 @@ bot = commands.Bot(
 BOSSES = [
     "Super Red Dragon", "Hell Maine", "Illusion of Kundun",
     "Death Beam Knight", "Genocider", "Phoenix of Darkness",
-    "Hydra", "Rei Kundun", "Erohim"
+    "Hydra", "Rei Kundun"
 ]
 
 # Inicializa apenas com estrutura básica, as salas serão carregadas do banco
