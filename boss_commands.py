@@ -166,9 +166,10 @@ def create_ranking_embed(user_stats: Dict) -> discord.Embed:
     embed.description = "\n\n".join(ranking_text)
     return embed
 
+# MODIFICADO: Adicionado parâmetro 'force_new'
 async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict, 
                       user_notifications: Dict, table_message: discord.Message, 
-                      NOTIFICATION_CHANNEL_ID: int):
+                      NOTIFICATION_CHANNEL_ID: int, force_new: bool = False):
     """Atualiza a mensagem da tabela de bosses"""
     try:
         logger.info("Iniciando atualização da tabela de bosses...")
@@ -180,28 +181,30 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
             user_notifications, 
             table_message, 
             NOTIFICATION_CHANNEL_ID,
-            # MODIFICADO: Passa a função de update correta
-            lambda channel=channel: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
+            # MODIFICADO: Passa a função de update correta com 'force_new'
+            lambda force_new=False: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, force_new),
             lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
             lambda: create_ranking_embed(user_stats),
             lambda: create_history_embed(bot, boss_timers),
             lambda: create_unrecorded_embed(bot, boss_timers)
         )
         
-        # Se não temos mensagem de tabela, envia uma nova
-        if table_message is None:
-            logger.info("Nenhuma tabela existente encontrada, enviando nova...")
+        # Se não temos mensagem de tabela ou se 'force_new' é True
+        if table_message is None or force_new:
+            logger.info("Nenhuma tabela existente encontrada (ou nova forçada), enviando nova...")
             try:
-                # Tenta apagar mensagens antigas do bot no canal
-                async for message in channel.history(limit=50):
-                    if message.author == bot.user:
-                        try:
-                            await message.delete()
-                            logger.info(f"Mensagem antiga {message.id} deletada.")
-                        except discord.Forbidden:
-                            logger.warning(f"Não foi possível deletar a mensagem antiga {message.id} (sem permissão).")
-                        except discord.NotFound:
-                            pass # Mensagem já foi deletada
+                # MODIFICADO: Tenta apagar mensagens antigas APENAS SE force_new=True
+                if force_new:
+                    logger.info("Limpando mensagens antigas (force_new=True)...")
+                    async for message in channel.history(limit=50):
+                        if message.author == bot.user:
+                            try:
+                                await message.delete()
+                                logger.info(f"Mensagem antiga {message.id} deletada.")
+                            except discord.Forbidden:
+                                logger.warning(f"Não foi possível deletar a mensagem antiga {message.id} (sem permissão).")
+                            except discord.NotFound:
+                                pass # Mensagem já foi deletada
                 
                 table_message = await channel.send(embed=embed, view=view)
                 logger.info("✅ Nova tabela enviada com sucesso!")
@@ -223,8 +226,9 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
             return table_message
         except discord.NotFound:
             logger.warning("⚠ Tabela anterior não encontrada, enviando nova...")
-            table_message = None # Força o envio de uma nova no próximo if
-            return await update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID)
+            table_message = None # Força o envio de uma nova
+            # MODIFICADO: Chama recursivamente SEM force_new
+            return await update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, False)
         except Exception as e:
             logger.error(f"❌ Erro ao editar tabela existente: {e}")
             return table_message
@@ -356,25 +360,27 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     
     # Define a função de atualização que será usada pelas tasks
     # Ela usa a variável table_message deste escopo
-    async def update_main_table():
+    # MODIFICADO: Adicionado 'force_new'
+    async def update_main_table(force_new=False):
         nonlocal table_message # Garante que estamos modificando a variável table_message deste escopo
         if channel:
             table_message = await update_table(
                 bot, channel, boss_timers, user_stats, 
-                user_notifications, table_message, NOTIFICATION_CHANNEL_ID
+                user_notifications, table_message, NOTIFICATION_CHANNEL_ID,
+                force_new=force_new # Passa o parâmetro
             )
 
     # Verifica se a tabela já foi enviada
     if table_message is None:
         if channel:
-            await update_main_table() # Envia a tabela inicial e armazena em table_message
+            await update_main_table() # Envia a tabela inicial (sem forçar)
     
     # Tasks
     @tasks.loop(seconds=60)
     async def live_table_updater():
         """Atualiza a tabela periodicamente"""
         try:
-            await update_main_table()
+            await update_main_table() # Chama sem forçar
         except Exception as e:
             logger.error(f"Erro na task de atualização de tabela: {e}", exc_info=True)
 
@@ -387,38 +393,11 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
             update_main_table # Passa a função de atualização
         )
 
-    # @tasks.loop(minutes=30)
-    # async def periodic_table_update():
-    #     """Atualiza a tabela periodicamente com novo post"""
-    #     try:
-    #         logger.info("\nIniciando atualização periódica da tabela...")
-    #         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
-    #         if channel:
-    #             logger.info(f"Canal encontrado: {channel.name}")
-    #             nonlocal table_message
-    #             table_message = None  # Força o envio de uma nova mensagem
-    #             table_message = await update_table(
-    #                 bot, channel, boss_timers, user_stats, 
-    #                 user_notifications, table_message, NOTIFICATION_CHANNEL_ID
-    #             )
-    #             logger.info("✅ Tabela atualizada com sucesso!")
-    #         else:
-    #             logger.info(f"Canal com ID {NOTIFICATION_CHANNEL_ID} não encontrado!")
-            
-    #         # Define um novo intervalo aleatório entre 30 e 60 minutos
-    #         new_interval = random.randint(30, 60)
-    #         logger.info(f"Próxima atualização em {new_interval} minutos")
-    #         periodic_table_update.change_interval(minutes=new_interval)
-        
-    #     except Exception as e:
-    #         logger.error(f"Erro na atualização periódica: {e}", exc_info=True)
-    #         # Tenta novamente em 5 minutos se falhar
-    #         periodic_table_update.change_interval(minutes=5)
+    # (Task periodic_table_update removida/comentada)
 
     # Iniciar as tasks
     check_boss_respawns_task.start()
     live_table_updater.start()
-    # periodic_table_update.start() # MODIFICADO: Desabilitado conforme solicitado
 
     # Função para cancelar tasks
     async def shutdown_tasks():
@@ -426,13 +405,11 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
         try:
             check_boss_respawns_task.cancel()
             live_table_updater.cancel()
-            # periodic_table_update.cancel() # MODIFICADO: Desabilitado
             
             # Aguarda as tasks serem realmente canceladas
             await asyncio.gather(
                 check_boss_respawns_task,
                 live_table_updater,
-                # periodic_table_update, # MODIFICADO: Desabilitado
                 return_exceptions=True
             )
             logger.info("Todas as tasks foram canceladas com sucesso")
@@ -445,10 +422,10 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     # Retornar as funções necessárias para outros módulos
     return (
         lambda boss_timers=boss_timers: create_boss_embed(boss_timers),
-        # MODIFICADO: A função de update agora usa o channel do escopo
-        lambda channel=channel: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
+        # MODIFICADO: A função de update agora aceita 'force_new'
+        lambda force_new=False: update_main_table(force_new=force_new),
         lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
-        lambda: create_ranking_embed(user_stats),  # CORRIGIDO: função síncrona
+        lambda: create_ranking_embed(user_stats),
         lambda: create_history_embed(bot, boss_timers),
         lambda: create_unrecorded_embed(bot, boss_timers)
     )

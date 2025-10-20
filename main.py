@@ -11,7 +11,8 @@ import traceback
 from datetime import datetime, timedelta
 import pytz
 import random
-from boss_commands import setup_boss_commands
+# MODIFICADO: Importa 'update_table' diretamente
+from boss_commands import setup_boss_commands, update_table
 from drops import setup_drops_command
 from database import init_db, load_db_data
 import logging
@@ -143,11 +144,12 @@ async def on_ready():
         global table_message
         table_message = None
         try:
-            from boss_commands import update_table
+            # MODIFICADO: Chama update_table sem 'force_new=True'
             table_message = await update_table(
                 bot, channel, boss_timers, 
                 user_stats, user_notifications, 
                 table_message, NOTIFICATION_CHANNEL_ID
+                # force_new=True foi removido para evitar rate limit na inicialização
             )
             logger.info("✅ Tabela enviada com sucesso no canal!")
         except Exception as e:
@@ -170,6 +172,7 @@ async def on_ready():
     
     logger.info("\nConfigurando comandos...")
     try:
+        # MODIFICADO: 'table_message' agora contém a mensagem criada (ou None)
         boss_funcs = await setup_boss_commands(
             bot, boss_timers, user_stats, 
             user_notifications, table_message, NOTIFICATION_CHANNEL_ID
