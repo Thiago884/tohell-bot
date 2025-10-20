@@ -14,7 +14,6 @@ BOSS_ABBREVIATIONS = {
     "phoenix of darkness": "phoenix",
     "rei kundun": "rei",
     "genocider": "geno",
-    "erohim": "ero"
 }
 
 def format_time_remaining(target_time: datetime) -> str:
