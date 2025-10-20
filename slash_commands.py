@@ -15,8 +15,7 @@ from database import (
     add_user_notification, remove_user_notification, load_db_data,
     add_sala_to_all_bosses, remove_sala_from_all_bosses, create_backup, restore_backup
 )
-# MODIFICADO: Importa SecondaryEmbedView
-from views import BossControlView, SecondaryEmbedView 
+from views import BossControlView
 from discord.app_commands import CommandAlreadyRegistered
 
 # Configuração do logger
@@ -103,12 +102,24 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     return
                 
-                await interaction.response.defer(ephemeral=True)
+                await interaction.response.defer()
                 
-                # MODIFICADO: Chama a função de update com 'force_new=True'
-                await update_table_func(force_new=True) 
-
-                await interaction.followup.send("Tabela de bosses recriada.", ephemeral=True)
+                embed = create_boss_embed_func(boss_timers)
+                view = BossControlView(
+                    bot,
+                    boss_timers,
+                    user_stats,
+                    user_notifications,
+                    table_message,
+                    NOTIFICATION_CHANNEL_ID,
+                    update_table_func,
+                    create_next_bosses_embed_func,
+                    create_ranking_embed_func,
+                    create_history_embed_func,
+                    create_unrecorded_embed_func
+                )
+                
+                await interaction.followup.send(embed=embed, view=view)
                 
             except Exception as e:
                 logger.error(f"Erro no comando slash bosses: {e}", exc_info=True)
@@ -174,6 +185,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 
                 boss_name = full_boss_name
                 
+                # VALIDAÇÃO CORRIGIDA: Verificar se a sala existe para este boss específico
                 if sala not in boss_timers[boss_name]:
                     available_salas = ', '.join(map(str, sorted(boss_timers[boss_name].keys())))
                     if not interaction.response.is_done():
@@ -188,6 +200,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         )
                     return
                 
+                # Verificação corrigida - só impede se o boss estiver agendado (ainda não abriu)
                 timers = boss_timers[boss_name][sala]
                 now = datetime.now(brazil_tz)
                 
@@ -263,16 +276,39 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
                 await save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
                 
-                await interaction.followup.send(
-                    f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
-                    f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
-                    f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
-                    f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
-                    ephemeral=False
-                )
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
+                        f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
+                        f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
+                        f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
+                        ephemeral=False
+                    )
+                else:
+                    await interaction.followup.send(
+                        f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
+                        f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
+                        f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
+                        f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
+                        ephemeral=False
+                    )
                 
-                # MODIFICADO: Chama a função de update sem parâmetros
-                await update_table_func()
+                # Atualiza a tabela
+                embed = create_boss_embed_func(boss_timers)
+                view = BossControlView(
+                    bot,
+                    boss_timers,
+                    user_stats,
+                    user_notifications,
+                    table_message,
+                    NOTIFICATION_CHANNEL_ID,
+                    update_table_func,
+                    create_next_bosses_embed_func,
+                    create_ranking_embed_func,
+                    create_history_embed_func,
+                    create_unrecorded_embed_func
+                )
+                await interaction.followup.send(embed=embed, view=view)
                 
             except Exception as e:
                 logger.error(f"Erro no comando slash boss: {e}", exc_info=True)
@@ -302,17 +338,15 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         ):
             """Limpa o timer de um boss via comando slash"""
             try:
-                await interaction.response.defer(ephemeral=True)
-
                 if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                    await interaction.followup.send(
+                    await interaction.response.send_message(
                         "⚠ Comandos só são aceitos no canal designado!",
                         ephemeral=True
                     )
                     return
                 
                 if sala is not None and (sala < 1 or sala > 20):
-                    await interaction.followup.send(
+                    await interaction.response.send_message(
                         "❌ Número de sala inválido. Deve ser entre 1 e 20.",
                         ephemeral=True
                     )
@@ -320,7 +354,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 
                 full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
                 if full_boss_name is None:
-                    await interaction.followup.send(
+                    await interaction.response.send_message(
                         f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
                         ephemeral=True
                     )
@@ -338,13 +372,13 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                             'opened_notified': False
                         }
                     await clear_timer(boss_name)
-                    await interaction.followup.send(
+                    await interaction.response.send_message(
                         f"✅ Todos os timers do boss **{boss_name}** foram resetados.",
                         ephemeral=True
                     )
                 else:
                     if sala not in boss_timers[boss_name]:
-                        await interaction.followup.send(
+                        await interaction.response.send_message(
                             f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
                             ephemeral=True
                         )
@@ -358,13 +392,27 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         'opened_notified': False
                     }
                     await clear_timer(boss_name, sala)
-                    await interaction.followup.send(
+                    await interaction.response.send_message(
                         f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
                         ephemeral=True
                     )
                 
-                # MODIFICADO: Chama a função de update sem parâmetros
-                await update_table_func()
+                # Atualiza a tabela
+                embed = create_boss_embed_func(boss_timers)
+                view = BossControlView(
+                    bot,
+                    boss_timers,
+                    user_stats,
+                    user_notifications,
+                    table_message,
+                    NOTIFICATION_CHANNEL_ID,
+                    update_table_func,
+                    create_next_bosses_embed_func,
+                    create_ranking_embed_func,
+                    create_history_embed_func,
+                    create_unrecorded_embed_func
+                )
+                await interaction.followup.send(embed=embed, view=view)
                 
             except Exception as e:
                 logger.error(f"Erro no comando slash clearboss: {e}", exc_info=True)
@@ -393,49 +441,57 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         ):
             """Gerencia salas via comando slash"""
             try:
-                await interaction.response.defer(ephemeral=True)
-
                 if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                    await interaction.followup.send(
-                        "⚠ Comandos só são aceitos no canal designado!",
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            "⚠ Comandos só são aceitos no canal designado!",
+                            ephemeral=True
+                        )
                     return
                 
+                # Verificação de permissão
                 if not interaction.user.guild_permissions.administrator:
-                    await interaction.followup.send(
-                        "❌ Apenas administradores podem usar este comando.",
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            "❌ Apenas administradores podem usar este comando.",
+                            ephemeral=True
+                        )
                     return
                 
                 if sala < 1 or sala > 20:
-                    await interaction.followup.send(
-                        "❌ Número de sala inválido. Deve ser entre 1 e 20.",
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            "❌ Número de sala inválido. Deve ser entre 1 e 20.",
+                            ephemeral=True
+                        )
                     return
                 
                 modified = False
                 
                 if action == 'add':
+                    # Verificar se sala já existe para todos os bosses
                     sala_exists = all(sala in boss_timers[boss] for boss in boss_timers)
                     if sala_exists:
-                        await interaction.followup.send(
-                            f"ℹ A sala {sala} já existe em todos os bosses.",
-                            ephemeral=True
-                        )
+                        if not interaction.response.is_done():
+                            await interaction.response.send_message(
+                                f"ℹ A sala {sala} já existe em todos os bosses.",
+                                ephemeral=True
+                            )
                         return
                     
+                    # Adicionar no banco de dados primeiro
                     success = await add_sala_to_all_bosses(sala)
                     if not success:
-                        await interaction.followup.send(
-                            "❌ Erro ao adicionar sala no banco de dados.",
-                            ephemeral=True
-                        )
+                        if not interaction.response.is_done():
+                            await interaction.response.send_message(
+                                "❌ Erro ao adicionar sala no banco de dados.",
+                                ephemeral=True
+                            )
                         return
                     
+                    # Adicionar na memória para todos os bosses
                     for boss in boss_timers:
+                        # Apenas adicionar sala 20 para bosses específicos
                         if sala == 20 and boss not in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:
                             continue
                             
@@ -452,22 +508,27 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     message = f"✅ Sala {sala} adicionada aos bosses relevantes!"
                 
                 elif action == 'rem':
+                    # Verificar se sala existe em algum boss
                     sala_exists = any(sala in boss_timers[boss] for boss in boss_timers)
                     if not sala_exists:
-                        await interaction.followup.send(
-                            f"ℹ A sala {sala} não existe em nenhum boss.",
-                            ephemeral=True
-                        )
+                        if not interaction.response.is_done():
+                            await interaction.response.send_message(
+                                f"ℹ A sala {sala} não existe em nenhum boss.",
+                                ephemeral=True
+                            )
                         return
                     
+                    # Remover do banco de dados primeiro
                     success = await remove_sala_from_all_bosses(sala)
                     if not success:
-                        await interaction.followup.send(
-                            "❌ Erro ao remover sala do banco de dados.",
-                            ephemeral=True
-                        )
+                        if not interaction.response.is_done():
+                            await interaction.response.send_message(
+                                "❌ Erro ao remover sala do banco de dados.",
+                                ephemeral=True
+                            )
                         return
                     
+                    # Remover da memória
                     for boss in boss_timers:
                         if sala in boss_timers[boss]:
                             del boss_timers[boss][sala]
@@ -475,20 +536,41 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     modified = True
                     message = f"✅ Sala {sala} removida de todos os bosses!"
                 else:
-                    await interaction.followup.send(
-                        "Ação inválida. Use 'add' para adicionar ou 'rem' para remover.",
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            "Ação inválida. Use 'add' para adicionar ou 'rem' para remover.",
+                            ephemeral=True
+                        )
                     return
                 
                 if modified:
-                    await interaction.followup.send(
-                        message,
-                        ephemeral=True
-                    )
+                    if not interaction.response.is_done():
+                        await interaction.response.send_message(
+                            message,
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.followup.send(
+                            message,
+                            ephemeral=True
+                        )
                         
-                    # MODIFICADO: Chama a função de update sem parâmetros
-                    await update_table_func()
+                    # Atualiza a tabela
+                    embed = create_boss_embed_func(boss_timers)
+                    view = BossControlView(
+                        bot,
+                        boss_timers,
+                        user_stats,
+                        user_notifications,
+                        table_message,
+                        NOTIFICATION_CHANNEL_ID,
+                        update_table_func,
+                        create_next_bosses_embed_func,
+                        create_ranking_embed_func,
+                        create_history_embed_func,
+                        create_unrecorded_embed_func
+                    )
+                    await interaction.channel.send(embed=embed, view=view)
                 
             except Exception as e:
                 logger.error(f"Erro no comando slash managesalas: {e}", exc_info=True)
@@ -552,7 +634,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # MODIFICADO: Comando para mostrar próximos bosses
+    # Comando para mostrar próximos bosses (mantido original)
     if "nextboss" not in command_names:
         @bot.tree.command(name="nextboss", description="Mostra os próximos bosses a abrir")
         async def nextboss_slash(interaction: discord.Interaction):
@@ -565,22 +647,10 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     return
                 
-                await interaction.response.defer(ephemeral=True)
+                await interaction.response.defer()
                 embed = create_next_bosses_embed_func(boss_timers)
+                await interaction.followup.send(embed=embed)
                 
-                view = SecondaryEmbedView(
-                    bot, boss_timers, user_stats, user_notifications,
-                    table_message, NOTIFICATION_CHANNEL_ID, update_table_func,
-                    create_next_bosses_embed_func, create_ranking_embed_func,
-                    create_history_embed_func, create_unrecorded_embed_func
-                )
-                
-                if table_message:
-                    await table_message.edit(embed=embed, view=view)
-                    await interaction.followup.send("Tabela principal atualizada.", ephemeral=True)
-                else:
-                    await interaction.followup.send(embed=embed, view=view)
-
             except Exception as e:
                 logger.error(f"Erro no comando slash nextboss: {e}", exc_info=True)
                 if not interaction.response.is_done():
@@ -594,7 +664,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # MODIFICADO: Comando para mostrar ranking
+    # Comando para mostrar ranking (mantido original)
     if "ranking" not in command_names:
         @bot.tree.command(name="ranking", description="Mostra ranking de anotações")
         async def ranking_slash(interaction: discord.Interaction):
@@ -607,21 +677,9 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     return
                 
-                await interaction.response.defer(ephemeral=True)
+                await interaction.response.defer()
                 embed = create_ranking_embed_func(user_stats)
-                
-                view = SecondaryEmbedView(
-                    bot, boss_timers, user_stats, user_notifications,
-                    table_message, NOTIFICATION_CHANNEL_ID, update_table_func,
-                    create_next_bosses_embed_func, create_ranking_embed_func,
-                    create_history_embed_func, create_unrecorded_embed_func
-                )
-                
-                if table_message:
-                    await table_message.edit(embed=embed, view=view)
-                    await interaction.followup.send("Tabela principal atualizada.", ephemeral=True)
-                else:
-                    await interaction.followup.send(embed=embed, view=view)
+                await interaction.followup.send(embed=embed)
                 
             except Exception as e:
                 logger.error(f"Erro no comando slash ranking: {e}", exc_info=True)
@@ -770,7 +828,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # MODIFICADO: Comando para mostrar histórico
+    # Comando para mostrar histórico (mantido original)
     if "historico" not in command_names:
         @bot.tree.command(name="historico", description="Mostra histórico de anotações")
         async def historico_slash(interaction: discord.Interaction):
@@ -783,21 +841,9 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     return
                 
-                await interaction.response.defer(ephemeral=True)
+                await interaction.response.defer()
                 embed = await create_history_embed_func()
-                
-                view = SecondaryEmbedView(
-                    bot, boss_timers, user_stats, user_notifications,
-                    table_message, NOTIFICATION_CHANNEL_ID, update_table_func,
-                    create_next_bosses_embed_func, create_ranking_embed_func,
-                    create_history_embed_func, create_unrecorded_embed_func
-                )
-                
-                if table_message:
-                    await table_message.edit(embed=embed, view=view)
-                    await interaction.followup.send("Tabela principal atualizada.", ephemeral=True)
-                else:
-                    await interaction.followup.send(embed=embed, view=view)
+                await interaction.followup.send(embed=embed)
                 
             except Exception as e:
                 logger.error(f"Erro no comando slash historico: {e}", exc_info=True)
@@ -812,7 +858,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # MODIFICADO: Comando para mostrar bosses não anotados
+    # Comando para mostrar bosses não anotados (mantido original)
     if "naoanotados" not in command_names:
         @bot.tree.command(name="naoanotados", description="Mostra bosses que fecharam sem registro")
         async def naoanotados_slash(interaction: discord.Interaction):
@@ -825,21 +871,9 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     return
                 
-                await interaction.response.defer(ephemeral=True)
+                await interaction.response.defer()
                 embed = await create_unrecorded_embed_func()
-                
-                view = SecondaryEmbedView(
-                    bot, boss_timers, user_stats, user_notifications,
-                    table_message, NOTIFICATION_CHANNEL_ID, update_table_func,
-                    create_next_bosses_embed_func, create_ranking_embed_func,
-                    create_history_embed_func, create_unrecorded_embed_func
-                )
-                
-                if table_message:
-                    await table_message.edit(embed=embed, view=view)
-                    await interaction.followup.send("Tabela principal atualizada.", ephemeral=True)
-                else:
-                    await interaction.followup.send(embed=embed, view=view)
+                await interaction.followup.send(embed=embed)
                 
             except Exception as e:
                 logger.error(f"Erro no comando slash naoanotados: {e}", exc_info=True)
@@ -874,6 +908,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     return
                 
+                # Verificação de permissão
                 if not interaction.user.guild_permissions.administrator:
                     await interaction.response.send_message(
                         "❌ Apenas administradores podem usar este comando.",
@@ -931,8 +966,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                                 ephemeral=True
                             )
                             
-                            # MODIFICADO: Chama a função de update sem parâmetros
-                            await update_table_func()
+                            await update_table_func(interaction.channel)
                         else:
                             await interaction.followup.send(
                                 f"❌ Falha ao restaurar backup **{backup_file}**!",

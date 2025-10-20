@@ -166,10 +166,9 @@ def create_ranking_embed(user_stats: Dict) -> discord.Embed:
     embed.description = "\n\n".join(ranking_text)
     return embed
 
-# MODIFICADO: Adicionado parâmetro 'force_new'
 async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict, 
                       user_notifications: Dict, table_message: discord.Message, 
-                      NOTIFICATION_CHANNEL_ID: int, force_new: bool = False):
+                      NOTIFICATION_CHANNEL_ID: int):
     """Atualiza a mensagem da tabela de bosses"""
     try:
         logger.info("Iniciando atualização da tabela de bosses...")
@@ -181,37 +180,19 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
             user_notifications, 
             table_message, 
             NOTIFICATION_CHANNEL_ID,
-            # MODIFICADO: Passa a função de update correta com 'force_new'
-            lambda force_new=False: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, force_new),
+            lambda: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
             lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
             lambda: create_ranking_embed(user_stats),
             lambda: create_history_embed(bot, boss_timers),
             lambda: create_unrecorded_embed(bot, boss_timers)
         )
         
-        # Se não temos mensagem de tabela ou se 'force_new' é True
-        if table_message is None or force_new:
-            logger.info("Nenhuma tabela existente encontrada (ou nova forçada), enviando nova...")
+        # Se não temos mensagem de tabela, envia uma nova
+        if table_message is None:
+            logger.info("Nenhuma tabela existente encontrada, enviando nova...")
             try:
-                # MODIFICADO: Tenta apagar mensagens antigas APENAS SE force_new=True
-                if force_new:
-                    logger.info("Limpando mensagens antigas (force_new=True)...")
-                    async for message in channel.history(limit=50):
-                        if message.author == bot.user:
-                            try:
-                                await message.delete()
-                                logger.info(f"Mensagem antiga {message.id} deletada.")
-                            except discord.Forbidden:
-                                logger.warning(f"Não foi possível deletar a mensagem antiga {message.id} (sem permissão).")
-                            except discord.NotFound:
-                                pass # Mensagem já foi deletada
-                
                 table_message = await channel.send(embed=embed, view=view)
                 logger.info("✅ Nova tabela enviada com sucesso!")
-                
-                # Atualiza a referência na view
-                view.table_message = table_message
-                
                 return table_message
             except Exception as e:
                 logger.error(f"❌ Erro ao enviar nova tabela: {e}")
@@ -219,16 +200,13 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
         
         # Tenta editar a mensagem existente
         try:
-            # Atualiza a referência na view
-            view.table_message = table_message
             await table_message.edit(embed=embed, view=view)
             logger.info("✅ Tabela existente atualizada com sucesso!")
             return table_message
         except discord.NotFound:
             logger.warning("⚠ Tabela anterior não encontrada, enviando nova...")
-            table_message = None # Força o envio de uma nova
-            # MODIFICADO: Chama recursivamente SEM force_new
-            return await update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, False)
+            table_message = await channel.send(embed=embed, view=view)
+            return table_message
         except Exception as e:
             logger.error(f"❌ Erro ao editar tabela existente: {e}")
             return table_message
@@ -236,7 +214,6 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
     except Exception as e:
         logger.error(f"❌ Erro crítico na atualização da tabela: {e}", exc_info=True)
         return table_message
-
 
 async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict, 
                              NOTIFICATION_CHANNEL_ID: int, update_table_func):
@@ -250,7 +227,6 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
         now = datetime.now(brazil_tz)
         notifications = []
         dm_notifications = []
-        needs_table_update = False # Flag para evitar updates desnecessários
 
         for boss in boss_timers:
             for sala in boss_timers[boss]:
@@ -260,13 +236,10 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
                 
                 if respawn_time is not None:
                     # Notificação de pré-abertura (5 minutos antes)
-                    # (Lógica original mantida)
                     if now >= (respawn_time - timedelta(minutes=5)) and now < respawn_time:
                         time_left = format_time_remaining(respawn_time)
                         recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
-                        # Implementar lógica para notificar apenas uma vez (se necessário)
                         notifications.append(f"🟡 **{boss} (Sala {sala})** estará disponível em {time_left} ({respawn_time:%d/%m %H:%M} BRT){recorded_by}")
-                        needs_table_update = True # Precisa atualizar a tabela para mostrar o status "🕒"
                     
                     # Notificação de abertura
                     if now >= respawn_time and closed_time is not None and now < closed_time:
@@ -275,7 +248,6 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
                             notifications.append(f"🟢 **{boss} (Sala {sala})** está disponível AGORA! (aberto até {closed_time:%d/%m %H:%M} BRT){recorded_by}")
                             boss_timers[boss][sala]['opened_notified'] = True
                             await save_timer(boss, sala, timers['death_time'], respawn_time, closed_time, timers['recorded_by'], True)
-                            needs_table_update = True
                             
                             for user_id in user_notifications:
                                 if boss in user_notifications[user_id]:
@@ -288,40 +260,40 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
                                     })
                     
                     # Notificação de fechamento
-                    if closed_time is not None and now >= closed_time:
-                         # Se o boss estava aberto (opened_notified=True) ou se tinha um respawn (mas nunca foi notificado)
-                        if timers.get('opened_notified', False) or timers['respawn_time'] is not None:
-                            
-                            # Limpa o boss
-                            boss_timers[boss][sala] = {
-                                'death_time': None,
-                                'respawn_time': None,
-                                'closed_time': None,
-                                'recorded_by': None,
-                                'opened_notified': False
-                            }
-                            # Limpa do banco
-                            await clear_timer(boss, sala) 
-                            needs_table_update = True
-                            
-                            message = f"🔴 **{boss} (Sala {sala})** FECHOU"
-                            if not timers.get('opened_notified', False):
-                                message += " (sem registro de morte durante o período aberto)"
-                            
-                            notifications.append(message)
+                    if closed_time is not None and abs((now - closed_time).total_seconds()) < 60:
+                        message = f"🔴 **{boss} (Sala {sala})** FECHOU"
+                        if not timers.get('opened_notified', False):
+                            message += " sem nenhuma anotação durante o período aberto!"
+                        else:
+                            message += "!"
 
+                        notifications.append(message)
+                        
+                        # Apenas marca que foi fechado, sem apagar os horários
+                        boss_timers[boss][sala]['opened_notified'] = False
+
+                        # Atualiza no banco com os mesmo dados (para manter integridade)
+                        await save_timer(
+                            boss,
+                            sala,
+                            timers['death_time'],
+                            timers['respawn_time'],
+                            timers['closed_time'],
+                            timers['recorded_by'],
+                            False
+                        )
 
         if notifications:
             message = "**Notificações de Boss:**\n" + "\n".join(notifications)
             try:
                 await asyncio.sleep(1)  # Delay para evitar rate limit
-                await channel.send(message, delete_after=300) # Envia notificação e apaga após 5 min
+                await channel.send(message)
             except discord.HTTPException as e:
                 if e.status == 429:
                     retry_after = e.retry_after
                     logger.warning(f"Rate limit nas notificações. Tentando novamente em {retry_after} segundos")
                     await asyncio.sleep(retry_after)
-                    await channel.send(message[:2000], delete_after=300)
+                    await channel.send(message[:2000])  # Envia mensagem truncada se necessário
                 else:
                     logger.error(f"Erro HTTP ao enviar notificações: {e}")
         
@@ -337,9 +309,8 @@ async def check_boss_respawns(bot, boss_timers: Dict, user_notifications: Dict,
                 )
                 await asyncio.sleep(1)  # Delay entre notificações DM
         
-        if needs_table_update:
-            await asyncio.sleep(1)  # Delay antes de atualizar a tabela
-            await update_table_func()
+        await asyncio.sleep(1)  # Delay antes de atualizar a tabela
+        await update_table_func()
     
     except discord.HTTPException as e:
         if e.status == 429:
@@ -356,31 +327,28 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
                             NOTIFICATION_CHANNEL_ID: int):
     """Configura todas as funcionalidades relacionadas a bosses"""
     
-    channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
-    
-    # Define a função de atualização que será usada pelas tasks
-    # Ela usa a variável table_message deste escopo
-    # MODIFICADO: Adicionado 'force_new'
-    async def update_main_table(force_new=False):
-        nonlocal table_message # Garante que estamos modificando a variável table_message deste escopo
-        if channel:
-            table_message = await update_table(
-                bot, channel, boss_timers, user_stats, 
-                user_notifications, table_message, NOTIFICATION_CHANNEL_ID,
-                force_new=force_new # Passa o parâmetro
-            )
-
     # Verifica se a tabela já foi enviada
     if table_message is None:
+        channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
         if channel:
-            await update_main_table() # Envia a tabela inicial (sem forçar)
+            table_message = await update_table(
+                bot, channel, boss_timers, 
+                user_stats, user_notifications, 
+                table_message, NOTIFICATION_CHANNEL_ID
+            )
     
     # Tasks
     @tasks.loop(seconds=60)
     async def live_table_updater():
         """Atualiza a tabela periodicamente"""
         try:
-            await update_main_table() # Chama sem forçar
+            channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
+            if channel:
+                nonlocal table_message
+                table_message = await update_table(
+                    bot, channel, boss_timers, user_stats, 
+                    user_notifications, table_message, NOTIFICATION_CHANNEL_ID
+                )
         except Exception as e:
             logger.error(f"Erro na task de atualização de tabela: {e}", exc_info=True)
 
@@ -390,14 +358,45 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
         await check_boss_respawns(
             bot, boss_timers, user_notifications, 
             NOTIFICATION_CHANNEL_ID,
-            update_main_table # Passa a função de atualização
+            lambda: update_table(
+                bot, bot.get_channel(NOTIFICATION_CHANNEL_ID), 
+                boss_timers, user_stats, user_notifications, 
+                table_message, NOTIFICATION_CHANNEL_ID
+            )
         )
 
-    # (Task periodic_table_update removida/comentada)
+    @tasks.loop(minutes=30)
+    async def periodic_table_update():
+        """Atualiza a tabela periodicamente com novo post"""
+        try:
+            logger.info("\nIniciando atualização periódica da tabela...")
+            channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
+            if channel:
+                logger.info(f"Canal encontrado: {channel.name}")
+                nonlocal table_message
+                table_message = None  # Força o envio de uma nova mensagem
+                table_message = await update_table(
+                    bot, channel, boss_timers, user_stats, 
+                    user_notifications, table_message, NOTIFICATION_CHANNEL_ID
+                )
+                logger.info("✅ Tabela atualizada com sucesso!")
+            else:
+                logger.info(f"Canal com ID {NOTIFICATION_CHANNEL_ID} não encontrado!")
+            
+            # Define um novo intervalo aleatório entre 30 e 60 minutos
+            new_interval = random.randint(30, 60)
+            logger.info(f"Próxima atualização em {new_interval} minutos")
+            periodic_table_update.change_interval(minutes=new_interval)
+        
+        except Exception as e:
+            logger.error(f"Erro na atualização periódica: {e}", exc_info=True)
+            # Tenta novamente em 5 minutos se falhar
+            periodic_table_update.change_interval(minutes=5)
 
     # Iniciar as tasks
     check_boss_respawns_task.start()
     live_table_updater.start()
+    periodic_table_update.start()
 
     # Função para cancelar tasks
     async def shutdown_tasks():
@@ -405,11 +404,13 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
         try:
             check_boss_respawns_task.cancel()
             live_table_updater.cancel()
+            periodic_table_update.cancel()
             
             # Aguarda as tasks serem realmente canceladas
             await asyncio.gather(
                 check_boss_respawns_task,
                 live_table_updater,
+                periodic_table_update,
                 return_exceptions=True
             )
             logger.info("Todas as tasks foram canceladas com sucesso")
@@ -422,10 +423,9 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     # Retornar as funções necessárias para outros módulos
     return (
         lambda boss_timers=boss_timers: create_boss_embed(boss_timers),
-        # MODIFICADO: A função de update agora aceita 'force_new'
-        lambda force_new=False: update_main_table(force_new=force_new),
+        lambda channel: update_table(bot, channel, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID),
         lambda boss_timers=boss_timers: create_next_bosses_embed(boss_timers),
-        lambda: create_ranking_embed(user_stats),
+        lambda: create_ranking_embed(user_stats),  # CORRIGIDO: função síncrona
         lambda: create_history_embed(bot, boss_timers),
         lambda: create_unrecorded_embed(bot, boss_timers)
     )
