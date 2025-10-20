@@ -186,6 +186,7 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
                 await save_user_stats(user_id, interaction.user.name, self.user_stats[user_id]['count'], now)
                 
+                # MODIFICADO: Envia a confirmação pública
                 await interaction.followup.send(
                     f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
                     f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
@@ -194,22 +195,8 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                     ephemeral=False
                 )
                 
-                # Enviar a tabela atualizada
-                embed = create_boss_embed(self.boss_timers)
-                view = BossControlView(
-                    self.bot,
-                    self.boss_timers,
-                    self.user_stats,
-                    self.user_notifications,
-                    self.table_message,
-                    self.NOTIFICATION_CHANNEL_ID,
-                    self.update_table_func,
-                    self.create_next_bosses_embed_func,
-                    self.create_ranking_embed_func,
-                    self.create_history_embed_func,
-                    self.create_unrecorded_embed_func
-                )
-                await interaction.followup.send(embed=embed, view=view)
+                # MODIFICADO: Atualiza a tabela principal em vez de enviar uma nova
+                await self.update_table_func(interaction.channel)
                 
             except ValueError:
                 await interaction.followup.send(
@@ -277,7 +264,8 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                 cancel_button = discord.ui.Button(label="Cancelar", style=discord.ButtonStyle.gray)
                 
                 async def confirm_callback(interaction: discord.Interaction):
-                    await interaction.response.defer()
+                    # MODIFICADO: Defer ephemeral
+                    await interaction.response.defer(ephemeral=True) 
                     for s in self.boss_timers[boss_name]:
                         self.boss_timers[boss_name][s] = {
                             'death_time': None,
@@ -287,27 +275,15 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                             'opened_notified': False
                         }
                     await clear_timer(boss_name)
-                    await interaction.followup.send(
+                    
+                    # Edita a mensagem de confirmação
+                    await interaction.edit_original_response(
                         content=f"✅ Todos os timers do boss **{boss_name}** foram resetados.",
                         view=None
                     )
                     
-                    # Enviar a tabela atualizada
-                    embed = create_boss_embed(self.boss_timers)
-                    view = BossControlView(
-                        self.bot,
-                        self.boss_timers,
-                        {},  # user_stats não é usado na view
-                        {},  # user_notifications não é usado na view
-                        self.table_message,
-                        self.NOTIFICATION_CHANNEL_ID,
-                        self.update_table_func,
-                        self.create_next_bosses_embed_func,
-                        self.create_ranking_embed_func,
-                        self.create_history_embed_func,
-                        self.create_unrecorded_embed_func
-                    )
-                    await interaction.followup.send(embed=embed, view=view)
+                    # MODIFICADO: Atualiza a tabela principal
+                    await self.update_table_func(interaction.channel)
                 
                 async def cancel_callback(interaction: discord.Interaction):
                     await interaction.response.edit_message(
@@ -355,22 +331,8 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                 )
                 return
             
-            # Enviar a tabela atualizada
-            embed = create_boss_embed(self.boss_timers)
-            view = BossControlView(
-                self.bot,
-                self.boss_timers,
-                {},  # user_stats não é usado na view
-                {},  # user_notifications não é usado na view
-                self.table_message,
-                self.NOTIFICATION_CHANNEL_ID,
-                self.update_table_func,
-                self.create_next_bosses_embed_func,
-                self.create_ranking_embed_func,
-                self.create_history_embed_func,
-                self.create_unrecorded_embed_func
-            )
-            await interaction.followup.send(embed=embed, view=view)
+            # MODIFICADO: Atualiza a tabela principal
+            await self.update_table_func(interaction.channel)
             
         except Exception as e:
             print(f"Erro no modal de limpar boss: {str(e)}")
@@ -475,6 +437,59 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
             except:
                 pass
 
+# MODIFICADO: Nova View para embeds secundários (Próximos, Ranking, etc.)
+class SecondaryEmbedView(View):
+    def __init__(self, bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
+        super().__init__(timeout=None)
+        self.bot = bot
+        self.boss_timers = boss_timers
+        self.user_stats = user_stats
+        self.user_notifications = user_notifications
+        self.table_message = table_message
+        self.NOTIFICATION_CHANNEL_ID = NOTIFICATION_CHANNEL_ID
+        self.update_table_func = update_table_func
+        self.create_next_bosses_embed_func = create_next_bosses_embed_func
+        self.create_ranking_embed_func = create_ranking_embed_func
+        self.create_history_embed_func = create_history_embed_func
+        self.create_unrecorded_embed_func = create_unrecorded_embed_func
+
+    @discord.ui.button(label="⬅️ Voltar para Tabela", style=discord.ButtonStyle.gray, custom_id="secondary_view:back")
+    async def back_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        try:
+            await interaction.response.defer()
+            
+            # Recria o embed principal dos bosses
+            embed = create_boss_embed(self.boss_timers)
+            
+            # Recria a view principal de controle
+            view = BossControlView(
+                self.bot,
+                self.boss_timers,
+                self.user_stats,
+                self.user_notifications,
+                self.table_message,
+                self.NOTIFICATION_CHANNEL_ID,
+                self.update_table_func,
+                self.create_next_bosses_embed_func,
+                self.create_ranking_embed_func,
+                self.create_history_embed_func,
+                self.create_unrecorded_embed_func
+            )
+            
+            # Edita a mensagem para voltar ao estado original
+            await interaction.message.edit(embed=embed, view=view)
+            
+        except Exception as e:
+            print(f"ERRO DETALHADO no botão de voltar: {str(e)}")
+            traceback.print_exc()
+            try:
+                await interaction.followup.send(
+                    "Ocorreu um erro ao voltar para a tabela.",
+                    ephemeral=True
+                )
+            except:
+                pass
+
 class BossControlView(View):
     def __init__(self, bot, boss_timers, user_stats, user_notifications, table_message, NOTIFICATION_CHANNEL_ID, update_table_func, create_next_bosses_embed_func, create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
         super().__init__(timeout=None)
@@ -558,6 +573,7 @@ class BossControlView(View):
             except:
                 pass
     
+    # MODIFICADO: Botão "Próximos" agora edita a mensagem
     @discord.ui.button(label="Próximos", style=discord.ButtonStyle.blurple, custom_id="boss_control:proximos", emoji="⏳")
     async def next_bosses_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
@@ -565,9 +581,20 @@ class BossControlView(View):
                 await interaction.response.send_message("⚠ Comandos só são aceitos no canal designado!", ephemeral=True)
                 return
 
-            await interaction.response.defer()
+            await interaction.response.defer() # Defer para editar
             embed = self.create_next_bosses_embed_func(self.boss_timers)
-            await interaction.followup.send(embed=embed)
+            
+            # Cria a view secundária com o botão "Voltar"
+            view = SecondaryEmbedView(
+                self.bot, self.boss_timers, self.user_stats, self.user_notifications,
+                self.table_message, self.NOTIFICATION_CHANNEL_ID, self.update_table_func,
+                self.create_next_bosses_embed_func, self.create_ranking_embed_func,
+                self.create_history_embed_func, self.create_unrecorded_embed_func
+            )
+            
+            # Edita a mensagem original
+            await interaction.message.edit(embed=embed, view=view)
+
         except Exception as e:
             print(f"ERRO DETALHADO no botão de próximos bosses: {str(e)}")
             traceback.print_exc()
@@ -576,6 +603,7 @@ class BossControlView(View):
             except:
                 pass
     
+    # MODIFICADO: Botão "Ranking" agora edita a mensagem
     @discord.ui.button(label="Ranking", style=discord.ButtonStyle.blurple, custom_id="boss_control:ranking", emoji="🏆")
     async def ranking_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
@@ -584,9 +612,19 @@ class BossControlView(View):
                 return
 
             await interaction.response.defer()
-            # Correção: função síncrona, sem await
-            embed = self.create_ranking_embed_func()
-            await interaction.followup.send(embed=embed)
+            embed = self.create_ranking_embed_func() # Função síncrona
+            
+            # Cria a view secundária com o botão "Voltar"
+            view = SecondaryEmbedView(
+                self.bot, self.boss_timers, self.user_stats, self.user_notifications,
+                self.table_message, self.NOTIFICATION_CHANNEL_ID, self.update_table_func,
+                self.create_next_bosses_embed_func, self.create_ranking_embed_func,
+                self.create_history_embed_func, self.create_unrecorded_embed_func
+            )
+            
+            # Edita a mensagem original
+            await interaction.message.edit(embed=embed, view=view)
+
         except Exception as e:
             print(f"ERRO DETALHADO no botão de ranking: {str(e)}")
             traceback.print_exc()
@@ -615,6 +653,7 @@ class BossControlView(View):
             except:
                 pass
     
+    # MODIFICADO: Botão "Histórico" agora edita a mensagem
     @discord.ui.button(label="Histórico", style=discord.ButtonStyle.gray, custom_id="boss_control:historico", emoji="📜")
     async def history_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
@@ -624,7 +663,18 @@ class BossControlView(View):
 
             await interaction.response.defer()
             embed = await self.create_history_embed_func()
-            await interaction.followup.send(embed=embed)
+            
+            # Cria a view secundária com o botão "Voltar"
+            view = SecondaryEmbedView(
+                self.bot, self.boss_timers, self.user_stats, self.user_notifications,
+                self.table_message, self.NOTIFICATION_CHANNEL_ID, self.update_table_func,
+                self.create_next_bosses_embed_func, self.create_ranking_embed_func,
+                self.create_history_embed_func, self.create_unrecorded_embed_func
+            )
+            
+            # Edita a mensagem original
+            await interaction.message.edit(embed=embed, view=view)
+
         except Exception as e:
             print(f"ERRO DETALHADO no botão de histórico: {str(e)}")
             traceback.print_exc()
@@ -633,6 +683,7 @@ class BossControlView(View):
             except:
                 pass
     
+    # MODIFICADO: Botão "Não Anotados" agora edita a mensagem
     @discord.ui.button(label="Não Anotados", style=discord.ButtonStyle.red, custom_id="boss_control:nao_anotados", emoji="❌")
     async def unrecorded_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
         try:
@@ -642,7 +693,18 @@ class BossControlView(View):
 
             await interaction.response.defer()
             embed = await self.create_unrecorded_embed_func()
-            await interaction.followup.send(embed=embed)
+            
+            # Cria a view secundária com o botão "Voltar"
+            view = SecondaryEmbedView(
+                self.bot, self.boss_timers, self.user_stats, self.user_notifications,
+                self.table_message, self.NOTIFICATION_CHANNEL_ID, self.update_table_func,
+                self.create_next_bosses_embed_func, self.create_ranking_embed_func,
+                self.create_history_embed_func, self.create_unrecorded_embed_func
+            )
+            
+            # Edita a mensagem original
+            await interaction.message.edit(embed=embed, view=view)
+
         except Exception as e:
             print(f"ERRO DETALHADO no botão de não anotados: {str(e)}")
             traceback.print_exc()
@@ -718,6 +780,7 @@ class BossControlView(View):
                             ephemeral=True
                         )
                         
+                        # MODIFICADO: Chama a função de update correta
                         await self.update_table_func(interaction.channel)
                     else:
                         await interaction.followup.send(
