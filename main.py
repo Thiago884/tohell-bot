@@ -80,11 +80,21 @@ table_message = None
 async def load_all_salas():
     """Carrega todas as salas do banco de dados com filtros específicos"""
     from database import get_all_salas_from_db
-    salas = await get_all_salas_from_db()
     
-    if not salas:
-        # Se não houver salas no banco, usa as padrão
-        salas = [1, 2, 3, 4, 5, 6, 7, 8]
+    # --- INÍCIO DA CORREÇÃO ---
+    
+    # 1. Define as salas padrão que sempre devem existir
+    default_salas = [1, 2, 3, 4, 5, 6, 7, 8]
+    
+    # 2. Busca quaisquer salas adicionais do banco de dados
+    db_salas = await get_all_salas_from_db()
+    
+    # 3. Combina as duas listas e remove duplicatas
+    all_salas = sorted(list(set(default_salas + db_salas)))
+    
+    # (O bloco 'if not salas:' anterior foi removido pois agora é redundante)
+    
+    # --- FIM DA CORREÇÃO ---
     
     for boss in BOSSES:
         # Para cada boss, criar estrutura ordenada com filtros
@@ -92,7 +102,8 @@ async def load_all_salas():
         if boss not in boss_timers:
             boss_timers[boss] = {}
         
-        for sala in sorted(salas):  # Ordenar salas
+        # 4. Usa a lista combinada 'all_salas' em vez de 'salas'
+        for sala in all_salas:  # <-- MUDANÇA AQUI
             # Erohim só pode ter sala 20
             if boss == "Erohim" and sala != 20:
                 continue
@@ -137,7 +148,7 @@ async def on_ready():
         await init_db()
         await load_db_data(boss_timers, user_stats, user_notifications)
         
-        # DEPOIS carrega a estrutura de salas
+        # DEPOIS carrega a estrutura de salas (agora corrigida)
         await load_all_salas()
         
         logger.info("✅ Dados carregados com sucesso!")
