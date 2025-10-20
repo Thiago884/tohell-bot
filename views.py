@@ -115,7 +115,7 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
         try:
             # Responder imediatamente para evitar timeout
             if not interaction.response.is_done():
-                await interaction.response.defer(ephemeral=True)
+                await interaction.response.defer(thinking=True) # Defer normal
             
             boss_name = get_boss_by_abbreviation(self.boss.value, self.boss_timers)
             if boss_name is None:
@@ -191,25 +191,11 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                     f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
                     f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
                     f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
-                    ephemeral=False
+                    ephemeral=False # Mensagem pública
                 )
                 
-                # Enviar a tabela atualizada
-                embed = create_boss_embed(self.boss_timers)
-                view = BossControlView(
-                    self.bot,
-                    self.boss_timers,
-                    self.user_stats,
-                    self.user_notifications,
-                    self.table_message,
-                    self.NOTIFICATION_CHANNEL_ID,
-                    self.update_table_func,
-                    self.create_next_bosses_embed_func,
-                    self.create_ranking_embed_func,
-                    self.create_history_embed_func,
-                    self.create_unrecorded_embed_func
-                )
-                await interaction.followup.send(embed=embed, view=view)
+                # MODIFICADO: Atualiza a tabela principal em vez de enviar uma nova
+                await self.update_table_func(interaction.channel)
                 
             except ValueError:
                 await interaction.followup.send(
@@ -277,7 +263,7 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                 cancel_button = discord.ui.Button(label="Cancelar", style=discord.ButtonStyle.gray)
                 
                 async def confirm_callback(interaction: discord.Interaction):
-                    await interaction.response.defer()
+                    await interaction.response.defer(ephemeral=True) # Defer ephemeral
                     for s in self.boss_timers[boss_name]:
                         self.boss_timers[boss_name][s] = {
                             'death_time': None,
@@ -287,27 +273,15 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                             'opened_notified': False
                         }
                     await clear_timer(boss_name)
-                    await interaction.followup.send(
+                    
+                    # Edita a mensagem de confirmação
+                    await interaction.edit_original_response(
                         content=f"✅ Todos os timers do boss **{boss_name}** foram resetados.",
                         view=None
                     )
                     
-                    # Enviar a tabela atualizada
-                    embed = create_boss_embed(self.boss_timers)
-                    view = BossControlView(
-                        self.bot,
-                        self.boss_timers,
-                        {},  # user_stats não é usado na view
-                        {},  # user_notifications não é usado na view
-                        self.table_message,
-                        self.NOTIFICATION_CHANNEL_ID,
-                        self.update_table_func,
-                        self.create_next_bosses_embed_func,
-                        self.create_ranking_embed_func,
-                        self.create_history_embed_func,
-                        self.create_unrecorded_embed_func
-                    )
-                    await interaction.followup.send(embed=embed, view=view)
+                    # MODIFICADO: Atualiza a tabela principal
+                    await self.update_table_func(interaction.channel)
                 
                 async def cancel_callback(interaction: discord.Interaction):
                     await interaction.response.edit_message(
@@ -355,22 +329,8 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                 )
                 return
             
-            # Enviar a tabela atualizada
-            embed = create_boss_embed(self.boss_timers)
-            view = BossControlView(
-                self.bot,
-                self.boss_timers,
-                {},  # user_stats não é usado na view
-                {},  # user_notifications não é usado na view
-                self.table_message,
-                self.NOTIFICATION_CHANNEL_ID,
-                self.update_table_func,
-                self.create_next_bosses_embed_func,
-                self.create_ranking_embed_func,
-                self.create_history_embed_func,
-                self.create_unrecorded_embed_func
-            )
-            await interaction.followup.send(embed=embed, view=view)
+            # MODIFICADO: Atualiza a tabela principal
+            await self.update_table_func(interaction.channel)
             
         except Exception as e:
             print(f"Erro no modal de limpar boss: {str(e)}")
@@ -567,7 +527,8 @@ class BossControlView(View):
 
             await interaction.response.defer()
             embed = self.create_next_bosses_embed_func(self.boss_timers)
-            await interaction.followup.send(embed=embed)
+            # MANTIDO: Envia como nova mensagem
+            await interaction.followup.send(embed=embed, ephemeral=True) 
         except Exception as e:
             print(f"ERRO DETALHADO no botão de próximos bosses: {str(e)}")
             traceback.print_exc()
@@ -586,7 +547,8 @@ class BossControlView(View):
             await interaction.response.defer()
             # Correção: função síncrona, sem await
             embed = self.create_ranking_embed_func()
-            await interaction.followup.send(embed=embed)
+            # MANTIDO: Envia como nova mensagem
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
             print(f"ERRO DETALHADO no botão de ranking: {str(e)}")
             traceback.print_exc()
@@ -624,7 +586,8 @@ class BossControlView(View):
 
             await interaction.response.defer()
             embed = await self.create_history_embed_func()
-            await interaction.followup.send(embed=embed)
+            # MANTIDO: Envia como nova mensagem
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
             print(f"ERRO DETALHADO no botão de histórico: {str(e)}")
             traceback.print_exc()
@@ -642,7 +605,8 @@ class BossControlView(View):
 
             await interaction.response.defer()
             embed = await self.create_unrecorded_embed_func()
-            await interaction.followup.send(embed=embed)
+            # MANTIDO: Envia como nova mensagem
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
             print(f"ERRO DETALHADO no botão de não anotados: {str(e)}")
             traceback.print_exc()
@@ -718,7 +682,8 @@ class BossControlView(View):
                             ephemeral=True
                         )
                         
-                        await self.update_table_func(interaction.channel)
+                        # MODIFICADO: Chama a função de update (forçando uma nova tabela)
+                        await self.update_table_func(interaction.channel, force_new=True)
                     else:
                         await interaction.followup.send(
                             f"❌ Falha ao restaurar backup **{backup_file}!",
