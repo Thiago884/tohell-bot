@@ -58,14 +58,19 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
         color=discord.Color.gold()
     )
     
-    for boss in boss_timers:
+    # Ordenar bosses alfabeticamente para consistência
+    sorted_bosses = sorted(boss_timers.keys())
+    
+    for boss in sorted_bosses:
         boss_info = []
-        for sala in sorted(boss_timers[boss].keys()):  # Ordenar salas numericamente
+        # Ordenar salas numericamente
+        salas_ordenadas = sorted(boss_timers[boss].keys())
+        
+        for sala in salas_ordenadas:
             timers = boss_timers[boss][sala]
             
-            if compact and timers['death_time'] is None:
-                continue
-                
+            # REMOVER qualquer filtro que possa estar escondendo dados
+            # Mostrar TODOS os registros, mesmo os vazios
             death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
             respawn_time = timers['respawn_time'].strftime("%H:%M") if timers['respawn_time'] else "--:--"
             closed_time = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
@@ -88,15 +93,12 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
                 f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
             )
         
-        if not boss_info and compact:
-            continue
-            
-        if boss_info:
-            embed.add_field(
-                name=f"**{boss}**",
-                value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
-                inline=False
-            )
+        # SEMPRE adicionar o campo do boss, mesmo se não houver informações
+        embed.add_field(
+            name=f"**{boss}**",
+            value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
+            inline=False
+        )
     
     return embed
 
