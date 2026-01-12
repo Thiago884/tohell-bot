@@ -86,7 +86,19 @@ def get_next_bosses(boss_timers: Dict) -> List[Dict[str, Any]]:
     upcoming_bosses.sort(key=lambda x: x['respawn_time'])
     open_bosses.sort(key=lambda x: x['closed_time'])
     
-    return upcoming_bosses[:5] + open_bosses[:5]
+    # CORREÇÃO: Retornar uma lista combinada corretamente
+    # Primeiro os bosses abertos (status: open), depois os próximos (status: upcoming)
+    all_bosses = []
+    
+    # Adiciona bosses abertos (se houver)
+    if open_bosses:
+        all_bosses.extend(open_bosses[:5])
+    
+    # Adiciona próximos bosses (se houver)
+    if upcoming_bosses:
+        all_bosses.extend(upcoming_bosses[:5])
+    
+    return all_bosses
 
 def parse_time_input(time_str: str) -> Optional[Tuple[int, int]]:
     """Converte uma string de tempo em hora e minuto"""

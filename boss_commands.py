@@ -48,7 +48,7 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
     
     return False
 
-# boss_commands.py - Modificação na função create_boss_embed
+# boss_commands.py - Função create_boss_embed corrigida
 def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed:
     """Cria embed com a tabela de timers de boss (função síncrona)"""
     now = datetime.now(brazil_tz)
@@ -58,10 +58,17 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
         color=discord.Color.gold()
     )
     
-    # Ordenar bosses alfabeticamente para consistência
-    sorted_bosses = sorted(boss_timers.keys())
+    # Lista de bosses na ordem desejada
+    boss_order = [
+        "Hydra", "Phoenix of Darkness", "Genocider", "Death Beam Knight",
+        "Hell Maine", "Super Red Dragon", "Illusion of Kundun", 
+        "Rei Kundun", "Erohim"
+    ]
     
-    for boss in sorted_bosses:
+    for boss in boss_order:
+        if boss not in boss_timers:
+            continue
+            
         boss_info = []
         # Ordenar salas numericamente
         salas_ordenadas = sorted(boss_timers[boss].keys())
@@ -69,14 +76,15 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
         for sala in salas_ordenadas:
             timers = boss_timers[boss][sala]
             
-            # REMOVER qualquer filtro que possa estar escondendo dados
-            # Mostrar TODOS os registros, mesmo os vazios
-            death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
-            respawn_time = timers['respawn_time'].strftime("%H:%M") if timers['respawn_time'] else "--:--"
-            closed_time = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
+            # Formatar os horários
+            death_time_str = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
+            respawn_time_str = timers['respawn_time'].strftime("%H:%M") if timers['respawn_time'] else "--:--"
+            closed_time_str = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
             recorded_by = f" ({timers['recorded_by']})" if timers['recorded_by'] else ""
             
-            status = ""
+            # Determinar status
+            status = "❌"  # Padrão: fechado/sem registro
+            
             if timers['respawn_time']:
                 if now >= timers['respawn_time']:
                     if timers['closed_time'] and now >= timers['closed_time']:
@@ -86,14 +94,12 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
                 else:
                     time_left = format_time_remaining(timers['respawn_time'])
                     status = f"🕒 ({time_left})"  # Boss agendado
-            else:
-                status = "❌"  # Sem registro
             
             boss_info.append(
-                f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
+                f"Sala {sala}: {death_time_str} [de {respawn_time_str} até {closed_time_str}] {status}{recorded_by}"
             )
         
-        # SEMPRE adicionar o campo do boss, mesmo se não houver informações
+        # Sempre adicionar o campo do boss
         embed.add_field(
             name=f"**{boss}**",
             value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",

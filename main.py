@@ -67,7 +67,7 @@ bot = commands.Bot(
 BOSSES = [
     "Super Red Dragon", "Hell Maine", "Illusion of Kundun",
     "Death Beam Knight", "Genocider", "Phoenix of Darkness",
-    "Hydra", "Rei Kundun"
+    "Hydra", "Rei Kundun", "Erohim"
 ]
 
 # Estrutura: {guild_id: {boss_name: {sala: dados}}}
@@ -100,8 +100,14 @@ async def load_all_salas_for_guild(guild_id):
     if guild_id not in boss_timers:
         boss_timers[guild_id] = {}
     
-    # Se não houver dados para este guild, inicialize com estrutura vazia
-    for boss in BOSSES:
+    # Inicializar todos os bosses com estrutura vazia
+    bosses_list = [
+        "Super Red Dragon", "Hell Maine", "Illusion of Kundun",
+        "Death Beam Knight", "Genocider", "Phoenix of Darkness",
+        "Hydra", "Rei Kundun", "Erohim"
+    ]
+    
+    for boss in bosses_list:
         if boss not in boss_timers[guild_id]:
             boss_timers[guild_id][boss] = {}
         
