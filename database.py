@@ -523,6 +523,7 @@ async def get_all_server_configs():
 async def load_all_server_data():
     """
     Carrega TODOS os dados do banco organizados por servidor.
+    Retorna: {guild_id: {boss_name: {sala: dados}}}
     """
     conn = await connect_db()
     if not conn:
@@ -533,7 +534,12 @@ async def load_all_server_data():
     try:
         async with conn.cursor(cursor=asyncmy.cursors.DictCursor) as cursor:
             # Carregar Timers
-            await cursor.execute("SELECT * FROM boss_timers")
+            await cursor.execute("""
+            SELECT guild_id, boss_name, sala, death_time, respawn_time, closed_time, 
+                   recorded_by, opened_notified 
+            FROM boss_timers 
+            ORDER BY guild_id, boss_name, sala
+            """)
             rows = await cursor.fetchall()
             
             for row in rows:
@@ -567,7 +573,58 @@ async def load_all_server_data():
                     'opened_notified': bool(row['opened_notified'])
                 }
 
-            logger.info(f"Dados carregados para {len(data)} servidores.")
+            logger.info(f"Dados de bosses carregados para {len(data)} servidores.")
+            
+            # CORREÇÃO: Carregar também user_stats e user_notifications
+            await cursor.execute("SELECT guild_id, user_id, username, count, last_recorded FROM user_stats")
+            user_stats_data = await cursor.fetchall()
+            
+            user_stats_dict = {}
+            for row in user_stats_data:
+                guild_id = row['guild_id']
+                user_id = row['user_id']
+                
+                if guild_id not in user_stats_dict:
+                    user_stats_dict[guild_id] = {}
+                
+                # Converter timestamp se necessário
+                last_recorded = row['last_recorded']
+                if last_recorded and last_recorded.tzinfo is None:
+                    last_recorded = brazil_tz.localize(last_recorded)
+                
+                user_stats_dict[guild_id][user_id] = {
+                    'count': row['count'],
+                    'last_recorded': last_recorded,
+                    'username': row['username']
+                }
+            
+            logger.info(f"Dados de estatísticas carregados para {len(user_stats_dict)} servidores.")
+            
+            # Adicionar user_stats aos dados de retorno
+            data['_user_stats'] = user_stats_dict
+            
+            # Carregar notificações
+            await cursor.execute("SELECT guild_id, user_id, boss_name FROM user_notifications")
+            notifications_data = await cursor.fetchall()
+            
+            notifications_dict = {}
+            for row in notifications_data:
+                guild_id = row['guild_id']
+                user_id = row['user_id']
+                boss_name = row['boss_name']
+                
+                if guild_id not in notifications_dict:
+                    notifications_dict[guild_id] = {}
+                
+                if user_id not in notifications_dict[guild_id]:
+                    notifications_dict[guild_id][user_id] = []
+                
+                if boss_name not in notifications_dict[guild_id][user_id]:
+                    notifications_dict[guild_id][user_id].append(boss_name)
+            
+            # Adicionar notificações aos dados de retorno
+            data['_user_notifications'] = notifications_dict
+            
             return data
             
     except Exception as e:
