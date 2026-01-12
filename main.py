@@ -204,16 +204,15 @@ async def on_ready():
     logger.info(f'📊 Servidores: {len(bot.guilds)}')
     logger.info("="*50 + "\n")
     
-    # 1. Inicialização do banco de dados e Carga de Dados
-    logger.info("\nInicializando banco de dados...")
     try:
+        # 1. Inicialização do banco de dados
+        logger.info("\nInicializando banco de dados...")
         await init_db()
         await migrate_database_to_multitenant()
         
         logger.info("Carregando dados de todos os servidores...")
-        # Primeiro, carregue todos os dados de uma vez usando a nova função
         success = await load_db_data(boss_timers, user_stats, user_notifications)
-
+        
         if success:
             logger.info(f"Dados carregados para {len(boss_timers)} servidores")
             
@@ -236,146 +235,60 @@ async def on_ready():
                 server_configs[guild_id] = {'notification_channel_id': None, 'table_channel_id': None, 'table_message_id': None}
         
         logger.info("✅ Dados carregados com sucesso!")
-    except Exception as e:
-        logger.error(f"❌ Erro ao inicializar banco de dados: {e}")
-        traceback.print_exc()
-    
-    # Inicializa servidores que o bot está mas não estavam no banco
-    for guild in bot.guilds:
-        if guild.id not in boss_timers:
-            await initialize_server(guild.id)
-
-    # 2. Configuração de Comandos Slash (GLOBAL)
-    # Esta etapa deve ocorrer ANTES do sync e FORA do loop de guildas
-    logger.info("Configurando comandos Slash globais...")
-    try:
-        # Wrapper para permitir que o slash command atualize a tabela correta
-        # A função update_table original do boss_commands suporta isso se passarmos os argumentos certos
-        async def global_update_wrapper(channel, guild_id=None):
-            if not guild_id and channel:
-                guild_id = channel.guild.id
-            
-            if guild_id:
-                # Recupera a configuração para saber qual mensagem editar
-                config = await get_server_config(guild_id)
-                msg_obj = None
-                
-                # Tenta encontrar a mensagem na memória ou buscar no canal
-                if config and config.get('table_message_id'):
-                    try:
-                        if channel:
-                            msg_obj = await channel.fetch_message(config['table_message_id'])
-                    except:
-                        pass
-                
-                # Chama a função de update original passando os dados corretos
-                # Nota: setup_boss_commands retorna lambdas, mas aqui estamos chamando direto
-                # Precisamos recriar a lógica de update_table para usar no slash
-                from views import BossControlView
-                
-                server_data = boss_timers.get(guild_id, {})
-                server_stats = user_stats.get(guild_id, {})
-                server_notif = user_notifications.get(guild_id, {})
-                
-                embed = create_boss_embed(server_data)
-                
-                view = BossControlView(
-                    bot,
-                    server_data,
-                    server_stats,
-                    server_notif,
-                    msg_obj,
-                    channel.id if channel else config.get('table_channel_id'),
-                    lambda: global_update_wrapper(channel, guild_id),
-                    lambda b=server_data: create_next_bosses_embed(b),
-                    lambda: create_ranking_embed(server_stats),
-                    lambda: create_history_embed(bot, server_data),
-                    lambda: create_unrecorded_embed(bot, server_data)
-                )
-                
-                if msg_obj:
-                    await msg_obj.edit(embed=embed, view=view)
-                elif channel:
-                    new_msg = await channel.send(embed=embed, view=view)
-                    await set_server_config(guild_id, config.get('notification_channel_id'), channel.id, new_msg.id)
-
-        # Configura os comandos de Drop
+        
+        # 2. Configurar comandos slash SEM verificação condicional
+        logger.info("Configurando comandos Slash...")
         await setup_drops_command(bot)
-
-        # Configura os comandos Slash principais (Setup, Registro, etc)
-        # Passamos os dicionários GLOBAIS e as funções helpers
+        
+        # Configurar comandos principais
         await setup_slash_commands(
             bot, 
             boss_timers, 
             user_stats, 
             user_notifications,
-            None, # table_message global não existe
-            None, # channel_id global não existe
+            None,
+            None,
             create_boss_embed,
-            global_update_wrapper,
+            lambda channel, guild_id=None: None,  # Placeholder
             create_next_bosses_embed,
             create_ranking_embed,
             create_history_embed,
             create_unrecorded_embed
         )
-        logger.info("✅ Comandos Slash configurados na árvore.")
-
-    except Exception as e:
-        logger.error(f"❌ Erro ao configurar comandos Slash: {e}")
-        traceback.print_exc()
-
-    # 3. Sincronização de Comandos (Ocorre DEPOIS de adicionar os comandos)
-    logger.info("Sincronizando comandos com o Discord...")
-    try:
-        # Sincroniza globalmente
+        
+        # 3. Sincronizar comandos GLOBALMENTE
+        logger.info("Sincronizando comandos com o Discord...")
+        
+        # Limpar comandos existentes primeiro
+        bot.tree.clear_commands(guild=None)
+        
+        # Sincronizar globalmente
         synced = await bot.tree.sync()
         logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente!")
         
-        # Opcional: Copiar para guildas específicas para update instantâneo em desenvolvimento
-        # Mas para produção, o sync global é suficiente (pode levar até 1h para aparecer globalmente, mas instantâneo se for a primeira vez)
-        # Para forçar atualização imediata em todos os servidores:
-        for guild in bot.guilds:
-             bot.tree.copy_global_to(guild=guild)
-             await bot.tree.sync(guild=guild)
-        logger.info("✅ Comandos sincronizados em todas as guildas locais.")
-        
-    except Exception as e:
-        logger.error(f"❌ Erro ao sincronizar comandos: {e}")
-        traceback.print_exc()
-    
-    # 4. Inicia Tasks de Background (Atualização de tabelas e respawns)
-    logger.info("\nIniciando tasks de background...")
-    try:
-        # Esta função inicia as tasks de loop para verificar respawns em todos os servidores
-        # Passamos dados fictícios apenas para inicializar as tasks, pois elas usam as variáveis globais internamente
-        # na implementação do boss_commands.py (versão multi-server)
-        
-        # Nota: O setup_boss_commands original foi modificado para retornar funções E iniciar tasks
-        # Vamos chamá-lo uma vez para iniciar as tasks multi-servidor
-        
-        # Precisamos garantir que ele pegue os objetos globais corretos
+        # 4. Iniciar tasks de background
+        logger.info("\nIniciando tasks de background...")
         await setup_boss_commands(
             bot, 
-            boss_timers, # Passa o dict global
+            boss_timers,
             user_stats, 
             user_notifications, 
             None, 
             0
         )
-        
         logger.info("✅ Tasks de background iniciadas.")
         
+        # Atualizar presença
+        await bot.change_presence(activity=discord.Activity(
+            type=discord.ActivityType.watching,
+            name=f"{len(bot.guilds)} servidores | /bosshelp"
+        ))
+        
+        logger.info("\n✅ Bot totalmente inicializado e pronto para uso!")
+        
     except Exception as e:
-        logger.error(f"❌ Erro ao iniciar tasks: {e}")
+        logger.error(f"❌ Erro durante inicialização: {e}")
         traceback.print_exc()
-    
-    # Atualiza presença do bot
-    await bot.change_presence(activity=discord.Activity(
-        type=discord.ActivityType.watching,
-        name=f"{len(bot.guilds)} servidores | /bosshelp"
-    ))
-    
-    logger.info("\n✅ Bot totalmente inicializado e pronto para uso!")
 
 @bot.command()
 @commands.is_owner()
