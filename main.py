@@ -211,13 +211,20 @@ async def on_ready():
         await migrate_database_to_multitenant()
         
         logger.info("Carregando dados de todos os servidores...")
-        all_data = await load_all_server_data()
-        
-        for guild_id, guild_data in all_data.items():
-            boss_timers[guild_id] = guild_data
-            await load_db_data(boss_timers, user_stats, user_notifications, guild_id)
-            await load_all_salas_for_guild(guild_id)
+        # Primeiro, carregue todos os dados de uma vez usando a nova função
+        success = await load_db_data(boss_timers, user_stats, user_notifications)
+
+        if success:
+            logger.info(f"Dados carregados para {len(boss_timers)} servidores")
             
+            # Depois, para cada servidor, carregue as salas
+            for guild_id in boss_timers.keys():
+                await load_all_salas_for_guild(guild_id)
+        else:
+            logger.error("Falha ao carregar dados do banco")
+        
+        # Carregar configurações de todos os servidores
+        for guild_id in boss_timers.keys():
             config = await get_server_config(guild_id)
             if config:
                 server_configs[guild_id] = {
