@@ -13,7 +13,8 @@ from shared_functions import get_boss_by_abbreviation, format_time_remaining, pa
 from database import (
     save_timer, save_user_stats, clear_timer, 
     add_user_notification, remove_user_notification, load_db_data,
-    add_sala_to_all_bosses, remove_sala_from_all_bosses, create_backup, restore_backup
+    add_sala_to_all_bosses, remove_sala_from_all_bosses, create_backup, restore_backup,
+    set_server_config, get_server_config, get_user_notifications
 )
 from views import BossControlView
 from discord.app_commands import CommandAlreadyRegistered
@@ -37,7 +38,11 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
     
     # Autocomplete para nomes de bosses
     async def boss_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
-        bosses = list(boss_timers.keys())
+        guild_id = interaction.guild_id
+        if not guild_id or guild_id not in boss_timers:
+            return []
+        
+        bosses = list(boss_timers[guild_id].keys())
         return [
             app_commands.Choice(name=boss, value=boss)
             for boss in bosses if current.lower() in boss.lower()
@@ -47,6 +52,10 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
     async def sala_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[int]]:
         """Autocomplete de salas baseado no boss selecionado"""
         try:
+            guild_id = interaction.guild_id
+            if not guild_id or guild_id not in boss_timers:
+                return []
+            
             # Obter o boss selecionado da interação atual
             options = interaction.data.get('options', [])
             boss_name = None
@@ -57,24 +66,30 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     break
             
             if not boss_name:
-                # Se não encontrou o boss, retorna salas padrão
-                salas = list(boss_timers[list(boss_timers.keys())[0]].keys())
+                # Se não encontrou o boss, retorna salas padrão do primeiro boss
+                bosses = list(boss_timers[guild_id].keys())
+                if not bosses:
+                    return []
+                salas = list(boss_timers[guild_id][bosses[0]].keys())
                 return [
                     app_commands.Choice(name=f"Sala {sala}", value=sala)
                     for sala in salas if current in str(sala)
                 ][:25]
             
             # Encontrar o nome completo do boss
-            full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
+            full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers[guild_id])
             if not full_boss_name:
-                salas = list(boss_timers[list(boss_timers.keys())[0]].keys())
+                bosses = list(boss_timers[guild_id].keys())
+                if not bosses:
+                    return []
+                salas = list(boss_timers[guild_id][bosses[0]].keys())
                 return [
                     app_commands.Choice(name=f"Sala {sala}", value=sala)
                     for sala in salas if current in str(sala)
                 ][:25]
             
             # Retornar salas específicas do boss
-            salas = list(boss_timers[full_boss_name].keys())
+            salas = list(boss_timers[guild_id][full_boss_name].keys())
             return [
                 app_commands.Choice(name=f"Sala {sala}", value=sala)
                 for sala in salas if current in str(sala)
@@ -82,12 +97,74 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             
         except Exception as e:
             logger.error(f"Erro no autocomplete de salas: {e}")
-            # Fallback para salas padrão em caso de erro
-            salas = list(boss_timers[list(boss_timers.keys())[0]].keys())
-            return [
-                app_commands.Choice(name=f"Sala {sala}", value=sala)
-                for sala in salas if current in str(sala)
-            ][:25]
+            return []
+    
+    # --- NOVO COMANDO: SETUP ---
+    if "setup" not in command_names:
+        @bot.tree.command(name="setup", description="Configura os canais do bot neste servidor")
+        @app_commands.checks.has_permissions(administrator=True)
+        async def setup_slash(interaction: discord.Interaction, canal_tabela: discord.TextChannel, canal_notificacao: discord.TextChannel):
+            """Configura os canais do bot no servidor"""
+            try:
+                await interaction.response.defer(ephemeral=True)
+                guild_id = interaction.guild_id
+                
+                if not guild_id:
+                    await interaction.followup.send("Este comando deve ser usado em um servidor.")
+                    return
+
+                # Inicializa estrutura na memória se não existir
+                if guild_id not in boss_timers:
+                    boss_timers[guild_id] = {}
+                    user_stats[guild_id] = {}
+                    user_notifications[guild_id] = {}
+                
+                try:
+                    # Envia a tabela inicial
+                    embed = create_boss_embed_func(boss_timers.get(guild_id, {}))
+                    view = BossControlView(
+                        bot,
+                        boss_timers[guild_id],
+                        user_stats.get(guild_id, {}),
+                        user_notifications.get(guild_id, {}),
+                        None,
+                        canal_notificacao.id,
+                        lambda channel: update_table_func(channel, guild_id=guild_id),
+                        lambda: create_next_bosses_embed_func(boss_timers.get(guild_id, {})),
+                        lambda: create_ranking_embed_func(user_stats.get(guild_id, {})),
+                        lambda: create_history_embed_func(bot, boss_timers.get(guild_id, {})),
+                        lambda: create_unrecorded_embed_func(bot, boss_timers.get(guild_id, {}))
+                    )
+                    msg = await canal_tabela.send(embed=embed, view=view)
+                    
+                    # Salva configuração no banco
+                    success = await set_server_config(guild_id, canal_notificacao.id, canal_tabela.id, msg.id)
+                    
+                    if success:
+                        await interaction.followup.send(
+                            f"✅ Setup concluído!\n"
+                            f"📋 Canal Tabela: {canal_tabela.mention}\n"
+                            f"🔔 Canal Notificações: {canal_notificacao.mention}"
+                        )
+                    else:
+                        await interaction.followup.send("❌ Erro ao salvar configurações no banco de dados.")
+                        
+                except Exception as e:
+                    logger.error(f"Erro no comando setup: {e}", exc_info=True)
+                    await interaction.followup.send(f"❌ Erro no setup: {str(e)}")
+                    
+            except Exception as e:
+                logger.error(f"Erro no comando setup: {e}", exc_info=True)
+                if not interaction.response.is_done():
+                    await interaction.response.send_message(
+                        "Ocorreu um erro ao configurar o bot.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send(
+                        "Ocorreu um erro ao configurar o bot.",
+                        ephemeral=True
+                    )
     
     # Comando para mostrar tabela completa de bosses
     if "bosses" not in command_names:
@@ -95,28 +172,47 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         async def bosses_slash(interaction: discord.Interaction):
             """Mostra a tabela completa de bosses via comando slash"""
             try:
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                guild_id = interaction.guild_id
+                if not guild_id:
                     await interaction.response.send_message(
-                        "⚠ Comandos só são aceitos no canal designado!",
+                        "Este comando deve ser usado em um servidor.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica canal correto
+                if interaction.channel_id != config['table_channel_id']:
+                    await interaction.response.send_message(
+                        f"⚠ Comandos só são aceitos no canal designado! "
+                        f"Use no canal <#{config['table_channel_id']}>",
                         ephemeral=True
                     )
                     return
                 
                 await interaction.response.defer()
                 
-                embed = create_boss_embed_func(boss_timers)
+                embed = create_boss_embed_func(boss_timers.get(guild_id, {}))
                 view = BossControlView(
                     bot,
-                    boss_timers,
-                    user_stats,
-                    user_notifications,
-                    table_message,
-                    NOTIFICATION_CHANNEL_ID,
-                    update_table_func,
-                    create_next_bosses_embed_func,
-                    create_ranking_embed_func,
-                    create_history_embed_func,
-                    create_unrecorded_embed_func
+                    boss_timers.get(guild_id, {}),
+                    user_stats.get(guild_id, {}),
+                    user_notifications.get(guild_id, {}),
+                    None,
+                    config['table_channel_id'],
+                    lambda channel: update_table_func(channel, guild_id=guild_id),
+                    lambda: create_next_bosses_embed_func(boss_timers.get(guild_id, {})),
+                    lambda: create_ranking_embed_func(user_stats.get(guild_id, {})),
+                    lambda: create_history_embed_func(bot, boss_timers.get(guild_id, {})),
+                    lambda: create_unrecorded_embed_func(bot, boss_timers.get(guild_id, {}))
                 )
                 
                 await interaction.followup.send(embed=embed, view=view)
@@ -134,9 +230,9 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # Comando para registrar boss (COM CORREÇÃO)
-    if "boss" not in command_names:
-        @bot.tree.command(name="boss", description="Registra a morte de um boss")
+    # Comando para registrar boss (COM CORREÇÃO E MULTI-GUILD)
+    if "registro" not in command_names:
+        @bot.tree.command(name="registro", description="Registra a morte de um boss")
         @app_commands.autocomplete(boss_name=boss_autocomplete, sala=sala_autocomplete)
         @app_commands.describe(
             boss_name="Nome do boss",
@@ -144,7 +240,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             hora_morte="Horário da morte (formato HH:MM ou HHhMM)",
             foi_ontem="Se a morte foi ontem (padrão: não)"
         )
-        async def boss_slash(
+        async def registro_slash(
             interaction: discord.Interaction,
             boss_name: str,
             sala: int,
@@ -153,32 +249,53 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         ):
             """Registra a morte de um boss via comando slash"""
             try:
+                guild_id = interaction.guild_id
+                if not guild_id:
+                    await interaction.response.send_message(
+                        "Este comando deve ser usado em um servidor.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica canal correto
+                if interaction.channel_id != config['notification_channel_id']:
+                    await interaction.response.send_message(
+                        f"⚠ Comandos só são aceitos no canal designado! "
+                        f"Use no canal <#{config['notification_channel_id']}>",
+                        ephemeral=True
+                    )
+                    return
+                
                 if not interaction.response.is_done():
                     await interaction.response.defer(thinking=True)
                 
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            "⚠ Comandos só são aceitos no canal designado!",
-                            ephemeral=True
-                        )
-                    else:
-                        await interaction.followup.send(
-                            "⚠ Comandos só são aceitos no canal designado!",
-                            ephemeral=True
-                        )
-                    return
+                # Garante que o servidor está nas estruturas de dados
+                if guild_id not in boss_timers:
+                    boss_timers[guild_id] = {}
+                if guild_id not in user_stats:
+                    user_stats[guild_id] = {}
+                if guild_id not in user_notifications:
+                    user_notifications[guild_id] = {}
                 
-                full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
+                full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers[guild_id])
                 if full_boss_name is None:
                     if not interaction.response.is_done():
                         await interaction.response.send_message(
-                            f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
+                            f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers[guild_id].keys())}",
                             ephemeral=True
                         )
                     else:
                         await interaction.followup.send(
-                            f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
+                            f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers[guild_id].keys())}",
                             ephemeral=True
                         )
                     return
@@ -186,8 +303,8 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 boss_name = full_boss_name
                 
                 # VALIDAÇÃO CORRIGIDA: Verificar se a sala existe para este boss específico
-                if sala not in boss_timers[boss_name]:
-                    available_salas = ', '.join(map(str, sorted(boss_timers[boss_name].keys())))
+                if sala not in boss_timers[guild_id][boss_name]:
+                    available_salas = ', '.join(map(str, sorted(boss_timers[guild_id][boss_name].keys())))
                     if not interaction.response.is_done():
                         await interaction.response.send_message(
                             f"❌ Sala {sala} inválida para {boss_name}. Salas disponíveis: {available_salas}",
@@ -201,7 +318,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     return
                 
                 # Verificação corrigida - só impede se o boss estiver agendado (ainda não abriu)
-                timers = boss_timers[boss_name][sala]
+                timers = boss_timers[guild_id][boss_name][sala]
                 now = datetime.now(brazil_tz)
                 
                 if timers['respawn_time'] and now < timers['respawn_time']:  # Boss agendado e ainda não abriu
@@ -257,31 +374,34 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     death_time -= timedelta(days=1)
                 
                 respawn_time = death_time + timedelta(hours=8)
+                closed_time = respawn_time + timedelta(hours=4)
                 recorded_by = interaction.user.name
                 
-                boss_timers[boss_name][sala] = {
+                boss_timers[guild_id][boss_name][sala] = {
                     'death_time': death_time,
                     'respawn_time': respawn_time,
-                    'closed_time': respawn_time + timedelta(hours=4),
+                    'closed_time': closed_time,
                     'recorded_by': recorded_by,
                     'opened_notified': False
                 }
                 
                 user_id = str(interaction.user.id)
-                if user_id not in user_stats:
-                    user_stats[user_id] = {'count': 0, 'last_recorded': None}
-                user_stats[user_id]['count'] += 1
-                user_stats[user_id]['last_recorded'] = now
+                if user_id not in user_stats[guild_id]:
+                    user_stats[guild_id][user_id] = {'count': 0, 'last_recorded': None, 'username': recorded_by}
+                user_stats[guild_id][user_id]['count'] += 1
+                user_stats[guild_id][user_id]['last_recorded'] = now
+                user_stats[guild_id][user_id]['username'] = recorded_by
                 
-                await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
-                await save_user_stats(user_id, interaction.user.name, user_stats[user_id]['count'], now)
+                # Salva no banco com guild_id
+                await save_timer(guild_id, boss_name, sala, death_time, respawn_time, closed_time, recorded_by)
+                await save_user_stats(guild_id, user_id, recorded_by, user_stats[guild_id][user_id]['count'], now)
                 
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
                         f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
                         f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
                         f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
-                        f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
+                        f"- Fecha: {closed_time.strftime('%d/%m %H:%M')} BRT",
                         ephemeral=False
                     )
                 else:
@@ -289,29 +409,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
                         f"- Morte: {death_time.strftime('%d/%m %H:%M')} BRT\n"
                         f"- Abre: {respawn_time.strftime('%d/%m %H:%M')} BRT\n"
-                        f"- Fecha: {(respawn_time + timedelta(hours=4)).strftime('%d/%m %H:%M')} BRT",
+                        f"- Fecha: {closed_time.strftime('%d/%m %H:%M')} BRT",
                         ephemeral=False
                     )
                 
                 # Atualiza a tabela
-                embed = create_boss_embed_func(boss_timers)
-                view = BossControlView(
-                    bot,
-                    boss_timers,
-                    user_stats,
-                    user_notifications,
-                    table_message,
-                    NOTIFICATION_CHANNEL_ID,
-                    update_table_func,
-                    create_next_bosses_embed_func,
-                    create_ranking_embed_func,
-                    create_history_embed_func,
-                    create_unrecorded_embed_func
-                )
-                await interaction.followup.send(embed=embed, view=view)
+                channel = bot.get_channel(config['table_channel_id'])
+                if channel:
+                    await update_table_func(channel, guild_id=guild_id)
                 
             except Exception as e:
-                logger.error(f"Erro no comando slash boss: {e}", exc_info=True)
+                logger.error(f"Erro no comando slash registro: {e}", exc_info=True)
                 if not interaction.response.is_done():
                     await interaction.response.send_message(
                         "Ocorreu um erro ao processar seu comando.",
@@ -323,7 +431,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # Comando para limpar boss (mantido original)
+    # Comando para limpar boss (adaptado para multi-guild)
     if "clearboss" not in command_names:
         @bot.tree.command(name="clearboss", description="Limpa o timer de um boss")
         @app_commands.autocomplete(boss_name=boss_autocomplete)
@@ -338,9 +446,28 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         ):
             """Limpa o timer de um boss via comando slash"""
             try:
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                guild_id = interaction.guild_id
+                if not guild_id:
                     await interaction.response.send_message(
-                        "⚠ Comandos só são aceitos no canal designado!",
+                        "Este comando deve ser usado em um servidor.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica canal correto
+                if interaction.channel_id != config['notification_channel_id']:
+                    await interaction.response.send_message(
+                        f"⚠ Comandos só são aceitos no canal designado! "
+                        f"Use no canal <#{config['notification_channel_id']}>",
                         ephemeral=True
                     )
                     return
@@ -352,10 +479,10 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     return
                 
-                full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
+                full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers.get(guild_id, {}))
                 if full_boss_name is None:
                     await interaction.response.send_message(
-                        f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
+                        f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.get(guild_id, {}).keys())}",
                         ephemeral=True
                     )
                     return
@@ -363,56 +490,44 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 boss_name = full_boss_name
                 
                 if sala is None:
-                    for s in boss_timers[boss_name]:
-                        boss_timers[boss_name][s] = {
+                    for s in boss_timers[guild_id][boss_name]:
+                        boss_timers[guild_id][boss_name][s] = {
                             'death_time': None,
                             'respawn_time': None,
                             'closed_time': None,
                             'recorded_by': None,
                             'opened_notified': False
                         }
-                    await clear_timer(boss_name)
+                    await clear_timer(guild_id, boss_name)
                     await interaction.response.send_message(
                         f"✅ Todos os timers do boss **{boss_name}** foram resetados.",
                         ephemeral=True
                     )
                 else:
-                    if sala not in boss_timers[boss_name]:
+                    if sala not in boss_timers[guild_id][boss_name]:
                         await interaction.response.send_message(
-                            f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[boss_name].keys()))}",
+                            f"Sala inválida. Salas disponíveis: {', '.join(map(str, boss_timers[guild_id][boss_name].keys()))}",
                             ephemeral=True
                         )
                         return
                     
-                    boss_timers[boss_name][sala] = {
+                    boss_timers[guild_id][boss_name][sala] = {
                         'death_time': None,
                         'respawn_time': None,
                         'closed_time': None,
                         'recorded_by': None,
                         'opened_notified': False
                     }
-                    await clear_timer(boss_name, sala)
+                    await clear_timer(guild_id, boss_name, sala)
                     await interaction.response.send_message(
                         f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
                         ephemeral=True
                     )
                 
                 # Atualiza a tabela
-                embed = create_boss_embed_func(boss_timers)
-                view = BossControlView(
-                    bot,
-                    boss_timers,
-                    user_stats,
-                    user_notifications,
-                    table_message,
-                    NOTIFICATION_CHANNEL_ID,
-                    update_table_func,
-                    create_next_bosses_embed_func,
-                    create_ranking_embed_func,
-                    create_history_embed_func,
-                    create_unrecorded_embed_func
-                )
-                await interaction.followup.send(embed=embed, view=view)
+                channel = bot.get_channel(config['table_channel_id'])
+                if channel:
+                    await update_table_func(channel, guild_id=guild_id)
                 
             except Exception as e:
                 logger.error(f"Erro no comando slash clearboss: {e}", exc_info=True)
@@ -427,7 +542,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # Comando para gerenciar salas (ATUALIZADO)
+    # Comando para gerenciar salas (ATUALIZADO para multi-guild)
     if "managesalas" not in command_names:
         @bot.tree.command(name="managesalas", description="Adiciona ou remove salas de todos os bosses (apenas admins)")
         @app_commands.describe(
@@ -441,62 +556,76 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         ):
             """Gerencia salas via comando slash"""
             try:
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            "⚠ Comandos só são aceitos no canal designado!",
-                            ephemeral=True
-                        )
+                guild_id = interaction.guild_id
+                if not guild_id:
+                    await interaction.response.send_message(
+                        "Este comando deve ser usado em um servidor.",
+                        ephemeral=True
+                    )
                     return
                 
                 # Verificação de permissão
                 if not interaction.user.guild_permissions.administrator:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            "❌ Apenas administradores podem usar este comando.",
-                            ephemeral=True
-                        )
+                    await interaction.response.send_message(
+                        "❌ Apenas administradores podem usar este comando.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica canal correto
+                if interaction.channel_id != config['notification_channel_id']:
+                    await interaction.response.send_message(
+                        f"⚠ Comandos só são aceitos no canal designado! "
+                        f"Use no canal <#{config['notification_channel_id']}>",
+                        ephemeral=True
+                    )
                     return
                 
                 if sala < 1 or sala > 20:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            "❌ Número de sala inválido. Deve ser entre 1 e 20.",
-                            ephemeral=True
-                        )
+                    await interaction.response.send_message(
+                        "❌ Número de sala inválido. Deve ser entre 1 e 20.",
+                        ephemeral=True
+                    )
                     return
                 
                 modified = False
                 
                 if action == 'add':
                     # Verificar se sala já existe para todos os bosses
-                    sala_exists = all(sala in boss_timers[boss] for boss in boss_timers)
+                    sala_exists = all(sala in boss_timers[guild_id][boss] for boss in boss_timers[guild_id])
                     if sala_exists:
-                        if not interaction.response.is_done():
-                            await interaction.response.send_message(
-                                f"ℹ A sala {sala} já existe em todos os bosses.",
-                                ephemeral=True
-                            )
+                        await interaction.response.send_message(
+                            f"ℹ A sala {sala} já existe em todos os bosses.",
+                            ephemeral=True
+                        )
                         return
                     
                     # Adicionar no banco de dados primeiro
-                    success = await add_sala_to_all_bosses(sala)
+                    success = await add_sala_to_all_bosses(guild_id, sala)
                     if not success:
-                        if not interaction.response.is_done():
-                            await interaction.response.send_message(
-                                "❌ Erro ao adicionar sala no banco de dados.",
-                                ephemeral=True
-                            )
+                        await interaction.response.send_message(
+                            "❌ Erro ao adicionar sala no banco de dados.",
+                            ephemeral=True
+                        )
                         return
                     
                     # Adicionar na memória para todos os bosses
-                    for boss in boss_timers:
+                    for boss in boss_timers[guild_id]:
                         # Apenas adicionar sala 20 para bosses específicos
                         if sala == 20 and boss not in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"]:
                             continue
                             
-                        if sala not in boss_timers[boss]:
-                            boss_timers[boss][sala] = {
+                        if sala not in boss_timers[guild_id][boss]:
+                            boss_timers[guild_id][boss][sala] = {
                                 'death_time': None,
                                 'respawn_time': None,
                                 'closed_time': None,
@@ -509,68 +638,47 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 
                 elif action == 'rem':
                     # Verificar se sala existe em algum boss
-                    sala_exists = any(sala in boss_timers[boss] for boss in boss_timers)
+                    sala_exists = any(sala in boss_timers[guild_id][boss] for boss in boss_timers[guild_id])
                     if not sala_exists:
-                        if not interaction.response.is_done():
-                            await interaction.response.send_message(
-                                f"ℹ A sala {sala} não existe em nenhum boss.",
-                                ephemeral=True
-                            )
+                        await interaction.response.send_message(
+                            f"ℹ A sala {sala} não existe em nenhum boss.",
+                            ephemeral=True
+                        )
                         return
                     
                     # Remover do banco de dados primeiro
-                    success = await remove_sala_from_all_bosses(sala)
+                    success = await remove_sala_from_all_bosses(guild_id, sala)
                     if not success:
-                        if not interaction.response.is_done():
-                            await interaction.response.send_message(
-                                "❌ Erro ao remover sala do banco de dados.",
-                                ephemeral=True
-                            )
+                        await interaction.response.send_message(
+                            "❌ Erro ao remover sala do banco de dados.",
+                            ephemeral=True
+                        )
                         return
                     
                     # Remover da memória
-                    for boss in boss_timers:
-                        if sala in boss_timers[boss]:
-                            del boss_timers[boss][sala]
+                    for boss in boss_timers[guild_id]:
+                        if sala in boss_timers[guild_id][boss]:
+                            del boss_timers[guild_id][boss][sala]
                     
                     modified = True
                     message = f"✅ Sala {sala} removida de todos os bosses!"
                 else:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            "Ação inválida. Use 'add' para adicionar ou 'rem' para remover.",
-                            ephemeral=True
-                        )
+                    await interaction.response.send_message(
+                        "Ação inválida. Use 'add' para adicionar ou 'rem' para remover.",
+                        ephemeral=True
+                    )
                     return
                 
                 if modified:
-                    if not interaction.response.is_done():
-                        await interaction.response.send_message(
-                            message,
-                            ephemeral=True
-                        )
-                    else:
-                        await interaction.followup.send(
-                            message,
-                            ephemeral=True
-                        )
-                        
-                    # Atualiza a tabela
-                    embed = create_boss_embed_func(boss_timers)
-                    view = BossControlView(
-                        bot,
-                        boss_timers,
-                        user_stats,
-                        user_notifications,
-                        table_message,
-                        NOTIFICATION_CHANNEL_ID,
-                        update_table_func,
-                        create_next_bosses_embed_func,
-                        create_ranking_embed_func,
-                        create_history_embed_func,
-                        create_unrecorded_embed_func
+                    await interaction.response.send_message(
+                        message,
+                        ephemeral=True
                     )
-                    await interaction.channel.send(embed=embed, view=view)
+                    
+                    # Atualiza a tabela
+                    channel = bot.get_channel(config['table_channel_id'])
+                    if channel:
+                        await update_table_func(channel, guild_id=guild_id)
                 
             except Exception as e:
                 logger.error(f"Erro no comando slash managesalas: {e}", exc_info=True)
@@ -591,13 +699,15 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         async def migrate_slash(interaction: discord.Interaction):
             """Executa migrações via comando slash"""
             try:
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                guild_id = interaction.guild_id
+                if not guild_id:
                     await interaction.response.send_message(
-                        "⚠ Comandos só são aceitos no canal designado!",
+                        "Este comando deve ser usado em um servidor.",
                         ephemeral=True
                     )
                     return
                 
+                # Verificação de permissão
                 if not interaction.user.guild_permissions.administrator:
                     await interaction.response.send_message(
                         "❌ Apenas administradores podem usar este comando.",
@@ -605,10 +715,19 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     )
                     return
                 
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
+                        ephemeral=True
+                    )
+                    return
+                
                 await interaction.response.defer(ephemeral=True)
                 
                 from database import migrate_fix_sala_20
-                success = await migrate_fix_sala_20()
+                success = await migrate_fix_sala_20(guild_id)
                 
                 if success:
                     await interaction.followup.send(
@@ -634,21 +753,31 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # Comando para mostrar próximos bosses (mantido original)
+    # Comando para mostrar próximos bosses (adaptado para multi-guild)
     if "nextboss" not in command_names:
         @bot.tree.command(name="nextboss", description="Mostra os próximos bosses a abrir")
         async def nextboss_slash(interaction: discord.Interaction):
             """Mostra os próximos bosses via comando slash"""
             try:
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                guild_id = interaction.guild_id
+                if not guild_id:
                     await interaction.response.send_message(
-                        "⚠ Comandos só são aceitos no canal designado!",
+                        "Este comando deve ser usado em um servidor.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
                         ephemeral=True
                     )
                     return
                 
                 await interaction.response.defer()
-                embed = create_next_bosses_embed_func(boss_timers)
+                embed = create_next_bosses_embed_func(boss_timers.get(guild_id, {}))
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
@@ -664,21 +793,31 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # Comando para mostrar ranking (mantido original)
+    # Comando para mostrar ranking (adaptado para multi-guild)
     if "ranking" not in command_names:
         @bot.tree.command(name="ranking", description="Mostra ranking de anotações")
         async def ranking_slash(interaction: discord.Interaction):
             """Mostra ranking via comando slash"""
             try:
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                guild_id = interaction.guild_id
+                if not guild_id:
                     await interaction.response.send_message(
-                        "⚠ Comandos só são aceitos no canal designado!",
+                        "Este comando deve ser usado em um servidor.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
                         ephemeral=True
                     )
                     return
                 
                 await interaction.response.defer()
-                embed = create_ranking_embed_func(user_stats)
+                embed = create_ranking_embed_func(user_stats.get(guild_id, {}))
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
@@ -694,7 +833,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # Comando para gerenciar notificações (mantido original)
+    # Comando para gerenciar notificações (adaptado para multi-guild)
     if "notify" not in command_names:
         @bot.tree.command(name="notify", description="Gerencia notificações por DM")
         @app_commands.autocomplete(boss_name=boss_autocomplete)
@@ -709,17 +848,36 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         ):
             """Gerencia notificações via comando slash"""
             try:
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                guild_id = interaction.guild_id
+                if not guild_id:
                     await interaction.response.send_message(
-                        "⚠ Comandos só são aceitos no canal designado!",
+                        "Este comando deve ser usado em um servidor.",
                         ephemeral=True
                     )
                     return
                 
-                full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers)
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica canal correto
+                if interaction.channel_id != config['notification_channel_id']:
+                    await interaction.response.send_message(
+                        f"⚠ Comandos só são aceitos no canal designado! "
+                        f"Use no canal <#{config['notification_channel_id']}>",
+                        ephemeral=True
+                    )
+                    return
+                
+                full_boss_name = get_boss_by_abbreviation(boss_name, boss_timers.get(guild_id, {}))
                 if full_boss_name is None:
                     await interaction.response.send_message(
-                        f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.keys())}",
+                        f"Boss inválido. Bosses disponíveis: {', '.join(boss_timers.get(guild_id, {}).keys())}",
                         ephemeral=True
                     )
                     return
@@ -727,13 +885,16 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 boss_name = full_boss_name
                 user_id = str(interaction.user.id)
                 
+                # Garante que as estruturas existem
+                if guild_id not in user_notifications:
+                    user_notifications[guild_id] = {}
+                if user_id not in user_notifications[guild_id]:
+                    user_notifications[guild_id][user_id] = []
+                
                 if action.lower() in ['add', 'adicionar', 'a']:
-                    if user_id not in user_notifications:
-                        user_notifications[user_id] = []
-                    
-                    if boss_name not in user_notifications[user_id]:
-                        if await add_user_notification(user_id, boss_name):
-                            user_notifications[user_id].append(boss_name)
+                    if boss_name not in user_notifications[guild_id][user_id]:
+                        if await add_user_notification(guild_id, user_id, boss_name):
+                            user_notifications[guild_id][user_id].append(boss_name)
                             await interaction.response.send_message(
                                 f"✅ Você será notificado quando **{boss_name}** estiver disponível!",
                                 ephemeral=True
@@ -750,9 +911,9 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         )
                 
                 elif action.lower() in ['rem', 'remover', 'r']:
-                    if user_id in user_notifications and boss_name in user_notifications[user_id]:
-                        if await remove_user_notification(user_id, boss_name):
-                            user_notifications[user_id].remove(boss_name)
+                    if boss_name in user_notifications[guild_id][user_id]:
+                        if await remove_user_notification(guild_id, user_id, boss_name):
+                            user_notifications[guild_id][user_id].remove(boss_name)
                             await interaction.response.send_message(
                                 f"✅ Você NÃO será mais notificado para **{boss_name}**.",
                                 ephemeral=True
@@ -786,21 +947,31 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # Comando para mostrar notificações do usuário (mantido original)
+    # Comando para mostrar notificações do usuário (adaptado para multi-guild)
     if "mynotifications" not in command_names:
         @bot.tree.command(name="mynotifications", description="Mostra suas notificações ativas")
         async def mynotifications_slash(interaction: discord.Interaction):
             """Mostra notificações do usuário via comando slash"""
             try:
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                guild_id = interaction.guild_id
+                if not guild_id:
                     await interaction.response.send_message(
-                        "⚠ Comandos só são aceitos no canal designado!",
+                        "Este comando deve ser usado em um servidor.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
                         ephemeral=True
                     )
                     return
                 
                 user_id = str(interaction.user.id)
-                notifications = user_notifications.get(user_id, [])
+                notifications = user_notifications.get(guild_id, {}).get(user_id, [])
                 
                 if not notifications:
                     await interaction.response.send_message(
@@ -828,21 +999,31 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # Comando para mostrar histórico (mantido original)
+    # Comando para mostrar histórico (adaptado para multi-guild)
     if "historico" not in command_names:
         @bot.tree.command(name="historico", description="Mostra histórico de anotações")
         async def historico_slash(interaction: discord.Interaction):
             """Mostra histórico via comando slash"""
             try:
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                guild_id = interaction.guild_id
+                if not guild_id:
                     await interaction.response.send_message(
-                        "⚠ Comandos só são aceitos no canal designado!",
+                        "Este comando deve ser usado em um servidor.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
                         ephemeral=True
                     )
                     return
                 
                 await interaction.response.defer()
-                embed = await create_history_embed_func()
+                embed = await create_history_embed_func(bot, boss_timers.get(guild_id, {}))
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
@@ -858,21 +1039,31 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # Comando para mostrar bosses não anotados (mantido original)
+    # Comando para mostrar bosses não anotados (adaptado para multi-guild)
     if "naoanotados" not in command_names:
         @bot.tree.command(name="naoanotados", description="Mostra bosses que fecharam sem registro")
         async def naoanotados_slash(interaction: discord.Interaction):
             """Mostra bosses não anotados via comando slash"""
             try:
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                guild_id = interaction.guild_id
+                if not guild_id:
                     await interaction.response.send_message(
-                        "⚠ Comandos só são aceitos no canal designado!",
+                        "Este comando deve ser usado em um servidor.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
                         ephemeral=True
                     )
                     return
                 
                 await interaction.response.defer()
-                embed = await create_unrecorded_embed_func()
+                embed = await create_unrecorded_embed_func(bot, boss_timers.get(guild_id, {}))
                 await interaction.followup.send(embed=embed)
                 
             except Exception as e:
@@ -888,7 +1079,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         ephemeral=True
                     )
     
-    # Comando para backup (apenas admins) - corrigido
+    # Comando para backup (apenas admins) - adaptado para multi-guild
     if "backup" not in command_names:
         @bot.tree.command(name="backup", description="Gerencia backups do banco de dados (apenas admins)")
         @app_commands.describe(
@@ -901,9 +1092,10 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         async def backup_slash(interaction: discord.Interaction, action: str):
             """Gerencia backups via comando slash"""
             try:
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                guild_id = interaction.guild_id
+                if not guild_id:
                     await interaction.response.send_message(
-                        "⚠ Comandos só são aceitos no canal designado!",
+                        "Este comando deve ser usado em um servidor.",
                         ephemeral=True
                     )
                     return
@@ -912,6 +1104,15 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 if not interaction.user.guild_permissions.administrator:
                     await interaction.response.send_message(
                         "❌ Apenas administradores podem usar este comando.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
                         ephemeral=True
                     )
                     return
@@ -959,17 +1160,29 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         backup_file = select.values[0]
                         
                         if await restore_backup(backup_file):
-                            await load_db_data(boss_timers, user_stats, user_notifications)
+                            # Recarrega dados para este servidor específico
+                            if guild_id in boss_timers:
+                                del boss_timers[guild_id]
+                            if guild_id in user_stats:
+                                del user_stats[guild_id]
+                            if guild_id in user_notifications:
+                                del user_notifications[guild_id]
+                            
+                            # Carrega dados do banco
+                            await load_db_data(boss_timers, user_stats, user_notifications, guild_id)
                             
                             await interaction.followup.send(
                                 f"✅ Backup **{backup_file}** restaurado com sucesso!",
                                 ephemeral=True
                             )
                             
-                            await update_table_func(interaction.channel)
+                            # Atualiza a tabela
+                            channel = bot.get_channel(config['table_channel_id'])
+                            if channel:
+                                await update_table_func(channel, guild_id=guild_id)
                         else:
                             await interaction.followup.send(
-                                f"❌ Falha ao restaurar backup **{backup_file}**!",
+                                f"❌ Falha ao restaurar backup **{backup_file}!",
                                 ephemeral=True
                             )
                     
@@ -998,23 +1211,39 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 except:
                     pass
     
-    # Comando de ajuda (mantido original)
+    # Comando de ajuda (adaptado para multi-guild)
     if "bosshelp" not in command_names:
         @bot.tree.command(name="bosshelp", description="Mostra ajuda com todos os comandos disponíveis")
         async def bosshelp_slash(interaction: discord.Interaction):
             """Mostra ajuda via comando slash"""
             try:
-                if interaction.channel.id != NOTIFICATION_CHANNEL_ID:
+                guild_id = interaction.guild_id
+                if not guild_id:
                     await interaction.response.send_message(
-                        "⚠ Comandos só são aceitos no canal designado!",
+                        "Este comando deve ser usado em um servidor.",
+                        ephemeral=True
+                    )
+                    return
+                
+                # Verifica se o servidor tem configuração
+                config = await get_server_config(guild_id)
+                if not config:
+                    await interaction.response.send_message(
+                        "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
                         ephemeral=True
                     )
                     return
 
                 embed = discord.Embed(
                     title="📚 Ajuda do Boss Timer",
-                    description=f"Todos os comandos devem ser usados neste canal (ID: {NOTIFICATION_CHANNEL_ID})",
+                    description=f"Todos os comandos devem ser usados nos canais configurados",
                     color=discord.Color.green()
+                )
+                
+                embed.add_field(
+                    name="/setup <canal_tabela> <canal_notificacao>",
+                    value="Configura os canais do bot neste servidor (apenas admins)",
+                    inline=False
                 )
                 
                 embed.add_field(
@@ -1024,19 +1253,13 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 )
                 
                 embed.add_field(
-                    name="/boss <nome> <sala> <hora_morte> [foi_ontem]",
-                    value="Registra a morte de um boss no horário especificado\nExemplo: `/boss Hydra 8 14:30`\nBosses disponíveis: " + ", ".join(boss_timers.keys()),
+                    name="/registro <boss> <sala> <hora_morte> [foi_ontem]",
+                    value="Registra a morte de um boss no horário especificado\nExemplo: `/registro Hydra 8 14:30`\nBosses disponíveis: " + ", ".join(boss_timers.get(guild_id, {}).keys()),
                     inline=False
                 )
                 
                 embed.add_field(
-                    name="/agendarboss <nome> <sala> <hora_morte> [dia]",
-                    value="Agenda um boss para ser registrado automaticamente no futuro\nExemplo: `/agendarboss Hydra 8 14:30 1` (para amanhã)",
-                    inline=False
-                )
-                
-                embed.add_field(
-                    name="/clearboss <nome> [sala]",
+                    name="/clearboss <boss> [sala]",
                     value="Reseta o timer de um boss (opcional: especifique a sala, senão limpa todas)",
                     inline=False
                 )
@@ -1095,11 +1318,14 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     inline=False
                 )
                 
-                embed.add_field(
-                    name="Salas disponíveis",
-                    value=", ".join(map(str, boss_timers.get(list(boss_timers.keys())[0], {}).keys())),
-                    inline=False
-                )
+                if guild_id in boss_timers and boss_timers[guild_id]:
+                    bosses = list(boss_timers[guild_id].keys())
+                    if bosses:
+                        embed.add_field(
+                            name="Salas disponíveis",
+                            value=", ".join(map(str, boss_timers[guild_id][bosses[0]].keys())),
+                            inline=False
+                        )
                 
                 await interaction.response.send_message(embed=embed)
                 
