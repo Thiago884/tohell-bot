@@ -29,20 +29,55 @@ def format_time_remaining(target_time: datetime) -> str:
     return f"{hours:02d}h {minutes:02d}m"
 
 def get_boss_by_abbreviation(abbrev: str, boss_timers: Dict) -> Optional[str]:
-    """Encontra o nome completo do boss a partir de uma abreviação"""
-    abbrev = abbrev.lower()
+    """Encontra o nome completo do boss a partir de uma abreviação - CORRIGIDA"""
+    if not abbrev or not boss_timers:
+        return None
     
-    # Verifica primeiro no mapeamento oficial
-    for boss, abbr in BOSS_ABBREVIATIONS.items():
-        if abbr.lower() == abbrev:
-            for b in boss_timers.keys():
-                if b.lower() == boss:
-                    return b
+    abbrev = abbrev.lower().strip()
     
-    # Busca por correspondência parcial
+    # Mapeamento completo de abreviações
+    BOSS_MAPPING = {
+        "hydra": "Hydra",
+        "phoenix": "Phoenix of Darkness",
+        "phoenix of darkness": "Phoenix of Darkness",
+        "geno": "Genocider",
+        "genocider": "Genocider",
+        "dbk": "Death Beam Knight",
+        "death beam knight": "Death Beam Knight",
+        "hell": "Hell Maine",
+        "hell maine": "Hell Maine",
+        "red": "Super Red Dragon",
+        "super red dragon": "Super Red Dragon",
+        "illusion": "Illusion of Kundun",
+        "illusion of kundun": "Illusion of Kundun",
+        "rei": "Rei Kundun",
+        "rei kundun": "Rei Kundun",
+        "ero": "Erohim",
+        "erohim": "Erohim"
+    }
+    
+    # Primeiro, verificar no mapeamento
+    if abbrev in BOSS_MAPPING:
+        mapped_boss = BOSS_MAPPING[abbrev]
+        # Verificar se existe no dicionário
+        for boss in boss_timers.keys():
+            if boss.lower() == mapped_boss.lower():
+                return boss
+    
+    # Segundo, busca direta no dicionário
     for boss in boss_timers.keys():
-        if abbrev in boss.lower():
+        boss_lower = boss.lower()
+        if abbrev == boss_lower or abbrev in boss_lower:
             return boss
+    
+    # Terceiro, busca por abreviações parciais
+    for boss in boss_timers.keys():
+        boss_lower = boss.lower()
+        # Verificar se a abreviação corresponde ao início de alguma palavra do nome
+        words = boss_lower.split()
+        for word in words:
+            if word.startswith(abbrev):
+                return boss
     
     return None
 

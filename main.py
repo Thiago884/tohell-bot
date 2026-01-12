@@ -89,6 +89,35 @@ table_messages = {}
 # Configurações por servidor
 server_configs = {}
 
+async def initialize_guild_data(guild_id: int):
+    """Inicializa os dados de um servidor específico"""
+    if guild_id not in boss_timers:
+        # Inicializar com todos os bosses
+        bosses_list = [
+            "Hydra", "Phoenix of Darkness", "Genocider", "Death Beam Knight",
+            "Hell Maine", "Super Red Dragon", "Illusion of Kundun", 
+            "Rei Kundun", "Erohim"
+        ]
+        
+        boss_timers[guild_id] = {}
+        for boss in bosses_list:
+            boss_timers[guild_id][boss] = {}
+            # Inicializar com salas padrão
+            for sala in range(1, 9):
+                boss_timers[guild_id][boss][sala] = {
+                    'death_time': None,
+                    'respawn_time': None,
+                    'closed_time': None,
+                    'recorded_by': None,
+                    'opened_notified': False
+                }
+    
+    if guild_id not in user_stats:
+        user_stats[guild_id] = {}
+    
+    if guild_id not in user_notifications:
+        user_notifications[guild_id] = {}
+
 async def load_all_salas_for_guild(guild_id):
     """Carrega todas as salas do banco de dados para um servidor específico"""
     from database import get_all_salas_from_db
@@ -131,6 +160,10 @@ async def initialize_server(guild_id):
     """Inicializa um novo servidor no sistema"""
     try:
         logger.info(f"Inicializando servidor {guild_id}")
+        
+        # Inicializar os dados do servidor primeiro
+        await initialize_guild_data(guild_id)
+        
         config = await get_server_config(guild_id)
         
         if config:
@@ -146,6 +179,7 @@ async def initialize_server(guild_id):
                 'table_message_id': None
             }
         
+        # Carregar salas específicas
         await load_all_salas_for_guild(guild_id)
         return True
     except Exception as e:
@@ -224,8 +258,9 @@ async def on_ready():
         if success:
             logger.info(f"Dados carregados para {len(boss_timers)} servidores")
             
-            # Depois, para cada servidor, carregue as salas
-            for guild_id in boss_timers.keys():
+            # Para cada servidor, garantir que os dados estão inicializados
+            for guild_id in list(boss_timers.keys()):
+                await initialize_guild_data(guild_id)
                 await load_all_salas_for_guild(guild_id)
         else:
             logger.error("Falha ao carregar dados do banco")

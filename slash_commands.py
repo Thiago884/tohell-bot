@@ -32,17 +32,41 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                              create_boss_embed_func, update_table_func, create_next_bosses_embed_func,
                              create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
     
-    # Autocomplete para nomes de bosses
+    # Autocomplete para nomes de bosses - CORRIGIDA
     async def boss_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+        """Autocomplete para nomes de bosses - CORRIGIDA"""
         guild_id = interaction.guild_id
-        if not guild_id or guild_id not in boss_timers:
+        if not guild_id:
             return []
         
-        bosses = list(boss_timers[guild_id].keys())
-        return [
-            app_commands.Choice(name=boss, value=boss)
-            for boss in bosses if current.lower() in boss.lower()
-        ][:25]
+        try:
+            # Lista de bosses padrão que devem estar disponíveis
+            default_bosses = [
+                "Hydra", "Phoenix of Darkness", "Genocider", "Death Beam Knight",
+                "Hell Maine", "Super Red Dragon", "Illusion of Kundun", 
+                "Rei Kundun", "Erohim"
+            ]
+            
+            # Se tiver dados do servidor, usar, senão usar os padrão
+            server_bosses = list(boss_timers.get(guild_id, {}).keys())
+            
+            if not server_bosses:
+                available_bosses = default_bosses
+            else:
+                available_bosses = server_bosses
+            
+            # Filtrar pelo texto atual
+            filtered = []
+            for boss in available_bosses:
+                if current.lower() in boss.lower():
+                    filtered.append(app_commands.Choice(name=boss, value=boss))
+            
+            # Limitar a 25 resultados
+            return filtered[:25]
+            
+        except Exception as e:
+            logger.error(f"Erro no autocomplete de bosses: {e}")
+            return []
     
     # Autocomplete para salas - CORRIGIDO E SIMPLIFICADO
     async def sala_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[int]]:
@@ -143,7 +167,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 )
     
     # ==============================================================================
-    # COMANDO: /registro (Registrar morte de boss)
+    # COMANDO: /registro (Registrar morte de boss) - CORRIGIDO
     # ==============================================================================
     @bot.tree.command(name="registro", description="Registra a morte de um boss")
     @app_commands.autocomplete(boss_name=boss_autocomplete, sala=sala_autocomplete)
@@ -170,6 +194,28 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 )
                 return
             
+            # ADICIONAR: Inicializar dados do servidor se necessário
+            if guild_id not in boss_timers:
+                # Inicializar com todos os bosses
+                bosses_list = [
+                    "Hydra", "Phoenix of Darkness", "Genocider", "Death Beam Knight",
+                    "Hell Maine", "Super Red Dragon", "Illusion of Kundun", 
+                    "Rei Kundun", "Erohim"
+                ]
+                
+                boss_timers[guild_id] = {}
+                for boss in bosses_list:
+                    boss_timers[guild_id][boss] = {}
+                    # Inicializar com salas padrão
+                    for sala_num in range(1, 9):
+                        boss_timers[guild_id][boss][sala_num] = {
+                            'death_time': None,
+                            'respawn_time': None,
+                            'closed_time': None,
+                            'recorded_by': None,
+                            'opened_notified': False
+                        }
+            
             # Verifica se o servidor tem configuração
             config = await get_server_config(guild_id)
             if not config:
@@ -192,8 +238,6 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 await interaction.response.defer(thinking=True)
             
             # Garante que o servidor está nas estruturas de dados
-            if guild_id not in boss_timers:
-                boss_timers[guild_id] = {}
             if guild_id not in user_stats:
                 user_stats[guild_id] = {}
             if guild_id not in user_notifications:

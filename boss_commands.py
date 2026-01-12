@@ -48,7 +48,7 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
     
     return False
 
-# boss_commands.py - Função create_boss_embed corrigida
+# boss_commands.py - Função create_boss_embed corrigida (VERSÃO CORRIGIDA)
 def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed:
     """Cria embed com a tabela de timers de boss (função síncrona)"""
     now = datetime.now(brazil_tz)
@@ -58,7 +58,12 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
         color=discord.Color.gold()
     )
     
-    # Lista de bosses na ordem desejada
+    # CORREÇÃO: Usar os bosses que realmente existem no dicionário, não uma lista fixa
+    if not boss_timers:
+        embed.description = "Nenhum boss registrado ainda."
+        return embed
+    
+    # Lista de bosses na ordem desejada - mas apenas os que existem
     boss_order = [
         "Hydra", "Phoenix of Darkness", "Genocider", "Death Beam Knight",
         "Hell Maine", "Super Red Dragon", "Illusion of Kundun", 
@@ -67,7 +72,7 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
     
     for boss in boss_order:
         if boss not in boss_timers:
-            continue
+            continue  # Pular bosses que não existem nesta instância
             
         boss_info = []
         # Ordenar salas numericamente
@@ -99,7 +104,7 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
                 f"Sala {sala}: {death_time_str} [de {respawn_time_str} até {closed_time_str}] {status}{recorded_by}"
             )
         
-        # Sempre adicionar o campo do boss
+        # Sempre adicionar o campo do boss, mesmo sem informações
         embed.add_field(
             name=f"**{boss}**",
             value="\n".join(boss_info) if boss_info else "Nenhum horário registrado",
