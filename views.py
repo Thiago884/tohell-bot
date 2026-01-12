@@ -183,8 +183,10 @@ class AnotarBossModal(Modal, title="Anotar Horário do Boss"):
                 self.user_stats[user_id]['count'] += 1
                 self.user_stats[user_id]['last_recorded'] = now
                 
-                await save_timer(boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by)
-                await save_user_stats(user_id, interaction.user.name, self.user_stats[user_id]['count'], now)
+                # CORREÇÃO: Adicionar guild_id e corrigir parâmetros
+                guild_id = interaction.guild_id
+                await save_timer(guild_id, boss_name, sala, death_time, respawn_time, respawn_time + timedelta(hours=4), recorded_by, False)
+                await save_user_stats(guild_id, user_id, interaction.user.name, self.user_stats[user_id]['count'], now)
                 
                 await interaction.followup.send(
                     f"✅ **{boss_name} (Sala {sala})** registrado por {recorded_by}:\n"
@@ -286,7 +288,11 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                             'recorded_by': None,
                             'opened_notified': False
                         }
-                    await clear_timer(boss_name)
+                    
+                    # CORREÇÃO: Adicionar guild_id
+                    guild_id = interaction.guild_id
+                    await clear_timer(guild_id, boss_name)
+                    
                     await interaction.followup.send(
                         content=f"✅ Todos os timers do boss **{boss_name}** foram resetados.",
                         view=None
@@ -343,7 +349,11 @@ class LimparBossModal(Modal, title="Limpar Boss"):
                     'recorded_by': None,
                     'opened_notified': False
                 }
-                await clear_timer(boss_name, sala)
+                
+                # CORREÇÃO: Adicionar guild_id
+                guild_id = interaction.guild_id
+                await clear_timer(guild_id, boss_name, sala)
+                
                 await interaction.followup.send(
                     f"✅ Timer do boss **{boss_name} (Sala {sala})** foi resetado.",
                     ephemeral=True
@@ -419,11 +429,15 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
             user_id = str(interaction.user.id)
             action = self.action.value.lower()
             
+            # CORREÇÃO: Adicionar guild_id
+            guild_id = interaction.guild_id
+            
             if action in ['add', 'adicionar', 'a']:
                 if user_id not in self.user_notifications:
                     self.user_notifications[user_id] = []
                 if boss_name not in self.user_notifications[user_id]:
-                    if await add_user_notification(user_id, boss_name):
+                    # CORREÇÃO: Passar guild_id, user_id e boss_name
+                    if await add_user_notification(guild_id, user_id, boss_name):
                         self.user_notifications[user_id].append(boss_name)
                         await interaction.followup.send(
                             f"✅ Você será notificado quando **{boss_name}** estiver disponível!",
@@ -442,7 +456,8 @@ class NotificationModal(Modal, title="Gerenciar Notificações"):
             
             elif action in ['rem', 'remover', 'r']:
                 if user_id in self.user_notifications and boss_name in self.user_notifications[user_id]:
-                    if await remove_user_notification(user_id, boss_name):
+                    # CORREÇÃO: Passar guild_id, user_id e boss_name
+                    if await remove_user_notification(guild_id, user_id, boss_name):
                         self.user_notifications[user_id].remove(boss_name)
                         await interaction.followup.send(
                             f"✅ Você NÃO será mais notificado para **{boss_name}**.",
