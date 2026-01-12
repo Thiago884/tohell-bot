@@ -37,7 +37,7 @@ async def init_db():
             return False
         
         async with conn.cursor() as cursor:
-            # Tabela de configurações por servidor (NOVO)
+            # Tabela de configurações por servidor
             await cursor.execute("""
             CREATE TABLE IF NOT EXISTS server_configs (
                 guild_id BIGINT PRIMARY KEY,
@@ -48,7 +48,7 @@ async def init_db():
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
             
-            # Tabela de timers de boss (MODIFICADA para multi-guild)
+            # Tabela de timers de boss
             await cursor.execute("""
             CREATE TABLE IF NOT EXISTS boss_timers (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -68,7 +68,7 @@ async def init_db():
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
             
-            # Tabela de estatísticas de usuários (MODIFICADA para multi-guild)
+            # Tabela de estatísticas de usuários
             await cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_stats (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -84,7 +84,7 @@ async def init_db():
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
             """)
             
-            # Tabela de notificações de usuários (MODIFICADA para multi-guild)
+            # Tabela de notificações de usuários
             await cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_notifications (
                 guild_id BIGINT NOT NULL,
@@ -109,9 +109,8 @@ async def init_db():
 async def migrate_database_to_multitenant():
     """
     Atualiza as tabelas existentes para suportar múltiplos servidores (Multi-Guild).
-    Define o ID do servidor atual para os dados já existentes.
     """
-    current_guild_id = 1152651838651371520  # O TEU ID DO MAIN.PY
+    current_guild_id = 1152651838651371520  # ID padrão para dados antigos
     
     conn = await connect_db()
     if not conn:
@@ -135,9 +134,7 @@ async def migrate_database_to_multitenant():
             # 2. Adicionar coluna guild_id em boss_timers
             try:
                 await cursor.execute("ALTER TABLE boss_timers ADD COLUMN guild_id BIGINT")
-                # Atualiza dados antigos para o servidor atual
                 await cursor.execute("UPDATE boss_timers SET guild_id = %s WHERE guild_id IS NULL", (current_guild_id,))
-                # Adiciona índice para performance
                 await cursor.execute("CREATE INDEX idx_guild_boss ON boss_timers(guild_id, boss_name)")
                 logger.info("Tabela boss_timers migrada com sucesso.")
             except Exception as e:
@@ -150,7 +147,6 @@ async def migrate_database_to_multitenant():
             try:
                 await cursor.execute("ALTER TABLE user_stats ADD COLUMN guild_id BIGINT")
                 await cursor.execute("UPDATE user_stats SET guild_id = %s WHERE guild_id IS NULL", (current_guild_id,))
-                # A chave primária composta deve mudar, mas por enquanto vamos apenas adicionar o índice
                 await cursor.execute("CREATE INDEX idx_guild_user ON user_stats(guild_id, user_id)")
                 logger.info("Tabela user_stats migrada com sucesso.")
             except Exception as e:
@@ -189,9 +185,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             return False
         
         async with conn.cursor() as cursor:
-            # Se guild_id especificado, carrega apenas dados desse servidor
             if guild_id:
-                # Carregar timers de boss - NÃO LIMPAR A ESTRUTURA EXISTENTE
                 await cursor.execute("""
                     SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
                     FROM boss_timers
@@ -199,7 +193,6 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                     ORDER BY boss_name, sala
                 """, (guild_id,))
             else:
-                # Carregar todos os timers de boss
                 await cursor.execute("""
                     SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
                     FROM boss_timers
@@ -212,11 +205,9 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                 boss_name = timer[0]
                 sala = timer[1]
                 
-                # Garante que o boss existe na estrutura
                 if boss_name not in boss_timers:
                     boss_timers[boss_name] = {}
                 
-                # Adiciona a sala ao boss com os dados do banco
                 boss_timers[boss_name][sala] = {
                     'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
                     'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
@@ -225,7 +216,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                     'opened_notified': bool(timer[6])
                 }
             
-            # Carregar estatísticas de usuários - LIMPAR E RECARREGAR
+            # Carregar estatísticas de usuários
             user_stats.clear()
             if guild_id:
                 await cursor.execute("""
@@ -248,7 +239,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                     'username': stat[1]
                 }
             
-            # Carregar notificações personalizadas - LIMPAR E RECARREGAR
+            # Carregar notificações personalizadas
             user_notifications.clear()
             if guild_id:
                 await cursor.execute("""
@@ -295,7 +286,7 @@ async def save_timer(guild_id: int, boss_name: str, sala: int, death_time: Optio
             return False
         
         async with conn.cursor() as cursor:
-            # Verifica se já existe registo para este Boss nesta Sala neste Servidor
+            # Verifica se já existe registo
             await cursor.execute("""
                 SELECT id FROM boss_timers 
                 WHERE guild_id = %s AND boss_name = %s AND sala = %s
@@ -304,7 +295,7 @@ async def save_timer(guild_id: int, boss_name: str, sala: int, death_time: Optio
             result = await cursor.fetchone()
             
             if result:
-                # Atualiza existente
+                # CORREÇÃO PRINCIPAL: Uso de vírgulas para separar campos no SET
                 await cursor.execute("""
                     UPDATE boss_timers 
                     SET death_time = %s,
@@ -514,7 +505,6 @@ async def get_all_server_configs():
 async def load_all_server_data():
     """
     Carrega TODOS os dados do banco organizados por servidor.
-    Retorno: Dict[guild_id, Dict[boss_name, Dict[sala, dados]]]
     """
     conn = await connect_db()
     if not conn:
@@ -539,7 +529,7 @@ async def load_all_server_data():
                 if boss not in data[guild_id]: 
                     data[guild_id][boss] = {}
                 
-                # Converte timestamps para aware (fuso horário correto) se necessário
+                # Converte timestamps para aware (fuso horário correto)
                 if row['respawn_time'] and row['respawn_time'].tzinfo is None:
                     row['respawn_time'] = brazil_tz.localize(row['respawn_time'])
                 if row['closed_time'] and row['closed_time'].tzinfo is None:
@@ -623,7 +613,7 @@ async def create_backup() -> Optional[str]:
                 'user_notifications': user_notifications_data,
                 'server_configs': server_configs_data,
                 'timestamp': timestamp,
-                'version': 2.0  # Versão atualizada para multi-guild
+                'version': 2.0
             }
             
             with open(backup_file, 'w', encoding='utf-8') as f:
@@ -698,7 +688,7 @@ async def restore_backup(backup_file: str) -> bool:
                     notification['boss_name']
                 ))
             
-            # Restaurar configurações de servidor (se existirem)
+            # Restaurar configurações de servidor
             if 'server_configs' in backup_data:
                 for config in backup_data['server_configs']:
                     await cursor.execute("""
@@ -762,7 +752,6 @@ async def add_sala_to_all_bosses(guild_id: int, sala: int) -> bool:
                                      "Hydra", "Phoenix of Darkness", "Illusion of Kundun", "Rei Kundun"]
             
             for boss in bosses_with_sala_20:
-                # Verifica se já existe para evitar duplicação
                 await cursor.execute("""
                 SELECT COUNT(*) FROM boss_timers 
                 WHERE guild_id = %s AND boss_name = %s AND sala = %s
@@ -817,7 +806,6 @@ async def migrate_remove_sala_20_from_wrong_bosses(guild_id: int) -> bool:
             return False
             
         async with conn.cursor() as cursor:
-            # Remove sala 20 de bosses que não deveriam tê-la
             await cursor.execute("""
             DELETE FROM boss_timers 
             WHERE guild_id = %s AND sala = 20 
