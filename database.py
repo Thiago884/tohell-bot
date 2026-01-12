@@ -186,6 +186,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
         
         async with conn.cursor() as cursor:
             if guild_id:
+                # Query para guild específica
                 await cursor.execute("""
                     SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
                     FROM boss_timers
@@ -193,8 +194,9 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                     ORDER BY boss_name, sala
                 """, (guild_id,))
             else:
+                # Query para todos os guilds - CORREÇÃO: sem WHERE clause
                 await cursor.execute("""
-                    SELECT boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
+                    SELECT guild_id, boss_name, sala, death_time, respawn_time, closed_time, recorded_by, opened_notified 
                     FROM boss_timers
                     ORDER BY guild_id, boss_name, sala
                 """)
@@ -202,19 +204,40 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             timers = await cursor.fetchall()
             
             for timer in timers:
-                boss_name = timer[0]
-                sala = timer[1]
-                
-                if boss_name not in boss_timers:
-                    boss_timers[boss_name] = {}
-                
-                boss_timers[boss_name][sala] = {
-                    'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
-                    'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
-                    'closed_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
-                    'recorded_by': timer[5],
-                    'opened_notified': bool(timer[6])
-                }
+                if guild_id:
+                    # Estrutura antiga para compatibilidade
+                    boss_name = timer[0]
+                    sala = timer[1]
+                    
+                    if boss_name not in boss_timers:
+                        boss_timers[boss_name] = {}
+                    
+                    boss_timers[boss_name][sala] = {
+                        'death_time': timer[2].replace(tzinfo=brazil_tz) if timer[2] else None,
+                        'respawn_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
+                        'closed_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
+                        'recorded_by': timer[5],
+                        'opened_notified': bool(timer[6])
+                    }
+                else:
+                    # Nova estrutura multi-guild
+                    guild_id_db = timer[0]
+                    boss_name = timer[1]
+                    sala = timer[2]
+                    
+                    if guild_id_db not in boss_timers:
+                        boss_timers[guild_id_db] = {}
+                    
+                    if boss_name not in boss_timers[guild_id_db]:
+                        boss_timers[guild_id_db][boss_name] = {}
+                    
+                    boss_timers[guild_id_db][boss_name][sala] = {
+                        'death_time': timer[3].replace(tzinfo=brazil_tz) if timer[3] else None,
+                        'respawn_time': timer[4].replace(tzinfo=brazil_tz) if timer[4] else None,
+                        'closed_time': timer[5].replace(tzinfo=brazil_tz) if timer[5] else None,
+                        'recorded_by': timer[6],
+                        'opened_notified': bool(timer[7])
+                    }
             
             # Carregar estatísticas de usuários
             user_stats.clear()
@@ -226,18 +249,32 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                 """, (guild_id,))
             else:
                 await cursor.execute("""
-                    SELECT user_id, username, count, last_recorded 
+                    SELECT guild_id, user_id, username, count, last_recorded 
                     FROM user_stats
                 """)
             
             stats = await cursor.fetchall()
             
             for stat in stats:
-                user_stats[stat[0]] = {
-                    'count': stat[2],
-                    'last_recorded': stat[3].replace(tzinfo=brazil_tz) if stat[3] else None,
-                    'username': stat[1]
-                }
+                if guild_id:
+                    user_id = stat[0]
+                    user_stats[user_id] = {
+                        'count': stat[2],
+                        'last_recorded': stat[3].replace(tzinfo=brazil_tz) if stat[3] else None,
+                        'username': stat[1]
+                    }
+                else:
+                    guild_id_db = stat[0]
+                    user_id = stat[1]
+                    
+                    if guild_id_db not in user_stats:
+                        user_stats[guild_id_db] = {}
+                    
+                    user_stats[guild_id_db][user_id] = {
+                        'count': stat[3],
+                        'last_recorded': stat[4].replace(tzinfo=brazil_tz) if stat[4] else None,
+                        'username': stat[2]
+                    }
             
             # Carregar notificações personalizadas
             user_notifications.clear()
@@ -250,7 +287,7 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
                 """, (guild_id,))
             else:
                 await cursor.execute("""
-                    SELECT user_id, boss_name 
+                    SELECT guild_id, user_id, boss_name 
                     FROM user_notifications
                     ORDER BY user_id, boss_name
                 """)
@@ -258,13 +295,27 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             notifications = await cursor.fetchall()
             
             for notification in notifications:
-                user_id = notification[0]
-                boss_name = notification[1]
-                
-                if user_id not in user_notifications:
-                    user_notifications[user_id] = []
-                if boss_name not in user_notifications[user_id]:
-                    user_notifications[user_id].append(boss_name)
+                if guild_id:
+                    user_id = notification[0]
+                    boss_name = notification[1]
+                    
+                    if user_id not in user_notifications:
+                        user_notifications[user_id] = []
+                    if boss_name not in user_notifications[user_id]:
+                        user_notifications[user_id].append(boss_name)
+                else:
+                    guild_id_db = notification[0]
+                    user_id = notification[1]
+                    boss_name = notification[2]
+                    
+                    if guild_id_db not in user_notifications:
+                        user_notifications[guild_id_db] = {}
+                    
+                    if user_id not in user_notifications[guild_id_db]:
+                        user_notifications[guild_id_db][user_id] = []
+                    
+                    if boss_name not in user_notifications[guild_id_db][user_id]:
+                        user_notifications[guild_id_db][user_id].append(boss_name)
         
         logger.info("Dados carregados do banco de dados com sucesso")
         return True
@@ -530,12 +581,24 @@ async def load_all_server_data():
                     data[guild_id][boss] = {}
                 
                 # Converte timestamps para aware (fuso horário correto)
-                if row['respawn_time'] and row['respawn_time'].tzinfo is None:
-                    row['respawn_time'] = brazil_tz.localize(row['respawn_time'])
-                if row['closed_time'] and row['closed_time'].tzinfo is None:
-                    row['closed_time'] = brazil_tz.localize(row['closed_time'])
+                death_time = row['death_time']
+                respawn_time = row['respawn_time']
+                closed_time = row['closed_time']
+                
+                if death_time and death_time.tzinfo is None:
+                    death_time = brazil_tz.localize(death_time)
+                if respawn_time and respawn_time.tzinfo is None:
+                    respawn_time = brazil_tz.localize(respawn_time)
+                if closed_time and closed_time.tzinfo is None:
+                    closed_time = brazil_tz.localize(closed_time)
                     
-                data[guild_id][boss][sala] = row
+                data[guild_id][boss][sala] = {
+                    'death_time': death_time,
+                    'respawn_time': respawn_time,
+                    'closed_time': closed_time,
+                    'recorded_by': row['recorded_by'],
+                    'opened_notified': bool(row['opened_notified'])
+                }
 
             logger.info(f"Dados carregados para {len(data)} servidores.")
             return data
