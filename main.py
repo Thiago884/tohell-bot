@@ -186,6 +186,44 @@ async def initialize_server(guild_id):
         logger.error(f"Erro ao inicializar servidor {guild_id}: {e}")
         return False
 
+async def initialize_all_servers():
+    """Inicializa dados para todos os servidores onde o bot está presente"""
+    logger.info("Inicializando dados para todos os servidores...")
+    
+    # Primeiro, carregar todas as configurações do banco
+    all_configs = await get_all_server_configs()
+    config_dict = {config['guild_id']: config for config in all_configs}
+    
+    # Para cada servidor do bot
+    for guild in bot.guilds:
+        guild_id = guild.id
+        
+        # Inicializar estruturas de dados se não existirem
+        if guild_id not in boss_timers:
+            await initialize_guild_data(guild_id)
+        
+        # Carregar configuração do servidor
+        if guild_id in config_dict:
+            config = config_dict[guild_id]
+            server_configs[guild_id] = {
+                'notification_channel_id': config.get('notification_channel_id'),
+                'table_channel_id': config.get('table_channel_id'),
+                'table_message_id': config.get('table_message_id')
+            }
+        else:
+            server_configs[guild_id] = {
+                'notification_channel_id': None,
+                'table_channel_id': None,
+                'table_message_id': None
+            }
+    
+    # Agora carregar dados do banco
+    success = await load_db_data(boss_timers, user_stats, user_notifications)
+    if success:
+        logger.info(f"Dados carregados para {len(boss_timers)} servidores")
+    else:
+        logger.error("Falha ao carregar dados do banco")
+
 async def setup_server_channels(guild):
     """Configura os canais para um novo servidor"""
     try:
@@ -253,26 +291,34 @@ async def on_ready():
         await migrate_database_to_multitenant()
         
         logger.info("Carregando dados de todos os servidores...")
-        success = await load_db_data(boss_timers, user_stats, user_notifications)
+        # CORREÇÃO: Carregar dados de TODOS os servidores primeiro
+        all_configs = await get_all_server_configs()
         
-        if success:
-            logger.info(f"Dados carregados para {len(boss_timers)} servidores")
-            
-            # Para cada servidor, garantir que os dados estão inicializados
-            for guild_id in list(boss_timers.keys()):
-                await initialize_guild_data(guild_id)
-                await load_all_salas_for_guild(guild_id)
+        if all_configs:
+            # Para cada configuração de servidor no banco, carregar os dados
+            for config in all_configs:
+                guild_id = config['guild_id']
+                await initialize_server(guild_id)
         else:
-            logger.error("Falha ao carregar dados do banco")
+            # Se não houver configurações, carregar dados de todos os servidores
+            success = await load_db_data(boss_timers, user_stats, user_notifications)
+            if success:
+                logger.info(f"Dados carregados para {len(boss_timers)} servidores")
+                
+                # Para cada servidor do bot, garantir que os dados estão inicializados
+                for guild in bot.guilds:
+                    await initialize_server(guild.id)
+            else:
+                logger.error("Falha ao carregar dados do banco")
         
-        # Carregar configurações de todos os servidores
+        # CORREÇÃO: Carregar configurações de todos os servidores
         for guild_id in boss_timers.keys():
             config = await get_server_config(guild_id)
             if config:
                 server_configs[guild_id] = {
-                    'notification_channel_id': config['notification_channel_id'],
-                    'table_channel_id': config['table_channel_id'],
-                    'table_message_id': config['table_message_id']
+                    'notification_channel_id': config.get('notification_channel_id'),
+                    'table_channel_id': config.get('table_channel_id'),
+                    'table_message_id': config.get('table_message_id')
                 }
             else:
                 server_configs[guild_id] = {'notification_channel_id': None, 'table_channel_id': None, 'table_message_id': None}
@@ -285,6 +331,60 @@ async def on_ready():
         # Configurar comando drops
         await setup_drops_command(bot)
         
+        # CORREÇÃO: Criar função de update_table para cada servidor
+        def create_update_table_func_for_guild(guild_id):
+            async def update_table_for_guild(channel):
+                if not channel or guild_id not in boss_timers:
+                    return
+                
+                config = server_configs.get(guild_id)
+                if not config or not config.get('table_channel_id'):
+                    return
+                
+                server_data = boss_timers.get(guild_id, {})
+                server_user_stats = user_stats.get(guild_id, {})
+                server_user_notifications = user_notifications.get(guild_id, {})
+                
+                # Buscar mensagem existente ou criar nova
+                if config['table_message_id']:
+                    try:
+                        table_msg = await channel.fetch_message(config['table_message_id'])
+                    except discord.NotFound:
+                        table_msg = None
+                        config['table_message_id'] = None
+                else:
+                    table_msg = None
+                
+                embed = create_boss_embed(server_data)
+                view = BossControlView(
+                    bot,
+                    server_data,
+                    server_user_stats,
+                    server_user_notifications,
+                    table_msg,
+                    config['table_channel_id'],
+                    lambda: update_table_for_guild(channel),
+                    lambda: create_next_bosses_embed(server_data),
+                    lambda: create_ranking_embed(server_user_stats),
+                    lambda: create_history_embed(bot, server_data),
+                    lambda: create_unrecorded_embed(bot, server_data)
+                )
+                
+                if table_msg:
+                    try:
+                        await table_msg.edit(embed=embed, view=view)
+                    except discord.NotFound:
+                        # Se a mensagem foi deletada, enviar nova
+                        new_msg = await channel.send(embed=embed, view=view)
+                        config['table_message_id'] = new_msg.id
+                        await set_server_config(guild_id, config.get('notification_channel_id'), config['table_channel_id'], new_msg.id)
+                else:
+                    new_msg = await channel.send(embed=embed, view=view)
+                    config['table_message_id'] = new_msg.id
+                    await set_server_config(guild_id, config.get('notification_channel_id'), config['table_channel_id'], new_msg.id)
+            
+            return update_table_for_guild
+        
         # Configurar comandos principais do slash_commands.py
         from slash_commands import setup_slash_commands
         await setup_slash_commands(
@@ -295,7 +395,7 @@ async def on_ready():
             None,
             0,
             create_boss_embed,
-            lambda channel, guild_id=None: None,  # Placeholder
+            None,  # Será substituído dinamicamente por servidor
             create_next_bosses_embed,
             create_ranking_embed,
             create_history_embed,

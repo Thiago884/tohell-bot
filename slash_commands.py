@@ -365,7 +365,61 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             # Atualiza a tabela
             channel = bot.get_channel(config['table_channel_id'])
             if channel:
-                await update_table_func(channel, guild_id=guild_id)
+                # CORREÇÃO: Verificar se temos a função de update_table
+                try:
+                    # Se estiver usando a função passada por parâmetro
+                    if update_table_func:
+                        await update_table_func(channel, guild_id=guild_id)
+                    else:
+                        # Criar função de update dinamicamente
+                        async def update_table_dynamic():
+                            server_data = boss_timers.get(guild_id, {})
+                            server_user_stats = user_stats.get(guild_id, {})
+                            server_user_notifications = user_notifications.get(guild_id, {})
+                            
+                            embed = create_boss_embed_func(server_data)
+                            
+                            # Buscar a mensagem da tabela
+                            try:
+                                msg = await channel.fetch_message(config['table_message_id'])
+                                view = BossControlView(
+                                    bot,
+                                    server_data,
+                                    server_user_stats,
+                                    server_user_notifications,
+                                    msg,
+                                    config['table_channel_id'],
+                                    lambda: None,
+                                    lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
+                                    lambda: create_ranking_embed_func(server_user_stats),
+                                    lambda: create_history_embed_func(bot, server_data),
+                                    lambda: create_unrecorded_embed_func(bot, server_data)
+                                )
+                                
+                                await msg.edit(embed=embed, view=view)
+                            except discord.NotFound:
+                                # Se a mensagem não existe, enviar nova
+                                view = BossControlView(
+                                    bot,
+                                    server_data,
+                                    server_user_stats,
+                                    server_user_notifications,
+                                    None,
+                                    config['table_channel_id'],
+                                    lambda: None,
+                                    lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
+                                    lambda: create_ranking_embed_func(server_user_stats),
+                                    lambda: create_history_embed_func(bot, server_data),
+                                    lambda: create_unrecorded_embed_func(bot, server_data)
+                                )
+                                
+                                new_msg = await channel.send(embed=embed, view=view)
+                                # Atualizar config com nova mensagem
+                                await set_server_config(guild_id, config['notification_channel_id'], config['table_channel_id'], new_msg.id)
+                        
+                        await update_table_dynamic()
+                except Exception as e:
+                    logger.error(f"Erro ao atualizar tabela após registro: {e}")
             
         except Exception as e:
             logger.error(f"Erro no comando slash registro: {e}", exc_info=True)
@@ -912,8 +966,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                         )
                 else:
                     await interaction.response.send_message(
-                        f"ℹ Você já está sendo notificado para **{boss_name}**.",
-                        ephemeral=True
+                        f"ℹ Você já está sendo notificado para **{boss_name}**.",                        ephemeral=True
                     )
             
             elif action.lower() in ['rem', 'remover', 'r']:

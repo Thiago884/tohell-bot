@@ -53,15 +53,34 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
     """Cria embed com a tabela de timers de boss (função síncrona)"""
     now = datetime.now(brazil_tz)
     
+    # CORREÇÃO: Verificar se boss_timers é um dicionário por servidor
+    # ou se é um dicionário de dicionários (multi-servidor)
+    if not boss_timers:
+        embed = discord.Embed(
+            title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
+            description="Nenhum boss registrado ainda.",
+            color=discord.Color.gold()
+        )
+        return embed
+    
+    # Verificar estrutura do dicionário
+    if isinstance(boss_timers, dict) and boss_timers:
+        first_key = next(iter(boss_timers))
+        is_multi_guild = isinstance(first_key, int)  # Se a chave é um ID de guild
+        
+        if is_multi_guild:
+            # Este caso não deve acontecer aqui, a função deve receber dados de UM servidor
+            embed = discord.Embed(
+                title="Erro",
+                description="Dados em formato incorreto para esta função",
+                color=discord.Color.red()
+            )
+            return embed
+    
     embed = discord.Embed(
         title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
         color=discord.Color.gold()
     )
-    
-    # CORREÇÃO: Usar os bosses que realmente existem no dicionário, não uma lista fixa
-    if not boss_timers:
-        embed.description = "Nenhum boss registrado ainda."
-        return embed
     
     # Lista de bosses na ordem desejada - mas apenas os que existem
     boss_order = [
