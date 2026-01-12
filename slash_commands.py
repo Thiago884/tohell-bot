@@ -14,7 +14,7 @@ from database import (
     save_timer, save_user_stats, clear_timer, 
     add_user_notification, remove_user_notification, load_db_data,
     add_sala_to_all_bosses, remove_sala_from_all_bosses, create_backup, restore_backup,
-    set_server_config, get_server_config, get_user_notifications
+    set_server_config, get_server_config, get_user_notifications, migrate_database_to_multitenant
 )
 from views import BossControlView
 from discord.app_commands import CommandAlreadyRegistered
@@ -94,6 +94,271 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         except Exception as e:
             logger.error(f"Erro no autocomplete de salas: {e}")
             return []
+    
+    # ==============================================================================
+    # NOVO COMANDO: /boss (Gerenciamento Principal)
+    # ==============================================================================
+    @app_commands.command(name="boss", description="Gerencia timers de bosses")
+    @app_commands.describe(
+        acao="Ação a realizar (marcar/check/lista)",
+        boss="Nome ou abreviação do boss",
+        sala="Número da sala (opcional)",
+        tempo="Tempo restante ou morte (ex: 10:30, 2h 30m)"
+    )
+    @app_commands.choices(acao=[
+        app_commands.Choice(name="Marcar Timer", value="marcar"),
+        app_commands.Choice(name="Verificar Status", value="check"),
+        app_commands.Choice(name="Listar Bosses", value="lista")
+    ])
+    async def boss(interaction: discord.Interaction, acao: str, boss: str = None, sala: int = None, tempo: str = None):
+        try:
+            guild_id = interaction.guild_id
+            
+            # Verifica se o servidor tem configuração
+            config = await get_server_config(guild_id)
+            if not config:
+                await interaction.response.send_message(
+                    "⚠️ Bot não configurado neste servidor! Use `/setup` primeiro.",
+                    ephemeral=True
+                )
+                return
+            
+            # Inicializa dados do servidor se não existirem
+            if guild_id not in boss_timers:
+                boss_timers[guild_id] = {}
+            if guild_id not in user_stats:
+                user_stats[guild_id] = {}
+            
+            # --- AÇÃO: LISTA ---
+            if acao == "lista":
+                if guild_id in boss_timers and boss_timers[guild_id]:
+                    bosses_list = list(boss_timers[guild_id].keys())
+                else:
+                    bosses_list = [
+                        "Hydra", "Phoenix of Darkness", "Genocider", "Death Beam Knight", 
+                        "Hell Maine", "Super Red Dragon", "Illusion of Kundun", 
+                        "Rei Kundun", "Erohim"
+                    ]
+                await interaction.response.send_message(
+                    f"📋 **Lista de Bosses Suportados:**\n" + "\n".join([f"• {b}" for b in bosses_list]),
+                    ephemeral=True
+                )
+                return
+
+            # Para outras ações, boss é obrigatório
+            if not boss:
+                await interaction.response.send_message("❌ Você precisa especificar o nome do boss!", ephemeral=True)
+                return
+
+            # Usar a lista de bosses disponíveis para este servidor
+            available_bosses = boss_timers.get(guild_id, {})
+            boss_name = get_boss_by_abbreviation(boss, available_bosses)
+            if not boss_name:
+                await interaction.response.send_message(f"❌ Boss '{boss}' não encontrado! Use /boss lista para ver os disponíveis.", ephemeral=True)
+                return
+
+            # --- AÇÃO: CHECK ---
+            if acao == "check":
+                if boss_name not in boss_timers[guild_id]:
+                    await interaction.response.send_message(f"ℹ️ Nenhum registro encontrado para {boss_name}.", ephemeral=True)
+                    return
+
+                embed = discord.Embed(title=f"🔎 Status: {boss_name}", color=discord.Color.blue())
+                found_any = False
+                
+                for s, info in boss_timers[guild_id][boss_name].items():
+                    if sala and s != sala:
+                        continue
+                    
+                    status = "✅ Vivo"
+                    death_time_str = "N/A"
+                    respawn_time_str = "N/A"
+                    
+                    if info['death_time']:
+                        death_dt = info['death_time'].astimezone(brazil_tz)
+                        death_time_str = death_dt.strftime('%d/%m %H:%M')
+                        
+                        if info['respawn_time']:
+                            respawn_dt = info['respawn_time'].astimezone(brazil_tz)
+                            now = datetime.now(brazil_tz)
+                            if now < respawn_dt:
+                                remaining = respawn_dt - now
+                                hours = remaining.seconds // 3600
+                                minutes = (remaining.seconds % 3600) // 60
+                                status = f"⏳ Nasce em {hours}h{minutes}m"
+                                respawn_time_str = respawn_dt.strftime('%d/%m %H:%M')
+                            else:
+                                if info['closed_time'] and now < info['closed_time']:
+                                    status = "✅ **ABERTO**"
+                                    respawn_time_str = f"{respawn_dt.strftime('%H:%M')} (Até {info['closed_time'].strftime('%H:%M')})"
+                                else:
+                                    status = "✅ Nasceu"
+                                    respawn_time_str = f"{respawn_dt.strftime('%H:%M')} (Já passou)"
+                    
+                    embed.add_field(
+                        name=f"Sala {s}",
+                        value=f"**Status:** {status}\n**Morte:** {death_time_str}\n**Respawn:** {respawn_time_str}\n**Morto por:** {info.get('recorded_by', 'Desconhecido')}",
+                        inline=False
+                    )
+                    found_any = True
+                
+                if not found_any:
+                    await interaction.response.send_message(f"❌ Sala {sala} não encontrada para {boss_name}.", ephemeral=True)
+                else:
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
+
+            # --- AÇÃO: MARCAR ---
+            if acao == "marcar":
+                if not sala:
+                    await interaction.response.send_message("❌ Para marcar, você precisa especificar a sala!", ephemeral=True)
+                    return
+                
+                # Verifica se a sala existe para este boss
+                if boss_name not in boss_timers[guild_id] or sala not in boss_timers[guild_id][boss_name]:
+                    await interaction.response.send_message(f"❌ Sala {sala} inválida para {boss_name}.", ephemeral=True)
+                    return
+                
+                if not tempo:
+                    # Se não informar tempo, assume morte agora
+                    death_time = datetime.now(brazil_tz)
+                else:
+                    # Tentar parsear o tempo
+                    time_parts = parse_time_input(tempo)
+                    if not time_parts:
+                        await interaction.response.send_message("❌ Formato de tempo inválido! Use HH:MM, HHhMM ou 'agora'.", ephemeral=True)
+                        return
+                    
+                    hour, minute = time_parts
+                    now = datetime.now(brazil_tz)
+                    death_time = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                    
+                    # Se o horário for no futuro, assume que foi ontem
+                    if death_time > now:
+                        death_time -= timedelta(days=1)
+                
+                # Calcular respawn (8 horas após a morte)
+                respawn_time = death_time + timedelta(hours=8)
+                closed_time = respawn_time + timedelta(hours=4)
+                
+                # Salvar no banco e memória
+                boss_timers[guild_id][boss_name][sala] = {
+                    'death_time': death_time,
+                    'respawn_time': respawn_time,
+                    'closed_time': closed_time,
+                    'recorded_by': interaction.user.name,
+                    'opened_notified': False
+                }
+                
+                # Atualizar estatísticas do usuário
+                user_id = str(interaction.user.id)
+                if user_id not in user_stats[guild_id]:
+                    user_stats[guild_id][user_id] = {'count': 0, 'last_recorded': None, 'username': interaction.user.name}
+                user_stats[guild_id][user_id]['count'] += 1
+                user_stats[guild_id][user_id]['last_recorded'] = datetime.now(brazil_tz)
+                
+                # Salvar no banco
+                await save_timer(guild_id, boss_name, sala, death_time, respawn_time, closed_time, interaction.user.name)
+                await save_user_stats(guild_id, user_id, interaction.user.name, user_stats[guild_id][user_id]['count'], datetime.now(brazil_tz))
+                
+                await interaction.response.send_message(
+                    f"✅ **{boss_name}** (Sala {sala}) marcado!\n"
+                    f"💀 Morte: {death_time.strftime('%d/%m %H:%M')}\n"
+                    f"🔄 Abre: {respawn_time.strftime('%d/%m %H:%M')}\n"
+                    f"🔒 Fecha: {closed_time.strftime('%d/%m %H:%M')}"
+                )
+                
+                # Atualizar tabela visual
+                channel = bot.get_channel(config['table_channel_id'])
+                if channel:
+                    await update_table_func(channel, guild_id=guild_id)
+                    
+        except Exception as e:
+            logger.error(f"Erro no comando /boss: {e}", exc_info=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "Ocorreu um erro ao processar seu comando.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    "Ocorreu um erro ao processar seu comando.",
+                    ephemeral=True
+                )
+    
+    # ==============================================================================
+    # COMANDO: /registro (Configuração do Canal) - ALTERNATIVO AO SETUP
+    # ==============================================================================
+    @app_commands.command(name="registro_canal", description="Define o canal oficial para a tabela de bosses")
+    @app_commands.describe(canal="Canal onde a tabela será enviada (opcional, padrão é o atual)")
+    async def registro_canal(interaction: discord.Interaction, canal: discord.TextChannel = None):
+        try:
+            if not interaction.user.guild_permissions.administrator:
+                await interaction.response.send_message("❌ Apenas administradores podem usar este comando.", ephemeral=True)
+                return
+
+            guild_id = interaction.guild_id
+            target_channel = canal or interaction.channel
+            
+            # Verifica se já existe configuração
+            config = await get_server_config(guild_id)
+            notification_channel_id = config['notification_channel_id'] if config else interaction.channel_id
+            
+            # Usar o setup existente
+            await interaction.response.defer(ephemeral=True)
+            
+            # Inicializa estrutura na memória se não existir
+            if guild_id not in boss_timers:
+                boss_timers[guild_id] = {}
+                user_stats[guild_id] = {}
+                user_notifications[guild_id] = {}
+            
+            try:
+                # Envia a tabela inicial
+                embed = create_boss_embed_func(boss_timers.get(guild_id, {}))
+                view = BossControlView(
+                    bot,
+                    boss_timers[guild_id],
+                    user_stats.get(guild_id, {}),
+                    user_notifications.get(guild_id, {}),
+                    None,
+                    notification_channel_id,
+                    lambda channel: update_table_func(channel, guild_id=guild_id),
+                    lambda: create_next_bosses_embed_func(boss_timers.get(guild_id, {})),
+                    lambda: create_ranking_embed_func(user_stats.get(guild_id, {})),
+                    lambda: create_history_embed_func(bot, boss_timers.get(guild_id, {})),
+                    lambda: create_unrecorded_embed_func(bot, boss_timers.get(guild_id, {}))
+                )
+                msg = await target_channel.send(embed=embed, view=view)
+                
+                # Salva configuração no banco
+                success = await set_server_config(guild_id, notification_channel_id, target_channel.id, msg.id)
+                
+                if success:
+                    await interaction.followup.send(
+                        f"✅ Canal de registros definido para: {target_channel.mention}\n"
+                        "A tabela será atualizada automaticamente.",
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.followup.send("❌ Erro ao salvar configurações no banco de dados.", ephemeral=True)
+                    
+            except Exception as e:
+                logger.error(f"Erro no comando registro_canal: {e}", exc_info=True)
+                await interaction.followup.send(f"❌ Erro: {str(e)}", ephemeral=True)
+                
+        except Exception as e:
+            logger.error(f"Erro no comando registro_canal: {e}", exc_info=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "Ocorreu um erro ao configurar o canal.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    "Ocorreu um erro ao configurar o canal.",
+                    ephemeral=True
+                )
     
     # --- NOVO COMANDO: SETUP ---
     @bot.tree.command(name="setup", description="Configura os canais do bot neste servidor")
@@ -1223,8 +1488,20 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             )
             
             embed.add_field(
+                name="/boss <ação> [boss] [sala] [tempo]",
+                value="Comando principal para gerenciar bosses:\n• **marcar** - Registra morte de boss\n• **check** - Verifica status\n• **lista** - Lista todos bosses",
+                inline=False
+            )
+            
+            embed.add_field(
                 name="/setup <canal_tabela> <canal_notificacao>",
                 value="Configura os canais do bot neste servidor (apenas admins)",
+                inline=False
+            )
+            
+            embed.add_field(
+                name="/registro_canal [canal]",
+                value="Define o canal oficial para a tabela de bosses (apenas admins)",
                 inline=False
             )
             
@@ -1323,3 +1600,21 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     "Ocorreu um erro ao exibir a ajuda.",
                     ephemeral=True
                 )
+    
+    # ==============================================================================
+    # REGISTRO DOS NOVOS COMANDOS NA ÁRVORE
+    # ==============================================================================
+    try:
+        # Adiciona o comando /boss
+        bot.tree.add_command(boss)
+        logger.info("Comando /boss adicionado à árvore.")
+
+        # Adiciona o comando /registro_canal (alternativo ao setup)
+        bot.tree.add_command(registro_canal)
+        logger.info("Comando /registro_canal adicionado à árvore.")
+        
+    except CommandAlreadyRegistered:
+        logger.warning("Tentativa de registrar comando duplicado ignorada.")
+    except Exception as e:
+        logger.error(f"Erro fatal ao adicionar novos comandos slash: {e}")
+        traceback.print_exc()

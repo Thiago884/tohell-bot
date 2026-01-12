@@ -100,11 +100,13 @@ async def load_all_salas_for_guild(guild_id):
     if guild_id not in boss_timers:
         boss_timers[guild_id] = {}
     
+    # Se não houver dados para este guild, inicialize com estrutura vazia
     for boss in BOSSES:
         if boss not in boss_timers[guild_id]:
             boss_timers[guild_id][boss] = {}
         
         for sala in all_salas:
+            # Regras especiais para sala 20
             if boss == "Erohim" and sala != 20:
                 continue
             if boss not in ["Genocider", "Super Red Dragon", "Hell Maine", "Death Beam Knight", "Erohim"] and sala == 20:
@@ -236,18 +238,21 @@ async def on_ready():
         
         logger.info("✅ Dados carregados com sucesso!")
         
-        # 2. Configurar comandos slash SEM verificação condicional
+        # 2. Configurar comandos slash
         logger.info("Configurando comandos Slash...")
+        
+        # Configurar comando drops
         await setup_drops_command(bot)
         
-        # Configurar comandos principais
+        # Configurar comandos principais do slash_commands.py
+        from slash_commands import setup_slash_commands
         await setup_slash_commands(
             bot, 
             boss_timers, 
             user_stats, 
             user_notifications,
             None,
-            None,
+            0,
             create_boss_embed,
             lambda channel, guild_id=None: None,  # Placeholder
             create_next_bosses_embed,
@@ -259,12 +264,18 @@ async def on_ready():
         # 3. Sincronizar comandos GLOBALMENTE
         logger.info("Sincronizando comandos com o Discord...")
         
-        # Limpar comandos existentes primeiro
-        bot.tree.clear_commands(guild=None)
-        
         # Sincronizar globalmente
         synced = await bot.tree.sync()
         logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente!")
+        
+        # Sincronizar por servidor também
+        for guild in bot.guilds:
+            try:
+                bot.tree.copy_global_to(guild=guild)
+                synced_guild = await bot.tree.sync(guild=guild)
+                logger.info(f"  ✅ {len(synced_guild)} comandos sincronizados no servidor {guild.name}")
+            except Exception as e:
+                logger.error(f"  ❌ Erro ao sincronizar no servidor {guild.name}: {e}")
         
         # 4. Iniciar tasks de background
         logger.info("\nIniciando tasks de background...")
