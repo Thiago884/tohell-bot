@@ -32,6 +32,58 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                              create_boss_embed_func, update_table_func, create_next_bosses_embed_func,
                              create_ranking_embed_func, create_history_embed_func, create_unrecorded_embed_func):
     
+    async def update_table_fallback(channel, guild_id):
+        """Função de fallback para atualizar tabela quando update_table_func é None"""
+        try:
+            config = await get_server_config(guild_id)
+            if not config:
+                return
+            
+            server_data = boss_timers.get(guild_id, {})
+            server_user_stats = user_stats.get(guild_id, {})
+            server_user_notifications = user_notifications.get(guild_id, {})
+            
+            embed = create_boss_embed_func(server_data)
+            
+            # Buscar mensagem da tabela
+            try:
+                msg = await channel.fetch_message(config['table_message_id'])
+                view = BossControlView(
+                    bot,
+                    server_data,
+                    server_user_stats,
+                    server_user_notifications,
+                    msg,
+                    config['table_channel_id'],
+                    lambda: update_table_fallback(channel, guild_id),
+                    lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
+                    lambda: create_ranking_embed_func(server_user_stats),
+                    lambda: create_history_embed_func(bot, server_data),
+                    lambda: create_unrecorded_embed_func(bot, server_data)
+                )
+                
+                await msg.edit(embed=embed, view=view)
+            except discord.NotFound:
+                # Se mensagem não existe, enviar nova
+                view = BossControlView(
+                    bot,
+                    server_data,
+                    server_user_stats,
+                    server_user_notifications,
+                    None,
+                    config['table_channel_id'],
+                    lambda: update_table_fallback(channel, guild_id),
+                    lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
+                    lambda: create_ranking_embed_func(server_user_stats),
+                    lambda: create_history_embed_func(bot, server_data),
+                    lambda: create_unrecorded_embed_func(bot, server_data)
+                )
+                
+                new_msg = await channel.send(embed=embed, view=view)
+                await set_server_config(guild_id, config['notification_channel_id'], config['table_channel_id'], new_msg.id)
+        except Exception as e:
+            logger.error(f"Erro no update_table_fallback para servidor {guild_id}: {e}")
+    
     # Autocomplete para nomes de bosses - CORRIGIDA
     async def boss_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
         """Autocomplete para nomes de bosses - CORRIGIDA"""
@@ -790,55 +842,17 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 # Atualiza a tabela
                 channel = bot.get_channel(config['table_channel_id'])
                 if channel:
+                    # VERIFICAÇÃO DE SEGURANÇA
                     if update_table_func:
-                        await update_table_func(channel, guild_id=guild_id)
+                        try:
+                            await update_table_func(channel, guild_id=guild_id)
+                        except Exception as e:
+                            logger.error(f"Erro ao chamar update_table_func: {e}")
+                            # Tenta usar a função de fallback
+                            await update_table_fallback(channel, guild_id)
                     else:
-                        # Se update_table_func não foi passado, criar dinamicamente
-                        async def update_table_dynamic():
-                            server_data = boss_timers.get(guild_id, {})
-                            server_user_stats = user_stats.get(guild_id, {})
-                            server_user_notifications = user_notifications.get(guild_id, {})
-                            
-                            embed = create_boss_embed_func(server_data)
-                            
-                            # Buscar mensagem da tabela
-                            try:
-                                msg = await channel.fetch_message(config['table_message_id'])
-                                view = BossControlView(
-                                    bot,
-                                    server_data,
-                                    server_user_stats,
-                                    server_user_notifications,
-                                    msg,
-                                    config['table_channel_id'],
-                                    lambda: None,
-                                    lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
-                                    lambda: create_ranking_embed_func(server_user_stats),
-                                    lambda: create_history_embed_func(bot, server_data),
-                                    lambda: create_unrecorded_embed_func(bot, server_data)
-                                )
-                                
-                                await msg.edit(embed=embed, view=view)
-                            except discord.NotFound:
-                                # Se mensagem não existe, enviar nova
-                                view = BossControlView(
-                                    bot,
-                                    server_data,
-                                    server_user_stats,
-                                    server_user_notifications,
-                                    None,
-                                    config['table_channel_id'],
-                                    lambda: None,
-                                    lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
-                                    lambda: create_ranking_embed_func(server_user_stats),
-                                    lambda: create_history_embed_func(bot, server_data),
-                                    lambda: create_unrecorded_embed_func(bot, server_data)
-                                )
-                                
-                                new_msg = await channel.send(embed=embed, view=view)
-                                await set_server_config(guild_id, config['notification_channel_id'], config['table_channel_id'], new_msg.id)
-                        
-                        await update_table_dynamic()
+                        # Fallback se update_table_func for None
+                        await update_table_fallback(channel, guild_id)
             
         except Exception as e:
             logger.error(f"Erro no comando slash managesalas: {e}", exc_info=True)

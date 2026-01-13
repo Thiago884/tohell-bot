@@ -161,44 +161,26 @@ async def initialize_server(guild_id):
     try:
         logger.info(f"Inicializando servidor {guild_id}")
         
-        # Verificar se já existe no banco
+        # Inicializar os dados do servidor primeiro
+        await initialize_guild_data(guild_id)
+        
         config = await get_server_config(guild_id)
         
         if config:
-            # Servidor já tem configuração no banco
             server_configs[guild_id] = {
                 'notification_channel_id': config['notification_channel_id'],
                 'table_channel_id': config['table_channel_id'],
                 'table_message_id': config['table_message_id']
             }
-            
-            # Verificar se já tem dados no banco
-            if guild_id not in boss_timers:
-                # Tentar carregar dados específicos deste servidor
-                from database import load_db_data
-                temp_boss = {}
-                temp_user = {}
-                temp_notif = {}
-                
-                if await load_db_data(temp_boss, temp_user, temp_notif, guild_id):
-                    if guild_id in temp_boss:
-                        boss_timers[guild_id] = temp_boss[guild_id]
-                    if guild_id in temp_user:
-                        user_stats[guild_id] = temp_user[guild_id]
-                    if guild_id in temp_notif:
-                        user_notifications[guild_id] = temp_notif[guild_id]
-                    logger.info(f"Dados do servidor {guild_id} carregados do banco")
         else:
-            # Servidor novo, inicializar estruturas vazias
             server_configs[guild_id] = {
                 'notification_channel_id': None,
                 'table_channel_id': None,
                 'table_message_id': None
             }
-            
-            # Inicializar estruturas de dados vazias
-            await initialize_guild_data(guild_id)
         
+        # Carregar salas específicas
+        await load_all_salas_for_guild(guild_id)
         return True
     except Exception as e:
         logger.error(f"Erro ao inicializar servidor {guild_id}: {e}")
@@ -309,46 +291,37 @@ async def on_ready():
         await migrate_database_to_multitenant()
         
         logger.info("Carregando dados de todos os servidores...")
+        # CORREÇÃO: Carregar dados de TODOS os servidores primeiro
+        all_configs = await get_all_server_configs()
         
-        # CORREÇÃO: Carregar todos os dados do banco primeiro
-        all_data = await load_all_server_data()
-        
-        if all_data:
-            # Converter estrutura para o formato correto
-            for guild_id, guild_data in all_data.items():
-                # Inicializar estruturas para este servidor
-                if guild_id not in boss_timers:
-                    boss_timers[guild_id] = {}
-                
-                # Adicionar bosses do banco
-                for boss_name, salas_data in guild_data.items():
-                    if boss_name not in boss_timers[guild_id]:
-                        boss_timers[guild_id][boss_name] = {}
-                    
-                    for sala, timer_data in salas_data.items():
-                        boss_timers[guild_id][boss_name][sala] = timer_data
-            
-            logger.info(f"✅ Dados carregados para {len(boss_timers)} servidores do banco de dados")
+        if all_configs:
+            # Para cada configuração de servidor no banco, carregar os dados
+            for config in all_configs:
+                guild_id = config['guild_id']
+                await initialize_server(guild_id)
         else:
-            # Se não houver dados no banco, inicializar estruturas vazias
-            for guild in bot.guilds:
-                await initialize_server(guild.id)
-            logger.info("✅ Estruturas de dados inicializadas para novos servidores")
+            # Se não houver configurações, carregar dados de todos os servidores
+            success = await load_db_data(boss_timers, user_stats, user_notifications)
+            if success:
+                logger.info(f"Dados carregados para {len(boss_timers)} servidores")
+                
+                # Para cada servidor do bot, garantir que os dados estão inicializados
+                for guild in bot.guilds:
+                    await initialize_server(guild.id)
+            else:
+                logger.error("Falha ao carregar dados do banco")
         
         # CORREÇÃO: Carregar configurações de todos os servidores
-        all_configs = await get_all_server_configs()
-        for config in all_configs:
-            guild_id = config['guild_id']
-            server_configs[guild_id] = {
-                'notification_channel_id': config.get('notification_channel_id'),
-                'table_channel_id': config.get('table_channel_id'),
-                'table_message_id': config.get('table_message_id')
-            }
-        
-        # CORREÇÃO: Carregar user_stats e user_notifications
-        success = await load_db_data(boss_timers, user_stats, user_notifications)
-        if success:
-            logger.info(f"✅ Estatísticas e notificações carregadas para {len(user_stats)} servidores")
+        for guild_id in boss_timers.keys():
+            config = await get_server_config(guild_id)
+            if config:
+                server_configs[guild_id] = {
+                    'notification_channel_id': config.get('notification_channel_id'),
+                    'table_channel_id': config.get('table_channel_id'),
+                    'table_message_id': config.get('table_message_id')
+                }
+            else:
+                server_configs[guild_id] = {'notification_channel_id': None, 'table_channel_id': None, 'table_message_id': None}
         
         logger.info("✅ Dados carregados com sucesso!")
         
@@ -358,12 +331,9 @@ async def on_ready():
         # Configurar comando drops
         await setup_drops_command(bot)
         
-        # Configurar comandos principais do slash_commands.py
-        from slash_commands import setup_slash_commands
-        
-        # CORREÇÃO: Criar função de update_table dinâmica para cada servidor
-        async def create_update_table_for_guild(guild_id):
-            async def update_table_func_for_guild(channel, guild_id=guild_id):
+        # CORREÇÃO: Criar função de update_table para cada servidor
+        def create_update_table_func_for_guild(guild_id):
+            async def update_table_for_guild(channel):
                 if not channel or guild_id not in boss_timers:
                     return
                 
@@ -393,7 +363,7 @@ async def on_ready():
                     server_user_notifications,
                     table_msg,
                     config['table_channel_id'],
-                    lambda ch=channel: update_table_func_for_guild(ch, guild_id=guild_id),
+                    lambda: update_table_for_guild(channel),
                     lambda: create_next_bosses_embed(server_data),
                     lambda: create_ranking_embed(server_user_stats),
                     lambda: create_history_embed(bot, server_data),
@@ -413,21 +383,32 @@ async def on_ready():
                     config['table_message_id'] = new_msg.id
                     await set_server_config(guild_id, config.get('notification_channel_id'), config['table_channel_id'], new_msg.id)
             
-            return update_table_func_for_guild
-        
-        # Criar dicionário de funções de update por servidor
+            return update_table_for_guild
+
+        # Configurar comandos principais do slash_commands.py
+        from slash_commands import setup_slash_commands
+
+        # Para cada servidor, criar função específica
         update_table_functions = {}
         for guild_id in boss_timers.keys():
-            update_table_functions[guild_id] = await create_update_table_for_guild(guild_id)
-        
-        # Passar função genérica que detecta o guild_id
-        async def generic_update_table(channel, guild_id=None):
-            if not guild_id and hasattr(channel, 'guild'):
-                guild_id = channel.guild.id
+            update_table_functions[guild_id] = create_update_table_func_for_guild(guild_id)
+
+        # Função genérica que busca a função específica do servidor
+        async def update_table_generic(channel, guild_id=None):
+            if not guild_id:
+                # Se não especificou guild_id, tenta pegar do contexto atual
+                if channel and hasattr(channel, 'guild'):
+                    guild_id = channel.guild.id
+                else:
+                    return
             
-            if guild_id and guild_id in update_table_functions:
+            if guild_id in update_table_functions:
                 await update_table_functions[guild_id](channel)
-        
+            else:
+                # Se não existir, cria uma nova função
+                update_table_functions[guild_id] = create_update_table_func_for_guild(guild_id)
+                await update_table_functions[guild_id](channel)
+
         await setup_slash_commands(
             bot, 
             boss_timers, 
@@ -436,17 +417,28 @@ async def on_ready():
             None,
             0,
             create_boss_embed,
-            generic_update_table,  # Passar a função genérica
+            update_table_generic,  # AGORA PASSANDO A FUNÇÃO CORRETA
             create_next_bosses_embed,
             create_ranking_embed,
             create_history_embed,
             create_unrecorded_embed
         )
         
-        # 3. Sincronizar comandos
+        # 3. Sincronizar comandos GLOBALMENTE
         logger.info("Sincronizando comandos com o Discord...")
+        
+        # Sincronizar globalmente
         synced = await bot.tree.sync()
         logger.info(f"✅ {len(synced)} comandos slash sincronizados globalmente!")
+        
+        # Sincronizar por servidor também
+        for guild in bot.guilds:
+            try:
+                bot.tree.copy_global_to(guild=guild)
+                synced_guild = await bot.tree.sync(guild=guild)
+                logger.info(f"  ✅ {len(synced_guild)} comandos sincronizados no servidor {guild.name}")
+            except Exception as e:
+                logger.error(f"  ❌ Erro ao sincronizar no servidor {guild.name}: {e}")
         
         # 4. Iniciar tasks de background
         logger.info("\nIniciando tasks de background...")
