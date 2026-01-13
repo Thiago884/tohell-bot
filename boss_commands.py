@@ -418,7 +418,7 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
             )
         )
 
-    @tasks.loop(minutes=30)
+    @tasks.loop(minutes=60)  # ALTERADO: De 30 para 60 minutos inicial
     async def periodic_table_update_legacy():
         """Atualiza a tabela periodicamente com novo post para servidor específico"""
         try:
@@ -436,14 +436,14 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
                 )
                 logger.info("✅ Tabela atualizada com sucesso!")
             
-            # Define um novo intervalo aleatório entre 30 e 60 minutos
-            new_interval = random.randint(30, 60)
+            # ALTERADO: Define um novo intervalo aleatório entre 60 e 240 minutos
+            new_interval = random.randint(60, 240)  # De 30-60 para 60-240
             logger.info(f"Próxima atualização em {new_interval} minutos")
             periodic_table_update_legacy.change_interval(minutes=new_interval)
         
         except Exception as e:
             logger.error(f"Erro na atualização periódica (legacy): {e}", exc_info=True)
-            periodic_table_update_legacy.change_interval(minutes=5)
+            periodic_table_update_legacy.change_interval(minutes=30)
 
     # Task de Atualização em Tempo Real para TODOS os servidores (NOVO)
     @tasks.loop(seconds=60)
@@ -557,7 +557,7 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
             logger.error(f"Erro na task de verificação multi-servidor: {e}", exc_info=True)
 
     # Task de Atualização Periódica para TODOS os servidores (NOVO)
-    @tasks.loop(minutes=30)
+    @tasks.loop(minutes=60)  # ALTERADO: De 30 para 60 minutos inicial
     async def periodic_table_update_multi():
         """Atualiza tabelas periodicamente com novo post para TODOS os servidores"""
         try:
@@ -617,15 +617,15 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
                     logger.error(f"Erro ao atualizar tabela do servidor {guild_id}: {e}")
                     # Continua para o próximo servidor
             
-            # Define um novo intervalo aleatório entre 30 e 60 minutos
-            new_interval = random.randint(30, 60)
+            # ALTERADO: Define um novo intervalo aleatório entre 60 e 240 minutos
+            new_interval = random.randint(60, 240)  # De 30-60 para 60-240
             logger.info(f"Próxima atualização em {new_interval} minutos")
             periodic_table_update_multi.change_interval(minutes=new_interval)
             
         except Exception as e:
             logger.error(f"Erro na atualização periódica multi-servidor: {e}", exc_info=True)
-            # Tenta novamente em 5 minutos se falhar
-            periodic_table_update_multi.change_interval(minutes=5)
+            # Tenta novamente em 30 minutos se falhar
+            periodic_table_update_multi.change_interval(minutes=30)
 
     # Iniciar as tasks MULTI-SERVIDOR
     live_table_updater_multi.start()
