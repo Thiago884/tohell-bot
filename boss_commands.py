@@ -7,8 +7,7 @@ from typing import Optional, Dict, List, Any
 import asyncio
 from database import save_timer, save_user_stats, clear_timer, get_all_server_configs, get_server_config
 from shared_functions import get_boss_by_abbreviation, format_time_remaining, get_next_bosses
-from utility_commands import create_unrecorded_embed
-from utility_commands import create_history_embed, create_unrecorded_embed
+from utility_commands import create_unrecorded_embed, create_history_embed
 from views import BossControlView
 import random
 import traceback
@@ -48,13 +47,11 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
     
     return False
 
-# boss_commands.py - Função create_boss_embed corrigida (VERSÃO CORRIGIDA)
 def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed:
     """Cria embed com a tabela de timers de boss (função síncrona)"""
     now = datetime.now(brazil_tz)
     
-    # CORREÇÃO: Verificar se boss_timers é um dicionário por servidor
-    # ou se é um dicionário de dicionários (multi-servidor)
+    # Verificar se boss_timers é um dicionário por servidor ou estrutura errada
     if not boss_timers:
         embed = discord.Embed(
             title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
@@ -63,13 +60,12 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
         )
         return embed
     
-    # Verificar estrutura do dicionário
+    # Verificar estrutura do dicionário para evitar erro de multi-guild na função errada
     if isinstance(boss_timers, dict) and boss_timers:
         first_key = next(iter(boss_timers))
         is_multi_guild = isinstance(first_key, int)  # Se a chave é um ID de guild
         
         if is_multi_guild:
-            # Este caso não deve acontecer aqui, a função deve receber dados de UM servidor
             embed = discord.Embed(
                 title="Erro",
                 description="Dados em formato incorreto para esta função",
@@ -82,7 +78,7 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
         color=discord.Color.gold()
     )
     
-    # Lista de bosses na ordem desejada - mas apenas os que existem
+    # Lista de bosses na ordem desejada
     boss_order = [
         "Hydra", "Phoenix of Darkness", "Genocider", "Death Beam Knight",
         "Hell Maine", "Super Red Dragon", "Illusion of Kundun", 
@@ -201,8 +197,12 @@ def create_ranking_embed(user_stats: Dict) -> discord.Embed:
 async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict, 
                       user_notifications: Dict, table_message: discord.Message, 
                       NOTIFICATION_CHANNEL_ID: int):
-    """Atualiza a mensagem da tabela de bosses (versão original mantida para compatibilidade)"""
+    """Atualiza a mensagem da tabela de bosses"""
     try:
+        # Verifica se o canal existe e temos permissão
+        if not channel:
+            return None
+            
         logger.info("Iniciando atualização da tabela de bosses...")
         embed = create_boss_embed(boss_timers)
         view = BossControlView(
@@ -249,7 +249,7 @@ async def update_table(bot, channel, boss_timers: Dict, user_stats: Dict,
 
 async def check_boss_respawns_single_server(bot, boss_timers: Dict, user_notifications: Dict, 
                                           guild_id: int, update_table_func):
-    """Verifica os respawns de boss para um servidor específico"""
+    """Verifica os respawns de boss para um servidor específico - CORRIGIDO"""
     try:
         # Busca configuração do servidor
         config = await get_server_config(guild_id)
@@ -279,11 +279,14 @@ async def check_boss_respawns_single_server(bot, boss_timers: Dict, user_notific
                         notifications.append(f"🟡 **{boss} (Sala {sala})** estará disponível em {time_left} ({respawn_time:%d/%m %H:%M} BRT){recorded_by}")
                     
                     # Notificação de abertura
+                    # CORREÇÃO: Lógica estrita (now < closed_time)
                     if now >= respawn_time and closed_time is not None and now < closed_time:
                         if not timers.get('opened_notified', False):
                             recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
                             notifications.append(f"🟢 **{boss} (Sala {sala})** está disponível AGORA! (aberto até {closed_time:%d/%m %H:%M} BRT){recorded_by}")
+                            
                             boss_timers[boss][sala]['opened_notified'] = True
+                            
                             await save_timer(guild_id, boss, sala, timers['death_time'], respawn_time, closed_time, timers['recorded_by'], True)
                             
                             for user_id in user_notifications:
@@ -297,29 +300,35 @@ async def check_boss_respawns_single_server(bot, boss_timers: Dict, user_notific
                                     })
                     
                     # Notificação de fechamento
-                    if closed_time is not None and abs((now - closed_time).total_seconds()) < 60:
-                        message = f"🔴 **{boss} (Sala {sala})** FECHOU"
-                        if not timers.get('opened_notified', False):
-                            message += " sem nenhuma anotação durante o período aberto!"
-                        else:
-                            message += "!"
+                    # CORREÇÃO: Lógica estrita (now >= closed_time) e flag de controle (closed_processed)
+                    if closed_time is not None and now >= closed_time:
+                        # Verifica se estamos na janela de 120 segundos após o fechamento para enviar a notificação
+                        if (now - closed_time).total_seconds() < 120:
+                            # Se ainda não processamos o fechamento em memória
+                            if not timers.get('closed_processed', False):
+                                message = f"🔴 **{boss} (Sala {sala})** FECHOU"
+                                if not timers.get('opened_notified', False):
+                                    message += " sem nenhuma anotação durante o período aberto!"
+                                else:
+                                    message += "!"
 
-                        notifications.append(message)
-                        
-                        # Apenas marca que foi fechado, sem apagar os horários
-                        boss_timers[boss][sala]['opened_notified'] = False
+                                notifications.append(message)
+                                
+                                # Atualiza flags em memória
+                                boss_timers[boss][sala]['opened_notified'] = False
+                                boss_timers[boss][sala]['closed_processed'] = True # Impede spam no próximo loop
 
-                        # Atualiza no banco com os mesmo dados (para manter integridade)
-                        await save_timer(
-                            guild_id,
-                            boss,
-                            sala,
-                            timers['death_time'],
-                            timers['respawn_time'],
-                            timers['closed_time'],
-                            timers['recorded_by'],
-                            False
-                        )
+                                # Atualiza no banco definindo opened_notified = False (para histórico/reinicialização)
+                                await save_timer(
+                                    guild_id,
+                                    boss,
+                                    sala,
+                                    timers['death_time'],
+                                    timers['respawn_time'],
+                                    timers['closed_time'],
+                                    timers['recorded_by'],
+                                    False
+                                )
 
         if notifications:
             message = "**Notificações de Boss:**\n" + "\n".join(notifications)
@@ -365,10 +374,10 @@ async def check_boss_respawns_single_server(bot, boss_timers: Dict, user_notific
 async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict, 
                             user_notifications: Dict, table_message: discord.Message, 
                             NOTIFICATION_CHANNEL_ID: int):
-    """Configura todas as funcionalidades relacionadas a bosses (versão original mantida para compatibilidade)"""
+    """Configura todas as funcionalidades relacionadas a bosses"""
     
-    # Verifica se a tabela já foi enviada
-    if table_message is None:
+    # Verifica se a tabela já foi enviada (Modo Legacy)
+    if table_message is None and NOTIFICATION_CHANNEL_ID != 0:
         channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
         if channel:
             table_message = await update_table(
@@ -382,6 +391,8 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     async def live_table_updater_legacy():
         """Atualiza a tabela periodicamente para servidor específico"""
         try:
+            if NOTIFICATION_CHANNEL_ID == 0: return
+            
             channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
             if channel:
                 nonlocal table_message
@@ -395,9 +406,11 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     @tasks.loop(minutes=1)
     async def check_boss_respawns_task_legacy():
         """Task para verificar respawns de bosses para servidor específico"""
+        if NOTIFICATION_CHANNEL_ID == 0: return
+        
         await check_boss_respawns_single_server(
             bot, boss_timers, user_notifications, 
-            0,  # guild_id placeholder (será obtido de config no main.py)
+            0,  # guild_id placeholder
             lambda: update_table(
                 bot, bot.get_channel(NOTIFICATION_CHANNEL_ID), 
                 boss_timers, user_stats, user_notifications, 
@@ -409,6 +422,8 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     async def periodic_table_update_legacy():
         """Atualiza a tabela periodicamente com novo post para servidor específico"""
         try:
+            if NOTIFICATION_CHANNEL_ID == 0: return
+
             logger.info("\nIniciando atualização periódica da tabela (legacy)...")
             channel = bot.get_channel(NOTIFICATION_CHANNEL_ID)
             if channel:
@@ -420,8 +435,6 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
                     user_notifications, table_message, NOTIFICATION_CHANNEL_ID
                 )
                 logger.info("✅ Tabela atualizada com sucesso!")
-            else:
-                logger.info(f"Canal com ID {NOTIFICATION_CHANNEL_ID} não encontrado!")
             
             # Define um novo intervalo aleatório entre 30 e 60 minutos
             new_interval = random.randint(30, 60)
@@ -430,7 +443,6 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
         
         except Exception as e:
             logger.error(f"Erro na atualização periódica (legacy): {e}", exc_info=True)
-            # Tenta novamente em 5 minutos se falhar
             periodic_table_update_legacy.change_interval(minutes=5)
 
     # Task de Atualização em Tempo Real para TODOS os servidores (NOVO)
@@ -481,7 +493,6 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
                     logger.warning(f"Sem permissões para editar mensagem no servidor {guild_id}")
                 except Exception as e:
                     logger.error(f"Erro ao atualizar tabela do servidor {guild_id}: {e}")
-                    # Continua para o próximo servidor
                     
         except Exception as e:
             logger.error(f"Erro na task de atualização multi-servidor: {e}", exc_info=True)
@@ -621,10 +632,11 @@ async def setup_boss_commands(bot, boss_timers: Dict, user_stats: Dict,
     check_boss_respawns_task_multi.start()
     periodic_table_update_multi.start()
 
-    # Iniciar as tasks LEGACY (para compatibilidade)
-    check_boss_respawns_task_legacy.start()
-    live_table_updater_legacy.start()
-    periodic_table_update_legacy.start()
+    # Iniciar as tasks LEGACY (para compatibilidade, apenas se ID configurado)
+    if NOTIFICATION_CHANNEL_ID != 0:
+        check_boss_respawns_task_legacy.start()
+        live_table_updater_legacy.start()
+        periodic_table_update_legacy.start()
 
     # Função para cancelar tasks
     async def shutdown_tasks():
