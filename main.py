@@ -305,22 +305,23 @@ async def on_ready():
             if guild_id not in user_notifications:
                 user_notifications[guild_id] = {}
         
-        # 3. Carregar dados do banco
+        # 3. Carregar dados do banco e configs
         logger.info("Carregando dados de todos os servidores...")
         all_configs = await get_all_server_configs()
         
         if all_configs:
-            # Para cada configuração de servidor no banco, carregar os dados
+            # Inicializa a estrutura base para os servidores configurados
             for config in all_configs:
                 guild_id = config['guild_id']
                 await initialize_server(guild_id)
+        
+        # CORREÇÃO: Carregar dados do banco SEMPRE, independente de haver configs ou não
+        logger.info("Buscando dados salvos no banco de dados...")
+        success = await load_db_data(boss_timers, user_stats, user_notifications)
+        if success:
+            logger.info(f"Dados carregados para {len(boss_timers)} servidores")
         else:
-            # Se não houver configurações, carregar dados de todos os servidores
-            success = await load_db_data(boss_timers, user_stats, user_notifications)
-            if success:
-                logger.info(f"Dados carregados para {len(boss_timers)} servidores")
-            else:
-                logger.error("Falha ao carregar dados do banco")
+            logger.error("Falha ao carregar dados do banco")
         
         # 4. Carregar configurações de todos os servidores
         logger.info("Carregando configurações de todos os servidores...")

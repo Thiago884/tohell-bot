@@ -185,10 +185,10 @@ async def load_db_data(boss_timers: Dict, user_stats: Dict, user_notifications: 
             return False
         
         async with conn.cursor() as cursor:
-            # PRIMEIRO: Limpar as estruturas existentes
-            boss_timers.clear()
-            user_stats.clear()
-            user_notifications.clear()
+            # CORREÇÃO: Removido o clear() para não apagar a estrutura inicializada
+            # boss_timers.clear()
+            # user_stats.clear()
+            # user_notifications.clear()
             
             # Carregar timers de boss - sempre carregar todos os guilds
             if guild_id:
