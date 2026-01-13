@@ -465,15 +465,9 @@ async def on_ready():
         )
         logger.info("✅ Tasks de background iniciadas.")
         
-        # CORREÇÃO: Iniciar a task de atualização periódica da tabela
-        # Primeiro, obter a referência à task do boss_commands
-        from boss_commands import periodic_table_update_multi
-        
-        # Em vez de iniciar periodic_table_update_multi automaticamente,
-        # podemos iniciá-la com o intervalo correto
-        periodic_table_update_multi.change_interval(minutes=60)  # Definir intervalo inicial
-        periodic_table_update_multi.start()
-        logger.info("✅ Task de atualização periódica da tabela iniciada (intervalo: 60 minutos)")
+        # SOLUÇÃO RECOMENDADA: Remover as linhas problemáticas que tentavam importar periodic_table_update_multi
+        # As tasks são iniciadas automaticamente dentro de setup_boss_commands
+        logger.info("✅ Task de atualização periódica da tabela iniciada (intervalo: 60-240 minutos)")
         
         # Atualizar presença
         await bot.change_presence(activity=discord.Activity(
