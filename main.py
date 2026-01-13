@@ -290,8 +290,23 @@ async def on_ready():
         await init_db()
         await migrate_database_to_multitenant()
         
+        # 2. Inicializar estruturas para todos os servidores
+        logger.info("Inicializando estruturas para todos os servidores...")
+        for guild in bot.guilds:
+            guild_id = guild.id
+            
+            # Inicializar se não existir
+            if guild_id not in boss_timers:
+                boss_timers[guild_id] = {}
+            
+            if guild_id not in user_stats:
+                user_stats[guild_id] = {}
+            
+            if guild_id not in user_notifications:
+                user_notifications[guild_id] = {}
+        
+        # 3. Carregar dados do banco
         logger.info("Carregando dados de todos os servidores...")
-        # CORREÇÃO: Carregar dados de TODOS os servidores primeiro
         all_configs = await get_all_server_configs()
         
         if all_configs:
@@ -304,14 +319,11 @@ async def on_ready():
             success = await load_db_data(boss_timers, user_stats, user_notifications)
             if success:
                 logger.info(f"Dados carregados para {len(boss_timers)} servidores")
-                
-                # Para cada servidor do bot, garantir que os dados estão inicializados
-                for guild in bot.guilds:
-                    await initialize_server(guild.id)
             else:
                 logger.error("Falha ao carregar dados do banco")
         
-        # CORREÇÃO: Carregar configurações de todos os servidores
+        # 4. Carregar configurações de todos os servidores
+        logger.info("Carregando configurações de todos os servidores...")
         for guild_id in boss_timers.keys():
             config = await get_server_config(guild_id)
             if config:
@@ -325,7 +337,7 @@ async def on_ready():
         
         logger.info("✅ Dados carregados com sucesso!")
         
-        # 2. Configurar comandos slash
+        # 5. Configurar comandos slash
         logger.info("Configurando comandos Slash...")
         
         # Configurar comando drops
@@ -424,7 +436,7 @@ async def on_ready():
             create_unrecorded_embed
         )
         
-        # 3. Sincronizar comandos GLOBALMENTE
+        # 6. Sincronizar comandos GLOBALMENTE
         logger.info("Sincronizando comandos com o Discord...")
         
         # Sincronizar globalmente
@@ -440,7 +452,7 @@ async def on_ready():
             except Exception as e:
                 logger.error(f"  ❌ Erro ao sincronizar no servidor {guild.name}: {e}")
         
-        # 4. Iniciar tasks de background
+        # 7. Iniciar tasks de background
         logger.info("\nIniciando tasks de background...")
         await setup_boss_commands(
             bot, 

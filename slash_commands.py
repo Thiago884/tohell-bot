@@ -145,10 +145,14 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             return [app_commands.Choice(name=f"Sala {i}", value=i) for i in range(1, 9)][:10]
     
     # ==============================================================================
-    # COMANDO PRINCIPAL: /setup
+    # COMANDO PRINCIPAL: /setup - CORRIGIDO
     # ==============================================================================
     @bot.tree.command(name="setup", description="Configura os canais do bot neste servidor")
     @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.describe(
+        canal_tabela="Canal onde a tabela de bosses será enviada",
+        canal_notificacao="Canal para enviar notificações (opcional, usa mesmo do canal_tabela se não especificar)"
+    )
     async def setup_slash(interaction: discord.Interaction, 
                          canal_tabela: discord.TextChannel, 
                          canal_notificacao: discord.TextChannel = None):
@@ -158,7 +162,16 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             guild_id = interaction.guild_id
             
             if not guild_id:
-                await interaction.followup.send("Este comando deve ser usado em um servidor.")
+                await interaction.followup.send("Este comando deve ser usado em um servidor.", ephemeral=True)
+                return
+
+            # Verifica se os canais pertencem ao mesmo servidor
+            if canal_tabela.guild.id != guild_id:
+                await interaction.followup.send("O canal da tabela deve estar neste servidor.", ephemeral=True)
+                return
+                
+            if canal_notificacao and canal_notificacao.guild.id != guild_id:
+                await interaction.followup.send("O canal de notificações deve estar neste servidor.", ephemeral=True)
                 return
 
             # Usar o mesmo canal para ambos se canal_notificacao não for especificado
@@ -172,6 +185,22 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 user_notifications[guild_id] = {}
             
             try:
+                # Verifica permissões nos canais
+                bot_member = interaction.guild.get_member(bot.user.id)
+                if not canal_tabela.permissions_for(bot_member).send_messages:
+                    await interaction.followup.send(
+                        f"❌ O bot não tem permissão para enviar mensagens no canal {canal_tabela.mention}.",
+                        ephemeral=True
+                    )
+                    return
+                    
+                if not canal_notificacao.permissions_for(bot_member).send_messages:
+                    await interaction.followup.send(
+                        f"❌ O bot não tem permissão para enviar mensagens no canal {canal_notificacao.mention}.",
+                        ephemeral=True
+                    )
+                    return
+                
                 # Envia a tabela inicial
                 embed = create_boss_embed_func(boss_timers.get(guild_id, {}))
                 view = BossControlView(
@@ -193,17 +222,40 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 success = await set_server_config(guild_id, canal_notificacao.id, canal_tabela.id, msg.id)
                 
                 if success:
+                    # Salva configuração na memória
+                    from main import server_configs
+                    if guild_id not in server_configs:
+                        server_configs[guild_id] = {}
+                    server_configs[guild_id] = {
+                        'notification_channel_id': canal_notificacao.id,
+                        'table_channel_id': canal_tabela.id,
+                        'table_message_id': msg.id
+                    }
+                    
                     await interaction.followup.send(
-                        f"✅ Setup concluído!\n"
-                        f"📋 Canal Tabela: {canal_tabela.mention}\n"
-                        f"🔔 Canal Notificações: {canal_notificacao.mention}"
+                        f"✅ **Setup concluído!**\n\n"
+                        f"📋 **Canal da Tabela:** {canal_tabela.mention}\n"
+                        f"🔔 **Canal de Notificações:** {canal_notificacao.mention}\n\n"
+                        f"A tabela foi enviada no canal designado. Use `/bosshelp` para ver todos os comandos disponíveis.",
+                        ephemeral=True
                     )
                 else:
-                    await interaction.followup.send("❌ Erro ao salvar configurações no banco de dados.")
+                    await interaction.followup.send("❌ Erro ao salvar configurações no banco de dados.", ephemeral=True)
                     
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    "❌ Permissão negada. Certifique-se de que o bot tem permissão para:\n"
+                    "1. Ver o canal\n2. Enviar mensagens\n3. Gerenciar mensagens",
+                    ephemeral=True
+                )
+            except discord.HTTPException as e:
+                if e.status == 403:
+                    await interaction.followup.send("❌ Permissões insuficientes para configurar o bot neste canal.", ephemeral=True)
+                else:
+                    await interaction.followup.send(f"❌ Erro HTTP: {e.status} - {e.text}", ephemeral=True)
             except Exception as e:
                 logger.error(f"Erro no comando setup: {e}", exc_info=True)
-                await interaction.followup.send(f"❌ Erro no setup: {str(e)}")
+                await interaction.followup.send(f"❌ Erro no setup: {str(e)[:200]}", ephemeral=True)
                 
         except Exception as e:
             logger.error(f"Erro no comando setup: {e}", exc_info=True)
