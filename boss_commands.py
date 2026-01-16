@@ -48,13 +48,13 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
     return False
 
 def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed:
-    """Cria embed com a tabela de timers de boss (função síncrona)"""
+    """Cria embed com a tabela de timers de boss (Versão com Timestamp Dinâmico)"""
     now = datetime.now(brazil_tz)
     
     # Verificar se boss_timers é um dicionário por servidor ou estrutura errada
     if not boss_timers:
         embed = discord.Embed(
-            title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
+            title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M')} BRT",
             description="Nenhum boss registrado ainda.",
             color=discord.Color.gold()
         )
@@ -74,7 +74,8 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
             return embed
     
     embed = discord.Embed(
-        title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
+        title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M')} BRT",
+        description="Os horários abaixo atualizam automaticamente ⏳",
         color=discord.Color.gold()
     )
     
@@ -106,17 +107,23 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
             status = "❌"  # Padrão: fechado/sem registro
             
             if timers['respawn_time']:
+                # Conversão para Timestamp UNIX
+                ts_respawn = int(timers['respawn_time'].timestamp())
+                ts_closed = int(timers['closed_time'].timestamp()) if timers['closed_time'] else 0
+
                 if now >= timers['respawn_time']:
                     if timers['closed_time'] and now >= timers['closed_time']:
                         status = "❌"  # Boss fechado
                     else:
-                        status = "✅"  # Boss aberto
+                        # Boss aberto: mostra countdown para fechar
+                        status = f"✅ Fecha <t:{ts_closed}:R>" 
                 else:
-                    time_left = format_time_remaining(timers['respawn_time'])
-                    status = f"🕒 ({time_left})"  # Boss agendado
+                    # Boss agendado: mostra countdown para nascer
+                    time_left = format_time_remaining(timers['respawn_time']) # fallback se necessário
+                    status = f"🕒 <t:{ts_respawn}:R>"
             
             boss_info.append(
-                f"Sala {sala}: {death_time_str} [de {respawn_time_str} até {closed_time_str}] {status}{recorded_by}"
+                f"Sala {sala}: {death_time_str} [{respawn_time_str} - {closed_time_str}] {status}{recorded_by}"
             )
         
         # Sempre adicionar o campo do boss, mesmo sem informações

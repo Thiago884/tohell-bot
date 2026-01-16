@@ -12,13 +12,14 @@ from database import save_timer, save_user_stats, clear_timer, add_user_notifica
 
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
-# views.py - Modificação na função create_boss_embed
+# views.py - Modificação na função create_boss_embed com Timestamps Dinâmicos
 def create_boss_embed(boss_timers, compact=False):
-    """Cria embed com a tabela de timers de boss (função síncrona)"""
+    """Cria embed com a tabela de timers de boss (função síncrona) usando Timestamps Dinâmicos"""
     now = datetime.now(brazil_tz)
     
     embed = discord.Embed(
-        title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M:%S')} BRT",
+        title=f"BOSS TIMER - {now.strftime('%d/%m/%Y %H:%M')} BRT",
+        description="Os horários abaixo atualizam automaticamente ⏳",
         color=discord.Color.gold()
     )
     
@@ -27,33 +28,35 @@ def create_boss_embed(boss_timers, compact=False):
         for sala in sorted(boss_timers[boss].keys()):  # Ordenar salas numericamente
             timers = boss_timers[boss][sala]
             
-            # REMOVER FILTRO que esconde bosses fechados
-            # if timers['closed_time'] and now >= timers['closed_time'] and timers['death_time'] is None:
-            #     continue
-                
             if compact and timers['death_time'] is None:
                 continue
                 
+            # Formatação de strings estáticas
             death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
-            respawn_time = timers['respawn_time'].strftime("%H:%M") if timers['respawn_time'] else "--:--"
-            closed_time = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
+            respawn_time_str = timers['respawn_time'].strftime("%H:%M") if timers['respawn_time'] else "--:--"
+            closed_time_str = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
             recorded_by = f" ({timers['recorded_by']})" if timers['recorded_by'] else ""
             
             status = ""
             if timers['respawn_time']:
+                # Conversão para Timestamp UNIX
+                ts_respawn = int(timers['respawn_time'].timestamp())
+                ts_closed = int(timers['closed_time'].timestamp()) if timers['closed_time'] else 0
+
                 if now >= timers['respawn_time']:
                     if timers['closed_time'] and now >= timers['closed_time']:
                         status = "❌"
                     else:
-                        status = "✅"
+                        # Aberto: Mostra countdown para fechar
+                        status = f"✅ Fecha <t:{ts_closed}:R>"
                 else:
-                    time_left = format_time_remaining(timers['respawn_time'])
-                    status = f"🕒 ({time_left})"
+                    # Aguardando: Mostra countdown para nascer
+                    status = f"🕒 <t:{ts_respawn}:R>"
             else:
                 status = "❌"
             
             boss_info.append(
-                f"Sala {sala}: {death_time} [de {respawn_time} até {closed_time}] {status}{recorded_by}"
+                f"Sala {sala}: {death_time} [{respawn_time_str} - {closed_time_str}] {status}{recorded_by}"
             )
         
         if not boss_info and compact:
