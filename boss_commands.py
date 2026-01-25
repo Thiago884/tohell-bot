@@ -12,12 +12,97 @@ from views import BossControlView
 import random
 import traceback
 import logging
+import os
+from gtts import gTTS
 
 # Configuração do logger
 logger = logging.getLogger(__name__)
 
 # Configuração do fuso horário do Brasil
 brazil_tz = pytz.timezone('America/Sao_Paulo')
+
+async def play_voice_announcement(bot, guild_id, text):
+    """
+    Gera um áudio TTS e reproduz no canal de voz com mais membros do servidor.
+    """
+    try:
+        # Se guild_id for 0 (legacy/placeholder), ignora
+        if not guild_id:
+            return
+
+        guild = bot.get_guild(guild_id)
+        if not guild: 
+            return
+
+        # === LÓGICA INTELIGENTE DE SELEÇÃO DE CANAL ===
+        
+        # Pega todos os canais de voz do servidor
+        voice_channels = guild.voice_channels
+        
+        # Filtra apenas canais que:
+        # 1. Tenham pelo menos 1 pessoa (len(vc.members) > 0)
+        # 2. O bot tenha permissão para conectar (vc.permissions_for(guild.me).connect)
+        canais_validos = [
+            vc for vc in voice_channels 
+            if len(vc.members) > 0 and vc.permissions_for(guild.me).connect
+        ]
+
+        # Se não tiver ninguém em nenhum canal de voz, o bot não faz nada
+        if not canais_validos:
+            return
+
+        # Escolhe o canal com MAIS gente
+        # A função max compara o tamanho da lista de membros de cada canal
+        melhor_canal = max(canais_validos, key=lambda vc: len(vc.members))
+
+        # Verifica se o bot já está conectado (para evitar conflitos)
+        if guild.voice_client and guild.voice_client.is_connected():
+            return
+
+        # === GERAÇÃO E REPRODUÇÃO DO ÁUDIO ===
+        
+        filename = f"tts_{guild_id}_{random.randint(1, 1000)}.mp3"
+        
+        # Gera o áudio em uma thread separada para não travar o bot
+        def generate_audio():
+            tts = gTTS(text=text, lang='pt')
+            tts.save(filename)
+        
+        await asyncio.to_thread(generate_audio)
+
+        vc = None
+        try:
+            # Conecta no canal mais cheio
+            vc = await melhor_canal.connect()
+            
+            # Toca o áudio
+            if vc:
+                # Nota: Requer FFmpeg instalado no sistema host
+                vc.play(discord.FFmpegPCMAudio(filename))
+                
+                # Espera terminar de falar
+                while vc.is_playing():
+                    await asyncio.sleep(1)
+                
+                # Espera 1 segundo extra e desconecta
+                await asyncio.sleep(1)
+                await vc.disconnect()
+            
+        except Exception as e:
+            logger.error(f"Erro ao transmitir voz no guild {guild_id}: {e}")
+            # Garante desconexão em caso de erro
+            if vc and vc.is_connected():
+                await vc.disconnect()
+            # Se o bot ficou "preso" no canal sem o objeto vc
+            elif guild.voice_client:
+                await guild.voice_client.disconnect()
+
+        # Limpeza do arquivo
+        if os.path.exists(filename):
+            os.remove(filename)
+
+    except Exception as e:
+        logger.error(f"Erro geral no voice alert: {e}")
 
 async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, closed_time):
     """Envia notificação por DM quando um boss abre"""
@@ -294,6 +379,11 @@ async def check_boss_respawns_single_server(bot, boss_timers: Dict, user_notific
                             
                             boss_timers[boss][sala]['opened_notified'] = True
                             
+                            # === ALERTA DE VOZ ADICIONADO AQUI ===
+                            tts_text = f"Atenção! O boss {boss}, da sala {sala}, está disponível!"
+                            asyncio.create_task(play_voice_announcement(bot, guild_id, tts_text))
+                            # =====================================
+
                             await save_timer(guild_id, boss, sala, timers['death_time'], respawn_time, closed_time, timers['recorded_by'], True)
                             
                             for user_id in user_notifications:
