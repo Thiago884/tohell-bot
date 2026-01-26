@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
 async def play_voice_announcement(bot, guild_id, text):
-    """Gera um áudio TTS e reproduz no canal de voz com mais membros do servidor."""
+    """Gera um áudio TTS e reproduz no canal de voz com mais membros do servidor (ignorando ausências)."""
     try:
         # Se guild_id for 0 (legacy/placeholder), ignora
         if not guild_id:
@@ -42,23 +42,44 @@ async def play_voice_announcement(bot, guild_id, text):
             except Exception as e:
                 logger.warning(f"Erro ao desconectar voz forçadamente: {e}")
 
-        # 2. Encontrar o melhor canal de voz (com mais gente, excluindo AFK)
+        # 2. Lógica de Seleção de Canal Inteligente
+        # Palavras-chave para ignorar (case insensitive)
+        ignored_words = ['ausência', 'ausencia', 'afk', 'dormindo', 'away', 'off', 'longe']
+
+        def is_valid_channel(channel):
+            # Ignora se for o canal oficial de AFK do servidor (configurado no Discord)
+            if guild.afk_channel and channel.id == guild.afk_channel.id:
+                return False
+            
+            # Ignora baseando-se no nome do canal
+            channel_name_lower = channel.name.lower()
+            if any(word in channel_name_lower for word in ignored_words):
+                return False
+            
+            # Ignora canais vazios (para não entrar sozinho em canal aleatório)
+            if len(channel.members) == 0:
+                return False
+
+            return True
+
+        # Obtém todos os canais de voz e filtra os válidos
         voice_channels = guild.voice_channels
         if not voice_channels:
             return
 
-        # Filtra canais vazios e ordena por número de membros
-        populated_channels = [vc for vc in voice_channels if len(vc.members) > 0]
+        valid_channels = [vc for vc in voice_channels if is_valid_channel(vc)]
         
-        if not populated_channels:
+        if not valid_channels:
+            logger.info(f"Nenhum canal de voz válido encontrado para anúncio no servidor {guild.name}")
             return
             
-        # Pega o canal com mais gente
-        channel = max(populated_channels, key=lambda vc: len(vc.members))
+        # Pega o canal com mais gente entre os VÁLIDOS
+        target_channel = max(valid_channels, key=lambda vc: len(vc.members))
 
         # Verifica permissões
-        permissions = channel.permissions_for(guild.me)
+        permissions = target_channel.permissions_for(guild.me)
         if not permissions.connect or not permissions.speak:
+            logger.warning(f"Sem permissão para conectar/falar em {target_channel.name}")
             return
 
         # 3. Gerar arquivo de áudio
@@ -71,7 +92,7 @@ async def play_voice_announcement(bot, guild_id, text):
             # 4. Conectar ao canal
             # IMPORTANTE: self_deaf=True ajuda a evitar o erro 4006 e economiza banda
             # timeout e reconnect adicionados para robustez
-            vc = await channel.connect(self_deaf=True, timeout=20.0, reconnect=True)
+            vc = await target_channel.connect(self_deaf=True, timeout=20.0, reconnect=True)
             
             # Pequeno delay para estabilizar o handshake de voz
             await asyncio.sleep(1)
