@@ -35,87 +35,87 @@ async def play_voice_announcement(bot, guild_id, text):
         # 1. Limpeza Prévia: Se o bot já estiver preso em algum canal, desconecta antes de começar
         if guild.voice_client:
             try:
-                await guild.voice_client.disconnect(force=True)
-                await asyncio.sleep(1) # Dá tempo pro Discord processar a saída
-            except:
-                pass
+                if guild.voice_client.is_connected():
+                    await guild.voice_client.disconnect(force=True)
+                # Aumentado o delay para garantir que o socket feche corretamente (Error 4006 fix)
+                await asyncio.sleep(2) 
+            except Exception as e:
+                logger.warning(f"Erro ao desconectar voz forçadamente: {e}")
 
-        # === LÓGICA DE SELEÇÃO DE CANAL ===
+        # 2. Encontrar o melhor canal de voz (com mais gente, excluindo AFK)
         voice_channels = guild.voice_channels
-        canais_validos = [
-            vc for vc in voice_channels 
-            if len(vc.members) > 0 and vc.permissions_for(guild.me).connect
-        ]
-
-        if not canais_validos:
+        if not voice_channels:
             return
 
-        melhor_canal = max(canais_validos, key=lambda vc: len(vc.members))
-        filename = f"tts_{guild_id}_{random.randint(1, 1000)}.mp3"
-
-        # Gera o áudio
-        try:
-            def generate_audio():
-                tts = gTTS(text=text, lang='pt')
-                tts.save(filename)
-            await asyncio.to_thread(generate_audio)
-        except Exception as e:
-            logger.error(f"Erro ao gerar áudio gTTS: {e}")
+        # Filtra canais vazios e ordena por número de membros
+        populated_channels = [vc for vc in voice_channels if len(vc.members) > 0]
+        
+        if not populated_channels:
             return
+            
+        # Pega o canal com mais gente
+        channel = max(populated_channels, key=lambda vc: len(vc.members))
+
+        # Verifica permissões
+        permissions = channel.permissions_for(guild.me)
+        if not permissions.connect or not permissions.speak:
+            return
+
+        # 3. Gerar arquivo de áudio
+        tts = gTTS(text=text, lang='pt')
+        fp = f'voice_{guild_id}.mp3'
+        tts.save(fp)
 
         vc = None
         try:
-            # Conecta
-            vc = await melhor_canal.connect(timeout=10.0, self_deaf=True)
+            # 4. Conectar ao canal
+            # IMPORTANTE: self_deaf=True ajuda a evitar o erro 4006 e economiza banda
+            # timeout e reconnect adicionados para robustez
+            vc = await channel.connect(self_deaf=True, timeout=20.0, reconnect=True)
             
-            # Toca o áudio
-            # Opções do FFmpeg para garantir compatibilidade e reconexão rápida
-            ffmpeg_options = {'options': '-vn'}
-            source = discord.FFmpegPCMAudio(filename, **ffmpeg_options)
-            vc.play(source)
-            
-            # Espera terminar de falar COM LIMITADOR DE TEMPO (Timeout)
-            # Isso impede que o bot fique preso para sempre se o is_playing bugar
-            timeout_counter = 0
-            max_duration = 20 # O bot nunca ficará mais de 20s no canal
-            
-            while vc.is_playing():
-                await asyncio.sleep(1)
-                timeout_counter += 1
-                if timeout_counter >= max_duration:
-                    logger.warning(f"Timeout de voz atingido no guild {guild_id}. Forçando saída.")
-                    break
-            
-            # Pequena pausa antes de sair para não cortar o finalzinho
+            # Pequeno delay para estabilizar o handshake de voz
             await asyncio.sleep(1)
 
+            if not vc.is_connected():
+                logger.error("Falha: VoiceClient não está conectado após connect()")
+                return
+
+            # 5. Reproduzir
+            if os.path.exists(fp):
+                # Usar FFmpegPCMAudio com opções de reconexão
+                source = discord.FFmpegPCMAudio(
+                    fp, 
+                    options='-loglevel panic'
+                )
+                vc.play(source)
+
+                # Esperar terminar
+                while vc.is_playing():
+                    await asyncio.sleep(1)
+                
+                # Pequeno delay antes de sair para não cortar o final
+                await asyncio.sleep(1)
+            
+        except discord.ClientException as e:
+            logger.warning(f"Conflito de conexão de voz no servidor {guild_id}: {e}")
         except Exception as e:
-            logger.error(f"Erro durante transmissão de voz no guild {guild_id}: {e}")
-        
+            logger.error(f"Erro durante reprodução de voz no servidor {guild_id}: {e}")
+            logger.error(traceback.format_exc())
         finally:
-            # === BLOCO DE SEGURANÇA MÁXIMA ===
-            # O código AQUI sempre será executado, com erro ou sem erro.
+            # 6. Limpeza final e desconexão
             try:
-                # Tenta desconectar a instância local
                 if vc and vc.is_connected():
                     await vc.disconnect(force=True)
                 
-                # Verificação dupla: Busca o cliente no servidor e desconecta se ainda estiver lá
-                elif guild.voice_client and guild.voice_client.is_connected():
-                    await guild.voice_client.disconnect(force=True)
-                    
+                # Remover arquivo temporário
+                if os.path.exists(fp):
+                    os.remove(fp)
             except Exception as e:
-                logger.error(f"Erro ao desconectar voz: {e}")
+                logger.error(f"Erro na limpeza de voz: {e}")
 
-            # Limpa o arquivo
-            if os.path.exists(filename):
-                try:
-                    os.remove(filename)
-                except:
-                    pass
-                    
     except Exception as e:
-        logger.error(f"Erro geral no voice alert: {e}")
+        logger.error(f"Erro fatal no anúncio de voz: {e}")
+        logger.error(traceback.format_exc())
 
 async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, closed_time):
     """Envia notificação por DM quando um boss abre"""
@@ -465,7 +465,7 @@ async def check_boss_respawns_single_server(bot, boss_timers: Dict, user_notific
                     notification['closed_time']
                 )
                 await asyncio.sleep(1)  # Delay entre notificações DM
-        
+                
         await asyncio.sleep(1)  # Delay antes de atualizar a tabela
         # Atualiza a tabela se tiver função de callback
         if update_table_func:
