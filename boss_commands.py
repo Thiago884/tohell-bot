@@ -22,9 +22,7 @@ logger = logging.getLogger(__name__)
 brazil_tz = pytz.timezone('America/Sao_Paulo')
 
 async def play_voice_announcement(bot, guild_id, text):
-    """
-    Gera um áudio TTS e reproduz no canal de voz com mais membros do servidor.
-    """
+    """Gera um áudio TTS e reproduz no canal de voz com mais membros do servidor."""
     try:
         # Se guild_id for 0 (legacy/placeholder), ignora
         if not guild_id:
@@ -34,73 +32,88 @@ async def play_voice_announcement(bot, guild_id, text):
         if not guild: 
             return
 
-        # === LÓGICA INTELIGENTE DE SELEÇÃO DE CANAL ===
-        
-        # Pega todos os canais de voz do servidor
+        # 1. Limpeza Prévia: Se o bot já estiver preso em algum canal, desconecta antes de começar
+        if guild.voice_client:
+            try:
+                await guild.voice_client.disconnect(force=True)
+                await asyncio.sleep(1) # Dá tempo pro Discord processar a saída
+            except:
+                pass
+
+        # === LÓGICA DE SELEÇÃO DE CANAL ===
         voice_channels = guild.voice_channels
-        
-        # Filtra apenas canais que:
-        # 1. Tenham pelo menos 1 pessoa (len(vc.members) > 0)
-        # 2. O bot tenha permissão para conectar (vc.permissions_for(guild.me).connect)
         canais_validos = [
             vc for vc in voice_channels 
             if len(vc.members) > 0 and vc.permissions_for(guild.me).connect
         ]
 
-        # Se não tiver ninguém em nenhum canal de voz, o bot não faz nada
         if not canais_validos:
             return
 
-        # Escolhe o canal com MAIS gente
-        # A função max compara o tamanho da lista de membros de cada canal
         melhor_canal = max(canais_validos, key=lambda vc: len(vc.members))
-
-        # Verifica se o bot já está conectado (para evitar conflitos)
-        if guild.voice_client and guild.voice_client.is_connected():
-            return
-
-        # === GERAÇÃO E REPRODUÇÃO DO ÁUDIO ===
-        
         filename = f"tts_{guild_id}_{random.randint(1, 1000)}.mp3"
-        
-        # Gera o áudio em uma thread separada para não travar o bot
-        def generate_audio():
-            tts = gTTS(text=text, lang='pt')
-            tts.save(filename)
-        
-        await asyncio.to_thread(generate_audio)
+
+        # Gera o áudio
+        try:
+            def generate_audio():
+                tts = gTTS(text=text, lang='pt')
+                tts.save(filename)
+            await asyncio.to_thread(generate_audio)
+        except Exception as e:
+            logger.error(f"Erro ao gerar áudio gTTS: {e}")
+            return
 
         vc = None
         try:
-            # Conecta no canal mais cheio
-            vc = await melhor_canal.connect()
+            # Conecta
+            vc = await melhor_canal.connect(timeout=10.0, self_deaf=True)
             
             # Toca o áudio
-            if vc:
-                # Nota: Requer FFmpeg instalado no sistema host
-                vc.play(discord.FFmpegPCMAudio(filename))
-                
-                # Espera terminar de falar
-                while vc.is_playing():
-                    await asyncio.sleep(1)
-                
-                # Espera 1 segundo extra e desconecta
-                await asyncio.sleep(1)
-                await vc.disconnect()
+            # Opções do FFmpeg para garantir compatibilidade e reconexão rápida
+            ffmpeg_options = {'options': '-vn'}
+            source = discord.FFmpegPCMAudio(filename, **ffmpeg_options)
+            vc.play(source)
             
+            # Espera terminar de falar COM LIMITADOR DE TEMPO (Timeout)
+            # Isso impede que o bot fique preso para sempre se o is_playing bugar
+            timeout_counter = 0
+            max_duration = 20 # O bot nunca ficará mais de 20s no canal
+            
+            while vc.is_playing():
+                await asyncio.sleep(1)
+                timeout_counter += 1
+                if timeout_counter >= max_duration:
+                    logger.warning(f"Timeout de voz atingido no guild {guild_id}. Forçando saída.")
+                    break
+            
+            # Pequena pausa antes de sair para não cortar o finalzinho
+            await asyncio.sleep(1)
+
         except Exception as e:
-            logger.error(f"Erro ao transmitir voz no guild {guild_id}: {e}")
-            # Garante desconexão em caso de erro
-            if vc and vc.is_connected():
-                await vc.disconnect()
-            # Se o bot ficou "preso" no canal sem o objeto vc
-            elif guild.voice_client:
-                await guild.voice_client.disconnect()
+            logger.error(f"Erro durante transmissão de voz no guild {guild_id}: {e}")
+        
+        finally:
+            # === BLOCO DE SEGURANÇA MÁXIMA ===
+            # O código AQUI sempre será executado, com erro ou sem erro.
+            try:
+                # Tenta desconectar a instância local
+                if vc and vc.is_connected():
+                    await vc.disconnect(force=True)
+                
+                # Verificação dupla: Busca o cliente no servidor e desconecta se ainda estiver lá
+                elif guild.voice_client and guild.voice_client.is_connected():
+                    await guild.voice_client.disconnect(force=True)
+                    
+            except Exception as e:
+                logger.error(f"Erro ao desconectar voz: {e}")
 
-        # Limpeza do arquivo
-        if os.path.exists(filename):
-            os.remove(filename)
-
+            # Limpa o arquivo
+            if os.path.exists(filename):
+                try:
+                    os.remove(filename)
+                except:
+                    pass
+                    
     except Exception as e:
         logger.error(f"Erro geral no voice alert: {e}")
 

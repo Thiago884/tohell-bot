@@ -18,6 +18,8 @@ from database import (
 )
 from views import BossControlView
 from discord.app_commands import CommandAlreadyRegistered
+# Importação adicionada para o comando de teste de voz
+from boss_commands import play_voice_announcement
 
 # Configuração do logger
 logger = logging.getLogger(__name__)
@@ -84,9 +86,8 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
         except Exception as e:
             logger.error(f"Erro no update_table_fallback para servidor {guild_id}: {e}")
     
-    # Autocomplete para nomes de bosses - CORRIGIDA
+    # Autocomplete para nomes de bosses
     async def boss_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
-        """Autocomplete para nomes de bosses - CORRIGIDA"""
         guild_id = interaction.guild_id
         if not guild_id:
             return []
@@ -120,7 +121,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             logger.error(f"Erro no autocomplete de bosses: {e}")
             return []
     
-    # Autocomplete para salas - CORRIGIDO E SIMPLIFICADO
+    # Autocomplete para salas
     async def sala_autocomplete(interaction: discord.Interaction, current: str) -> List[app_commands.Choice[int]]:
         try:
             guild_id = interaction.guild_id
@@ -145,7 +146,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             return [app_commands.Choice(name=f"Sala {i}", value=i) for i in range(1, 9)][:10]
     
     # ==============================================================================
-    # COMANDO PRINCIPAL: /setup - CORRIGIDO
+    # COMANDO PRINCIPAL: /setup
     # ==============================================================================
     @bot.tree.command(name="setup", description="Configura os canais do bot neste servidor")
     @app_commands.checks.has_permissions(administrator=True)
@@ -271,7 +272,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 )
     
     # ==============================================================================
-    # COMANDO: /registro (Registrar morte de boss) - CORRIGIDO
+    # COMANDO: /registro (Registrar morte de boss)
     # ==============================================================================
     @bot.tree.command(name="registro", description="Registra a morte de um boss")
     @app_commands.autocomplete(boss_name=boss_autocomplete, sala=sala_autocomplete)
@@ -298,9 +299,8 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 )
                 return
             
-            # ADICIONAR: Inicializar dados do servidor se necessário
+            # Inicializar dados do servidor se necessário
             if guild_id not in boss_timers:
-                # Inicializar com todos os bosses
                 bosses_list = [
                     "Hydra", "Phoenix of Darkness", "Genocider", "Death Beam Knight",
                     "Hell Maine", "Super Red Dragon", "Illusion of Kundun", 
@@ -310,7 +310,6 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 boss_timers[guild_id] = {}
                 for boss in bosses_list:
                     boss_timers[guild_id][boss] = {}
-                    # Inicializar com salas padrão
                     for sala_num in range(1, 9):
                         boss_timers[guild_id][boss][sala_num] = {
                             'death_time': None,
@@ -469,59 +468,12 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
             # Atualiza a tabela
             channel = bot.get_channel(config['table_channel_id'])
             if channel:
-                # CORREÇÃO: Verificar se temos a função de update_table
                 try:
-                    # Se estiver usando a função passada por parâmetro
                     if update_table_func:
                         await update_table_func(channel, guild_id=guild_id)
                     else:
-                        # Criar função de update dinamicamente
-                        async def update_table_dynamic():
-                            server_data = boss_timers.get(guild_id, {})
-                            server_user_stats = user_stats.get(guild_id, {})
-                            server_user_notifications = user_notifications.get(guild_id, {})
-                            
-                            embed = create_boss_embed_func(server_data)
-                            
-                            # Buscar a mensagem da tabela
-                            try:
-                                msg = await channel.fetch_message(config['table_message_id'])
-                                view = BossControlView(
-                                    bot,
-                                    server_data,
-                                    server_user_stats,
-                                    server_user_notifications,
-                                    msg,
-                                    config['table_channel_id'],
-                                    lambda: None,
-                                    lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
-                                    lambda: create_ranking_embed_func(server_user_stats),
-                                    lambda: create_history_embed_func(bot, server_data),
-                                    lambda: create_unrecorded_embed_func(bot, server_data)
-                                )
-                                
-                                await msg.edit(embed=embed, view=view)
-                            except discord.NotFound:
-                                # Se a mensagem não existe, enviar nova
-                                view = BossControlView(
-                                    bot,
-                                    server_data,
-                                    server_user_stats,
-                                    server_user_notifications,
-                                    None,
-                                    config['table_channel_id'],
-                                    lambda: None,
-                                    lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
-                                    lambda: create_ranking_embed_func(server_user_stats),
-                                    lambda: create_history_embed_func(bot, server_data),
-                                    lambda: create_unrecorded_embed_func(bot, server_data)
-                                )
-                                
-                                new_msg = await channel.send(embed=embed, view=view)
-                                # Atualizar config com nova mensagem
-                                await set_server_config(guild_id, config['notification_channel_id'], config['table_channel_id'], new_msg.id)
-                        
-                        await update_table_dynamic()
+                        # Fallback
+                        await update_table_fallback(channel, guild_id)
                 except Exception as e:
                     logger.error(f"Erro ao atualizar tabela após registro: {e}")
             
@@ -601,7 +553,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     ephemeral=True
                 )
     
-    # Comando para limpar boss (adaptado para multi-guild)
+    # Comando para limpar boss
     @bot.tree.command(name="clearboss", description="Limpa o timer de um boss")
     @app_commands.autocomplete(boss_name=boss_autocomplete)
     @app_commands.describe(
@@ -699,52 +651,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 if update_table_func:
                     await update_table_func(channel, guild_id=guild_id)
                 else:
-                    # Se update_table_func não foi passado, criar dinamicamente
-                    async def update_table_dynamic():
-                        server_data = boss_timers.get(guild_id, {})
-                        server_user_stats = user_stats.get(guild_id, {})
-                        server_user_notifications = user_notifications.get(guild_id, {})
-                        
-                        embed = create_boss_embed_func(server_data)
-                        
-                        # Buscar mensagem da tabela
-                        try:
-                            msg = await channel.fetch_message(config['table_message_id'])
-                            view = BossControlView(
-                                bot,
-                                server_data,
-                                server_user_stats,
-                                server_user_notifications,
-                                msg,
-                                config['table_channel_id'],
-                                lambda: None,
-                                lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
-                                lambda: create_ranking_embed_func(server_user_stats),
-                                lambda: create_history_embed_func(bot, server_data),
-                                lambda: create_unrecorded_embed_func(bot, server_data)
-                            )
-                            
-                            await msg.edit(embed=embed, view=view)
-                        except discord.NotFound:
-                            # Se mensagem não existe, enviar nova
-                            view = BossControlView(
-                                bot,
-                                server_data,
-                                server_user_stats,
-                                server_user_notifications,
-                                None,
-                                config['table_channel_id'],
-                                lambda: None,
-                                lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
-                                lambda: create_ranking_embed_func(server_user_stats),
-                                lambda: create_history_embed_func(bot, server_data),
-                                lambda: create_unrecorded_embed_func(bot, server_data)
-                            )
-                            
-                            new_msg = await channel.send(embed=embed, view=view)
-                            await set_server_config(guild_id, config['notification_channel_id'], config['table_channel_id'], new_msg.id)
-                    
-                    await update_table_dynamic()
+                    await update_table_fallback(channel, guild_id)
             
         except Exception as e:
             logger.error(f"Erro no comando slash clearboss: {e}", exc_info=True)
@@ -759,7 +666,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     ephemeral=True
                 )
     
-    # Comando para gerenciar salas (ATUALIZADO para multi-guild)
+    # Comando para gerenciar salas
     @bot.tree.command(name="managesalas", description="Adiciona ou remove salas de todos os bosses (apenas admins)")
     @app_commands.describe(
         action="'add' para adicionar ou 'rem' para remover",
@@ -894,16 +801,13 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 # Atualiza a tabela
                 channel = bot.get_channel(config['table_channel_id'])
                 if channel:
-                    # VERIFICAÇÃO DE SEGURANÇA
                     if update_table_func:
                         try:
                             await update_table_func(channel, guild_id=guild_id)
                         except Exception as e:
                             logger.error(f"Erro ao chamar update_table_func: {e}")
-                            # Tenta usar a função de fallback
                             await update_table_fallback(channel, guild_id)
                     else:
-                        # Fallback se update_table_func for None
                         await update_table_fallback(channel, guild_id)
             
         except Exception as e:
@@ -978,7 +882,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     ephemeral=True
                 )
     
-    # Comando para mostrar próximos bosses (adaptado para multi-guild)
+    # Comando para mostrar próximos bosses
     @bot.tree.command(name="nextboss", description="Mostra os próximos bosses a abrir")
     async def nextboss_slash(interaction: discord.Interaction):
         """Mostra os próximos bosses via comando slash"""
@@ -1017,7 +921,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     ephemeral=True
                 )
     
-    # Comando para mostrar ranking (adaptado para multi-guild)
+    # Comando para mostrar ranking
     @bot.tree.command(name="ranking", description="Mostra ranking de anotações")
     async def ranking_slash(interaction: discord.Interaction):
         """Mostra ranking via comando slash"""
@@ -1056,7 +960,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     ephemeral=True
                 )
     
-    # Comando para gerenciar notificações (adaptado para multi-guild)
+    # Comando para gerenciar notificações
     @bot.tree.command(name="notify", description="Gerencia notificações por DM")
     @app_commands.autocomplete(boss_name=boss_autocomplete)
     @app_commands.describe(
@@ -1169,7 +1073,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     ephemeral=True
                 )
     
-    # Comando para mostrar notificações do usuário (adaptado para multi-guild)
+    # Comando para mostrar notificações do usuário
     @bot.tree.command(name="mynotifications", description="Mostra suas notificações ativas")
     async def mynotifications_slash(interaction: discord.Interaction):
         """Mostra notificações do usuário via comando slash"""
@@ -1220,7 +1124,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     ephemeral=True
                 )
     
-    # Comando para mostrar histórico (adaptado para multi-guild)
+    # Comando para mostrar histórico
     @bot.tree.command(name="historico", description="Mostra histórico de anotações")
     async def historico_slash(interaction: discord.Interaction):
         """Mostra histórico via comando slash"""
@@ -1259,7 +1163,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     ephemeral=True
                 )
     
-    # Comando para mostrar bosses não anotados (adaptado para multi-guild)
+    # Comando para mostrar bosses não anotados
     @bot.tree.command(name="naoanotados", description="Mostra bosses que fecharam sem registro")
     async def naoanotados_slash(interaction: discord.Interaction):
         """Mostra bosses não anotados via comando slash"""
@@ -1298,7 +1202,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     ephemeral=True
                 )
     
-    # Comando para backup (apenas admins) - adaptado para multi-guild
+    # Comando para backup (apenas admins)
     @bot.tree.command(name="backup", description="Gerencia backups do banco de dados (apenas admins)")
     @app_commands.describe(
         action="Ação (create/restore)"
@@ -1400,52 +1304,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                             if update_table_func:
                                 await update_table_func(channel, guild_id=guild_id)
                             else:
-                                # Se update_table_func não foi passado, criar dinamicamente
-                                async def update_table_dynamic():
-                                    server_data = boss_timers.get(guild_id, {})
-                                    server_user_stats = user_stats.get(guild_id, {})
-                                    server_user_notifications = user_notifications.get(guild_id, {})
-                                    
-                                    embed = create_boss_embed_func(server_data)
-                                    
-                                    # Buscar mensagem da tabela
-                                    try:
-                                        msg = await channel.fetch_message(config['table_message_id'])
-                                        view = BossControlView(
-                                            bot,
-                                            server_data,
-                                            server_user_stats,
-                                            server_user_notifications,
-                                            msg,
-                                            config['table_channel_id'],
-                                            lambda: None,
-                                            lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
-                                            lambda: create_ranking_embed_func(server_user_stats),
-                                            lambda: create_history_embed_func(bot, server_data),
-                                            lambda: create_unrecorded_embed_func(bot, server_data)
-                                        )
-                                        
-                                        await msg.edit(embed=embed, view=view)
-                                    except discord.NotFound:
-                                        # Se mensagem não existe, enviar nova
-                                        view = BossControlView(
-                                            bot,
-                                            server_data,
-                                            server_user_stats,
-                                            server_user_notifications,
-                                            None,
-                                            config['table_channel_id'],
-                                            lambda: None,
-                                            lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
-                                            lambda: create_ranking_embed_func(server_user_stats),
-                                            lambda: create_history_embed_func(bot, server_data),
-                                            lambda: create_unrecorded_embed_func(bot, server_data)
-                                        )
-                                        
-                                        new_msg = await channel.send(embed=embed, view=view)
-                                        await set_server_config(guild_id, config['notification_channel_id'], config['table_channel_id'], new_msg.id)
-                                
-                                await update_table_dynamic()
+                                await update_table_fallback(channel, guild_id)
                     else:
                         await interaction.followup.send(
                             f"❌ Falha ao restaurar backup **{backup_file}!",
@@ -1476,8 +1335,67 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 )
             except:
                 pass
+
+    # Comando para testar o áudio de voz
+    @bot.tree.command(name="testvoz", description="Testa o alerta de voz nos canais (Apenas Admins)")
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.describe(mensagem="Mensagem personalizada para o bot falar (opcional)")
+    async def testvoz_slash(interaction: discord.Interaction, mensagem: Optional[str] = None):
+        """Testa o sistema de alerta de voz"""
+        try:
+            guild_id = interaction.guild_id
+            if not guild_id:
+                await interaction.response.send_message(
+                    "Este comando deve ser usado em um servidor.",
+                    ephemeral=True
+                )
+                return
+
+            # Verifica se há alguém em algum canal de voz
+            voice_channels = [
+                vc for vc in interaction.guild.voice_channels 
+                if len(vc.members) > 0 and vc.permissions_for(interaction.guild.me).connect
+            ]
+
+            if not voice_channels:
+                await interaction.response.send_message(
+                    "⚠️ **Atenção:** Não encontrei ninguém em canais de voz ou não tenho permissão para conectar.\n"
+                    "O bot só entra no canal se houver pelo menos uma pessoa ouvindo.\n"
+                    "🔊 **Entre em um canal de voz e tente novamente.**",
+                    ephemeral=True
+                )
+                return
+
+            await interaction.response.defer(ephemeral=True)
+
+            # Define a mensagem (padrão ou personalizada)
+            texto_teste = mensagem if mensagem else "Atenção! Este é um teste do sistema de alerta de voz do Boss Timer. O áudio está funcionando corretamente."
+
+            # Chama a função original que está em boss_commands.py
+            # Ela seleciona automaticamente o canal com mais gente
+            await play_voice_announcement(bot, guild_id, texto_teste)
+
+            await interaction.followup.send(
+                f"✅ **Teste Iniciado!**\n"
+                f"Tentando reproduzir áudio no canal com mais membros: **{max(voice_channels, key=lambda vc: len(vc.members)).name}**\n"
+                f"💬 Mensagem: *\"{texto_teste}\"*",
+                ephemeral=True
+            )
+
+        except Exception as e:
+            logger.error(f"Erro no comando slash testvoz: {e}", exc_info=True)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "Ocorreu um erro ao executar o teste de voz.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    f"Ocorreu um erro ao executar o teste: {str(e)}",
+                    ephemeral=True
+                )
     
-    # Comando de ajuda (adaptado para multi-guild)
+    # Comando de ajuda
     @bot.tree.command(name="bosshelp", description="Mostra ajuda com todos os comandos disponíveis")
     async def bosshelp_slash(interaction: discord.Interaction):
         """Mostra ajuda via comando slash"""
