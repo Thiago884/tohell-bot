@@ -58,7 +58,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     msg,
                     config['table_channel_id'],
                     lambda: update_table_fallback(channel, guild_id),
-                    lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
+                    lambda t: create_next_bosses_embed_func(t), # CORREÇÃO AQUI
                     lambda: create_ranking_embed_func(server_user_stats),
                     lambda: create_history_embed_func(bot, server_data),
                     lambda: create_unrecorded_embed_func(bot, server_data)
@@ -75,7 +75,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     None,
                     config['table_channel_id'],
                     lambda: update_table_fallback(channel, guild_id),
-                    lambda boss_timers=server_data: create_next_bosses_embed_func(boss_timers),
+                    lambda t: create_next_bosses_embed_func(t), # CORREÇÃO AQUI
                     lambda: create_ranking_embed_func(server_user_stats),
                     lambda: create_history_embed_func(bot, server_data),
                     lambda: create_unrecorded_embed_func(bot, server_data)
@@ -212,7 +212,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                     None,
                     canal_notificacao.id,
                     lambda channel: update_table_func(channel, guild_id=guild_id),
-                    lambda: create_next_bosses_embed_func(boss_timers.get(guild_id, {})),
+                    lambda t: create_next_bosses_embed_func(t), # CORREÇÃO AQUI
                     lambda: create_ranking_embed_func(user_stats.get(guild_id, {})),
                     lambda: create_history_embed_func(bot, boss_timers.get(guild_id, {})),
                     lambda: create_unrecorded_embed_func(bot, boss_timers.get(guild_id, {}))
@@ -532,7 +532,7 @@ async def setup_slash_commands(bot, boss_timers, user_stats, user_notifications,
                 None,
                 config['table_channel_id'],
                 lambda channel: update_table_func(channel, guild_id=guild_id),
-                lambda: create_next_bosses_embed_func(boss_timers.get(guild_id, {})),
+                lambda t: create_next_bosses_embed_func(t), # CORREÇÃO AQUI
                 lambda: create_ranking_embed_func(user_stats.get(guild_id, {})),
                 lambda: create_history_embed_func(bot, boss_timers.get(guild_id, {})),
                 lambda: create_unrecorded_embed_func(bot, boss_timers.get(guild_id, {}))
