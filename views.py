@@ -47,11 +47,11 @@ def create_boss_embed(boss_timers, compact=False):
                     else:
                         # Aberto
                         time_left = format_time_remaining(timers['closed_time'])
-                        status = f"✅ Fecha em **{time_left}** (<t:{ts_closed}:R>)"
+                        status = f"✅ Fecha em **{time_left}**"  # REMOVIDO: (<t:{ts_closed}:R>)
                 else:
                     # Aguardando
                     time_left = format_time_remaining(timers['respawn_time'])
-                    status = f"🕒 **{time_left}** (<t:{ts_respawn}:R>)"
+                    status = f"🕒 **{time_left}**"  # REMOVIDO: (<t:{ts_respawn}:R>)
             else:
                 status = "❌"
             
