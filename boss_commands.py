@@ -167,7 +167,7 @@ async def send_notification_dm(bot, user_id, boss_name, sala, respawn_time, clos
     return False
 
 def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed:
-    """Cria embed com a tabela de timers de boss (Versão com Timestamp Dinâmico)"""
+    """Cria embed com a tabela de timers de boss (Versão com Timestamp Dinâmico e Minutos)"""
     now = datetime.now(brazil_tz)
     
     # Verificar se boss_timers é um dicionário por servidor ou estrutura errada
@@ -234,12 +234,13 @@ def create_boss_embed(boss_timers: Dict, compact: bool = False) -> discord.Embed
                     if timers['closed_time'] and now >= timers['closed_time']:
                         status = "❌"  # Boss fechado
                     else:
-                        # Boss aberto: mostra countdown para fechar
-                        status = f"✅ Fecha <t:{ts_closed}:R>" 
+                        # Boss aberto: mostra countdown para fechar (Exato + Relativo)
+                        time_left = format_time_remaining(timers['closed_time'])
+                        status = f"✅ Fecha em **{time_left}** (<t:{ts_closed}:R>)" 
                 else:
-                    # Boss agendado: mostra countdown para nascer
-                    time_left = format_time_remaining(timers['respawn_time']) # fallback se necessário
-                    status = f"🕒 <t:{ts_respawn}:R>"
+                    # Boss agendado: mostra countdown para nascer (Exato + Relativo)
+                    time_left = format_time_remaining(timers['respawn_time'])
+                    status = f"🕒 **{time_left}** (<t:{ts_respawn}:R>)"
             
             boss_info.append(
                 f"Sala {sala}: {death_time_str} [{respawn_time_str} - {closed_time_str}] {status}{recorded_by}"

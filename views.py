@@ -14,7 +14,7 @@ brazil_tz = pytz.timezone('America/Sao_Paulo')
 
 # views.py - Modificação na função create_boss_embed com Timestamps Dinâmicos
 def create_boss_embed(boss_timers, compact=False):
-    """Cria embed com a tabela de timers de boss (função síncrona) usando Timestamps Dinâmicos"""
+    """Cria embed com a tabela de timers de boss (função síncrona) usando Timestamps Dinâmicos e Minutos"""
     now = datetime.now(brazil_tz)
     
     embed = discord.Embed(
@@ -25,13 +25,12 @@ def create_boss_embed(boss_timers, compact=False):
     
     for boss in boss_timers:
         boss_info = []
-        for sala in sorted(boss_timers[boss].keys()):  # Ordenar salas numericamente
+        for sala in sorted(boss_timers[boss].keys()):
             timers = boss_timers[boss][sala]
             
             if compact and timers['death_time'] is None:
                 continue
                 
-            # Formatação de strings estáticas
             death_time = timers['death_time'].strftime("%d/%m %H:%M") if timers['death_time'] else "--/-- --:--"
             respawn_time_str = timers['respawn_time'].strftime("%H:%M") if timers['respawn_time'] else "--:--"
             closed_time_str = timers['closed_time'].strftime("%H:%M") if timers['closed_time'] else "--:--"
@@ -39,7 +38,6 @@ def create_boss_embed(boss_timers, compact=False):
             
             status = ""
             if timers['respawn_time']:
-                # Conversão para Timestamp UNIX
                 ts_respawn = int(timers['respawn_time'].timestamp())
                 ts_closed = int(timers['closed_time'].timestamp()) if timers['closed_time'] else 0
 
@@ -47,11 +45,13 @@ def create_boss_embed(boss_timers, compact=False):
                     if timers['closed_time'] and now >= timers['closed_time']:
                         status = "❌"
                     else:
-                        # Aberto: Mostra countdown para fechar
-                        status = f"✅ Fecha <t:{ts_closed}:R>"
+                        # Aberto
+                        time_left = format_time_remaining(timers['closed_time'])
+                        status = f"✅ Fecha em **{time_left}** (<t:{ts_closed}:R>)"
                 else:
-                    # Aguardando: Mostra countdown para nascer
-                    status = f"🕒 <t:{ts_respawn}:R>"
+                    # Aguardando
+                    time_left = format_time_remaining(timers['respawn_time'])
+                    status = f"🕒 **{time_left}** (<t:{ts_respawn}:R>)"
             else:
                 status = "❌"
             
