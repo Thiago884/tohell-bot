@@ -399,11 +399,8 @@ async def check_boss_respawns_single_server(bot, boss_timers: Dict, user_notific
                 closed_time = timers['closed_time']
                 
                 if respawn_time is not None:
-                    # Notificação de pré-abertura (5 minutos antes)
-                    if now >= (respawn_time - timedelta(minutes=5)) and now < respawn_time:
-                        time_left = format_time_remaining(respawn_time)
-                        recorded_by = f"\nAnotado por: {timers['recorded_by']}" if timers['recorded_by'] else ""
-                        notifications.append(f"🟡 **{boss} (Sala {sala})** estará disponível em {time_left} ({respawn_time:%d/%m %H:%M} BRT){recorded_by}")
+                    # NOTIFICAÇÃO DE PRÉ-ABERTURA REMOVIDA (5 minutos antes)
+                    # O código original foi comentado para remover a notificação de contagem
                     
                     # Notificação de abertura
                     # CORREÇÃO: Lógica estrita (now < closed_time)
